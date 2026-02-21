@@ -297,6 +297,20 @@ _NEW_TABLES_SQL = [
         updated_at      TIMESTAMP NOT NULL
     )
     """,
+    # --- earnings_events: upcoming earnings calendar cache ---
+    """
+    CREATE TABLE IF NOT EXISTS earnings_events (
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        ticker          TEXT NOT NULL,
+        company         TEXT,
+        earnings_date   TEXT NOT NULL,
+        time_of_day     TEXT,
+        eps_estimate    REAL,
+        fiscal_quarter  TEXT,
+        fetched_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(ticker, earnings_date)
+    )
+    """,
 ]
 
 # Useful indices for the new tables
@@ -319,6 +333,8 @@ _INDEXES_SQL = [
     "CREATE INDEX IF NOT EXISTS idx_watchlist_stocks_tk    ON watchlist_stocks (ticker)",
     "CREATE INDEX IF NOT EXISTS idx_price_alerts_enabled   ON price_alerts (enabled, ticker)",
     "CREATE INDEX IF NOT EXISTS idx_sentiment_ticker       ON sentiment_cache (ticker)",
+    "CREATE INDEX IF NOT EXISTS idx_earnings_date          ON earnings_events (earnings_date)",
+    "CREATE INDEX IF NOT EXISTS idx_earnings_ticker        ON earnings_events (ticker)",
 ]
 
 
