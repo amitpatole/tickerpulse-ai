@@ -1,80 +1,84 @@
-# VO-004: Add integration tests for data provider fallback chain
+# VO-004: Create agent performance analytics dashboard
 
 ## Technical Design
 
-## Technical Design Spec: Integration Tests for Data Provider Fallback Chain
-
-**Status note:** `backend/tests/test_data_provider_fallback.py` already exists and is fully implemented (426 lines). This spec documents what's there and what remains.
+## Technical Design Spec: Agent Performance Analytics Dashboard
 
 ---
 
 ### 1. Approach
 
-Pure test authorship — no production code changes. Tests directly instantiate `DataProviderRegistry`, register `MagicMock` providers via `make_provider()`, then assert call order and return values. `create_registry()` tests use `unittest.mock.patch` to intercept provider class constructors, keeping all tests hermetic.
+Extend the existing `agents.py` blueprint with a new aggregation endpoint querying the already-indexed `agent_runs` table. Add a `/analytics` page following the same Next.js app-router pattern as `/agents`, using `@tremor/react` (already installed at ^3.18.7) for charts. Date filtering passes `start_date`/`end_date` query params from frontend to backend.
 
-The fallback chain under test (`base.py:148–186`) iterates `_fallback_order`, skipping unavailable providers (`is_available() == False`) and falling through on both exceptions and falsy results. For `get_historical`, the additional guard at line 181 (`result and result.bars`) makes empty-bars a distinct failure mode requiring its own test case.
+No new libraries, no schema changes — all required columns (`agent_name`, `status`, `duration_ms`, `estimated_cost`, `tokens_input`, `tokens_output`, `created_at`) exist and are indexed.
 
 ---
 
-### 2. Files to Modify/Create
+### 2. Files to Modify / Create
 
 | Action | Path |
-|--------|------|
-| **Already created** | `backend/tests/test_data_provider_fallback.py` |
-| No changes needed | `backend/data_providers/base.py` |
-| No changes needed | `backend/data_providers/__init__.py` |
-
-No `conftest.py` or `pytest.ini` required — tests are self-contained.
+|---|---|
+| **Modify** | `backend/api/agents.py` — add analytics route |
+| **Create** | `frontend/src/app/analytics/page.tsx` — analytics page |
+| **Create** | `frontend/src/components/analytics/AgentAnalyticsCharts.tsx` — chart components |
+| **Modify** | `frontend/src/lib/types.ts` — add `AgentAnalytics` response type |
+| **Modify** | `frontend/src/components/layout/Sidebar.tsx` (or nav file) — add `/analytics` nav link |
+| **Create** | `backend/tests/test_analytics_endpoint.py` — backend unit tests |
 
 ---
 
 ### 3. Data Model Changes
 
-None. Tests use in-memory `DataProvider` mocks and the existing `Quote`, `PriceBar`, `PriceHistory` dataclasses.
+**None.** `agent_runs` already has all required columns with indexes on `agent_name` and `started_at`. The `cost_tracking` table provides a secondary cost ledger but `agent_runs.estimated_cost` is sufficient.
 
 ---
 
 ### 4. API Changes
 
-None.
+**New endpoint:** `GET /api/agents/analytics`
+
+Query params: `start_date` (ISO8601, default `now-30d`), `end_date` (default `now`)
+
+Response shape:
+```json
+{
+  "runs_per_day": [{"date": "2026-01-20", "agent_name": "scanner", "count": 4}],
+  "avg_duration_ms": [{"agent_name": "scanner", "avg_ms": 1240}],
+  "cost_per_agent": [{"agent_name": "scanner", "total_cost": 0.42, "total_tokens": 18200}],
+  "success_rate": [{"agent_name": "scanner", "success": 38, "failed": 2, "rate": 0.95}],
+  "cost_trend": [{"date": "2026-01-20", "cumulative_cost": 1.23}]
+}
+```
+
+Three SQLite GROUP BY queries (runs/day, per-agent aggregates, cost trend) — all use existing indexes, well within 500ms.
 
 ---
 
 ### 5. Frontend Changes
 
-None.
+**`/analytics` page:** Client component with `useState` for date range, single `useApi` fetch to `/api/agents/analytics?start_date=...&end_date=...`, refetches on date change.
+
+**`AgentAnalyticsCharts.tsx`** renders four Tremor components:
+1. `BarChart` (stacked) — `runs_per_day`, x=date, group by agent
+2. `AreaChart` — `cost_trend`, x=date, y=cumulative_cost
+3. `BarChart` — `avg_duration_ms`, x=agent_name, y=avg_ms
+4. `DonutChart` — `success_rate`, one donut per agent (or stacked bar if >4 agents)
+
+Date range picker: two `<input type="date">` inputs styled with Tailwind, defaulting to last 30 days. No new library needed.
+
+**`types.ts`:** Add `AgentAnalytics` interface matching the response shape above.
 
 ---
 
 ### 6. Testing Strategy
 
-**`TestDataProviderRegistryFallback`** (8 cases) — tests the registry directly:
+**Backend (`test_analytics_endpoint.py`):**
+- Seed fixture rows into in-memory SQLite, assert aggregation correctness
+- Test empty-data returns `200` with empty arrays (not 500)
+- Test date range filtering excludes out-of-range rows
+- Test response time assertion (< 500ms) with 1000 seeded rows
 
-| Test | Verifies |
-|------|----------|
-| `test_primary_succeeds_no_fallback` | Chain stops at first success |
-| `test_primary_raises_falls_back` | Exception triggers next provider |
-| `test_primary_returns_none_falls_back` | `None` result triggers fallback |
-| `test_historical_empty_bars_falls_back` | `bars=[]` triggers fallback (`base.py:181`) |
-| `test_all_fail_returns_none` | Exhausted chain returns `None`, no crash |
-| `test_unavailable_provider_skipped` | `is_available()==False` → no `get_quote` call |
-| `test_full_chain_last_resort` | Full 4-provider chain, last-resort wins |
-| `test_set_primary_changes_order` | `set_primary()` puts provider first |
-| `test_set_primary_fails_then_falls_back` | Overridden primary fails, fallback resumes |
-
-**`TestCreateRegistry`** (5 cases) — tests the factory function with patched constructors:
-
-| Test | Verifies |
-|------|----------|
-| `test_create_registry_no_keys` | Only yfinance registered, premium ctors not called |
-| `test_create_registry_with_finnhub_key` | Finnhub registered with correct key, becomes primary |
-| `test_create_registry_explicit_primary` | `primary=` kwarg overrides auto-selection |
-| `test_create_registry_all_keys_polygon_is_primary` | Polygon wins auto-selection (highest priority) |
-| `test_create_registry_provider_init_failure` | Constructor `RuntimeError` → provider skipped, yfinance fallback |
-
-**Run command:**
-```
-python -m pytest backend/tests/test_data_provider_fallback.py -v
-```
-
-No environment variables required; all tests pass with zero real API calls.
+**Frontend:**
+- Mock `useApi` returning empty arrays → assert charts render without crash (empty state)
+- Mock with fixture data → assert Tremor components receive correct `data` props
+- Date picker change → assert new fetch URL includes updated params

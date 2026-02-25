@@ -1,51 +1,41 @@
-# VO-004: Add integration tests for data provider fallback chain
+# VO-004: Create agent performance analytics dashboard
 
 ## User Story
 
-Here's the user story based on the actual fallback logic in `base.py:148-186`:
+## User Story: Agent Performance Analytics Dashboard
 
 ---
 
-## User Story: Integration Tests for Data Provider Fallback Chain
+**User Story**
 
-**As a** backend engineer,
-**I want** integration tests that verify `DataProviderRegistry` correctly falls back through Polygon → Finnhub → Alpha Vantage → yfinance when a provider fails or returns empty data,
-**so that** I can confidently modify or extend the provider system without silently breaking the reliability guarantee users depend on for uninterrupted quote and history data.
+As a **platform operator**, I want a dedicated analytics dashboard showing AI agent performance metrics over time, so that I can identify underperforming agents, monitor costs, and make data-driven decisions about resource allocation.
 
 ---
 
-### Acceptance Criteria
+**Acceptance Criteria**
 
-**Fallback on exception (`get_quote` and `get_historical`)**
-- When the primary provider raises an exception, the registry tries the next provider in `_fallback_order` and returns its result
-- When all providers except yfinance raise exceptions, yfinance result is returned
-- When all providers raise exceptions, `None` is returned (no crash)
-
-**Fallback on empty/None result**
-- When a provider returns `None` for `get_quote`, the next provider is tried
-- When a provider returns a `PriceHistory` with empty `bars`, the next provider is tried (see `base.py:181`)
-- A provider returning a valid non-empty result stops the chain — subsequent providers are NOT called
-
-**Provider availability gating**
-- A provider with `is_available() == False` (no API key) is skipped entirely, not tried-then-fallen-back-from
-- yfinance (no key required) is always the last resort
-
-**Primary provider override**
-- When `set_primary()` is called, that provider is tried first before `_fallback_order` sequence
-
-**Test infrastructure**
-- All tests use `unittest.mock` — no real API calls
-- Tests live in `backend/tests/test_data_provider_fallback.py`
-- Tests run with `pytest` and pass in CI with no environment variables set
+- `GET /api/agents/analytics` endpoint returns:
+  - [ ] Runs per day for the last 30 days, grouped by agent
+  - [ ] Average duration per agent (ms)
+  - [ ] Total token usage and cost per agent
+  - [ ] Success rate per agent (success / total runs)
+- Backend queries `agent_runs` table; response time < 500ms
+- `/analytics` page renders without errors for empty data states
+- **Chart 1:** Stacked `BarChart` — daily run count by agent
+- **Chart 2:** `AreaChart` — cumulative cost trend over time
+- **Chart 3:** `BarChart` — average response time by agent
+- **Chart 4:** Donut or stacked bar — success/failure ratio per agent
+- Date range picker filters all charts simultaneously (default: last 30 days)
+- All charts use Tremor components; no new UI libraries introduced
 
 ---
 
-### Priority Reasoning
+**Priority Reasoning**
 
-**Medium-High.** The fallback chain is the core reliability guarantee of the data layer — every quote and chart in the UI depends on it. Currently there are zero tests for this logic. The `get_historical` empty-bars check (`base.py:181`) is a subtle edge case that's easy to break silently. Adding providers or changing priority order should be validated by a test, not manual QA.
+High. Without visibility into agent performance and cost, we're flying blind on one of our core product differentiators. This directly unblocks cost optimization and capacity planning conversations with customers.
 
 ---
 
-### Estimated Complexity: **2 / 5**
+**Estimated Complexity: 3/5**
 
-Pure test authorship — no production code changes. The existing `DataProviderRegistry` and `DataProvider` ABC are well-structured for mocking. The main work is setting up a handful of mock providers and asserting call order. No external dependencies or database fixtures needed.
+Backend aggregation queries are straightforward if `agent_runs` is indexed on `created_at` and `agent_id`. Frontend complexity is low given Tremor's out-of-the-box chart components. Main risk: data volume at scale — add a note to paginate or limit aggregation window if table grows large.
