@@ -1,0 +1,1 @@
+_(updated to mock `getRefreshInterval` / `setRefreshInterval` named exports instead of the old `api.get/api.put` pattern)_
