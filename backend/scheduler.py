@@ -1,3 +1,4 @@
+```python
 """
 APScheduler configuration and management for TickerPulse AI.
 Sets up job store (SQLite), job defaults, and exposes helpers.
@@ -320,6 +321,61 @@ class SchedulerManager:
                 logger.error("Failed to update job %s schedule: %s", job_id, exc)
                 return False
 
+    def reschedule_job(self, job_id: str, seconds: int) -> bool:
+        """Set a new interval for a job, or pause it when seconds == 0.
+
+        This is the high-level entry point used by the settings API.  It
+        encapsulates the pause/reschedule logic so callers only need to pass
+        the desired interval in seconds.
+
+        Parameters
+        ----------
+        job_id : str
+            The job to reschedule (e.g. ``'price_refresh'``).
+        seconds : int
+            New interval in seconds.  Pass ``0`` to pause the job (manual mode).
+
+        Returns
+        -------
+        bool
+            ``True`` on success, ``False`` if the job is unknown or an error
+            occurs.
+        """
+        if seconds == 0:
+            return self.pause_job(job_id)
+
+        with self._lock:
+            if job_id not in self._job_registry:
+                logger.warning("Cannot reschedule unknown job: %s", job_id)
+                return False
+            try:
+                if self.scheduler:
+                    sched_job = self.scheduler.get_job(job_id)
+                    if sched_job:
+                        # APScheduler's reschedule_job updates the trigger and
+                        # also unpauses the job if it was previously paused.
+                        self.scheduler.reschedule_job(
+                            job_id, trigger='interval', seconds=seconds
+                        )
+                    else:
+                        meta = self._job_registry[job_id]
+                        self.scheduler.add_job(
+                            meta['func'],
+                            'interval',
+                            id=job_id,
+                            name=meta['name'],
+                            replace_existing=True,
+                            seconds=seconds,
+                        )
+                self._job_registry[job_id]['trigger'] = 'interval'
+                self._job_registry[job_id]['trigger_args'] = {'seconds': seconds}
+                self._job_registry[job_id]['enabled'] = True
+                logger.info("Rescheduled job %s to interval=%ds", job_id, seconds)
+                return True
+            except Exception as exc:
+                logger.error("Failed to reschedule job %s: %s", job_id, exc)
+                return False
+
     def is_market_hours(self, market: str = 'US') -> bool:
         """Check if currently within market hours.
 
@@ -360,3 +416,4 @@ class SchedulerManager:
 
 # Module-level singleton -- populated by backend.jobs.register_all_jobs()
 scheduler_manager = SchedulerManager()
+```

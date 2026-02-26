@@ -1,10 +1,13 @@
+```python
 """
 TickerPulse AI v3.0 - Settings API Routes
 Blueprint for AI provider settings, data provider settings, and agent framework configuration.
 """
 
-from flask import Blueprint, jsonify, request
+import sqlite3
 import logging
+
+from flask import Blueprint, jsonify, request
 
 from backend.api.validators.provider_validators import (
     validate_add_provider_request,
@@ -17,6 +20,7 @@ from backend.core.settings_manager import (
     delete_ai_provider,
 )
 from backend.core.ai_providers import test_provider_connection
+from backend.config import Config
 
 logger = logging.getLogger(__name__)
 
@@ -49,15 +53,64 @@ def _parse_pagination(args):
 @settings_bp.route('/settings/ai-providers', methods=['GET'])
 def get_ai_providers_endpoint():
     """Get all supported AI providers with configuration status.
-
-    Query Parameters:
-        page (int, optional): Page number, 1-based. Default 1.
-        page_size (int, optional): Results per page, 1-100. Default 25.
-
-    Returns:
-        JSON envelope with data array and pagination metadata. Provider objects
-        include name, display_name, configured, models list, and default_model.
-        API keys are never exposed.
+    ---
+    tags:
+      - Settings
+    summary: List all AI providers
+    description: >
+      Returns all supported AI providers merged with DB configuration.
+      API keys are never exposed in the response.
+    parameters:
+      - in: query
+        name: page
+        type: integer
+        default: 1
+        description: Page number (1-based).
+      - in: query
+        name: page_size
+        type: integer
+        default: 25
+        description: Results per page (1-100).
+    responses:
+      200:
+        description: Paginated list of AI providers.
+        schema:
+          type: object
+          properties:
+            data:
+              type: array
+              items:
+                type: object
+                properties:
+                  name:
+                    type: string
+                  display_name:
+                    type: string
+                  configured:
+                    type: boolean
+                  is_active:
+                    type: boolean
+                  status:
+                    type: string
+                    enum: [active, configured, unconfigured]
+                  models:
+                    type: array
+                    items:
+                      type: string
+                  default_model:
+                    type: string
+            page:
+              type: integer
+            page_size:
+              type: integer
+            total:
+              type: integer
+            total_pages:
+              type: integer
+      400:
+        description: Invalid pagination parameters.
+        schema:
+          $ref: '#/definitions/Error'
     """
     page, page_size, err = _parse_pagination(request.args)
     if err:
@@ -129,14 +182,42 @@ def get_ai_providers_endpoint():
 @settings_bp.route('/settings/ai-provider', methods=['POST'])
 def add_ai_provider_endpoint():
     """Add or update an AI provider configuration.
-
-    Request Body (JSON):
-        provider (str): Provider identifier ('openai', 'anthropic', 'google', 'grok').
-        api_key (str): API key for the provider.
-        model (str, optional): Model name to use. Falls back to provider default.
-
-    Returns:
-        JSON object with 'success' boolean.
+    ---
+    tags:
+      - Settings
+    summary: Add or update an AI provider
+    consumes:
+      - application/json
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - provider
+            - api_key
+          properties:
+            provider:
+              type: string
+              enum: [openai, anthropic, google, xai]
+              example: anthropic
+            api_key:
+              type: string
+              example: sk-ant-...
+            model:
+              type: string
+              description: Model name. Falls back to provider default when omitted.
+              example: claude-sonnet-4-5-20250929
+    responses:
+      200:
+        description: Provider saved.
+        schema:
+          $ref: '#/definitions/SuccessResponse'
+      400:
+        description: Missing required fields.
+        schema:
+          $ref: '#/definitions/Error'
     """
     data = request.json
     if not data or 'provider' not in data or 'api_key' not in data:
@@ -154,12 +235,21 @@ def add_ai_provider_endpoint():
 @settings_bp.route('/settings/ai-provider/<int:provider_id>/activate', methods=['POST'])
 def activate_ai_provider_endpoint(provider_id):
     """Activate an AI provider by id (deactivates all others).
-
-    Path Parameters:
-        provider_id (int): ID of the provider to activate.
-
-    Returns:
-        JSON object with 'success' boolean.
+    ---
+    tags:
+      - Settings
+    summary: Set active AI provider
+    parameters:
+      - in: path
+        name: provider_id
+        type: integer
+        required: true
+        description: ID of the provider to activate.
+    responses:
+      200:
+        description: Provider activated.
+        schema:
+          $ref: '#/definitions/SuccessResponse'
     """
     success = set_active_provider(provider_id)
     return jsonify({'success': success})
@@ -168,12 +258,21 @@ def activate_ai_provider_endpoint(provider_id):
 @settings_bp.route('/settings/ai-provider/<int:provider_id>', methods=['DELETE'])
 def delete_ai_provider_endpoint(provider_id):
     """Delete an AI provider configuration.
-
-    Path Parameters:
-        provider_id (int): ID of the provider to delete.
-
-    Returns:
-        JSON object with 'success' boolean.
+    ---
+    tags:
+      - Settings
+    summary: Delete an AI provider
+    parameters:
+      - in: path
+        name: provider_id
+        type: integer
+        required: true
+        description: ID of the provider to delete.
+    responses:
+      200:
+        description: Provider deleted.
+        schema:
+          $ref: '#/definitions/SuccessResponse'
     """
     success = delete_ai_provider(provider_id)
     return jsonify({'success': success})
@@ -182,12 +281,25 @@ def delete_ai_provider_endpoint(provider_id):
 @settings_bp.route('/settings/ai-provider/<provider_name>/test', methods=['POST'])
 def test_stored_ai_provider(provider_name):
     """Test an AI provider connection using the stored API key.
-
-    Path Parameters:
-        provider_name (str): Provider identifier (e.g. 'anthropic').
-
-    Returns:
-        JSON object with 'success' boolean and provider info.
+    ---
+    tags:
+      - Settings
+    summary: Test a stored AI provider connection
+    parameters:
+      - in: path
+        name: provider_name
+        type: string
+        required: true
+        description: Provider identifier (e.g. 'anthropic').
+    responses:
+      200:
+        description: Test result.
+        schema:
+          $ref: '#/definitions/SuccessResponse'
+      500:
+        description: Internal error during test.
+        schema:
+          $ref: '#/definitions/Error'
     """
     from backend.core.settings_manager import get_active_ai_provider, get_all_ai_providers
 
@@ -206,8 +318,6 @@ def test_stored_ai_provider(provider_name):
         })
 
     # Get the full provider record (with API key) from DB
-    import sqlite3
-    from backend.config import Config
     try:
         conn = sqlite3.connect(Config.DB_PATH)
         conn.row_factory = sqlite3.Row
@@ -230,15 +340,40 @@ def test_stored_ai_provider(provider_name):
 @settings_bp.route('/settings/test-ai', methods=['POST'])
 def test_ai_provider_endpoint():
     """Test an AI provider connection with a simple prompt.
-
-    Request Body (JSON):
-        provider (str): Provider identifier.
-        api_key (str): API key to test.
-        model (str, optional): Model name to test.
-
-    Returns:
-        JSON object with 'success' boolean and 'provider' name on success,
-        or 'error' message on failure.
+    ---
+    tags:
+      - Settings
+    summary: Test an AI provider with a new API key
+    consumes:
+      - application/json
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - provider
+            - api_key
+          properties:
+            provider:
+              type: string
+              example: openai
+            api_key:
+              type: string
+              example: sk-...
+            model:
+              type: string
+              example: gpt-4o
+    responses:
+      200:
+        description: Test result.
+        schema:
+          $ref: '#/definitions/SuccessResponse'
+      400:
+        description: Missing required fields.
+        schema:
+          $ref: '#/definitions/Error'
     """
     data = request.json
     if not data or 'provider' not in data or 'api_key' not in data:
@@ -259,12 +394,32 @@ def test_ai_provider_endpoint():
 @settings_bp.route('/settings/data-providers', methods=['GET'])
 def get_data_providers():
     """List all configured data providers.
-
-    Returns placeholder data until the data provider subsystem is implemented.
-
-    Returns:
-        JSON array of data provider objects with id, name, type, status, and
-        configuration details.
+    ---
+    tags:
+      - Settings
+    summary: List data providers
+    description: Returns stub data for built-in data providers with their status.
+    responses:
+      200:
+        description: Array of data provider objects.
+        schema:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+              name:
+                type: string
+              type:
+                type: string
+              status:
+                type: string
+                enum: [active, unconfigured]
+              is_default:
+                type: boolean
+              requires_api_key:
+                type: boolean
     """
     # Stub: return built-in providers with default status
     providers = [
@@ -311,14 +466,38 @@ def get_data_providers():
 @settings_bp.route('/settings/data-provider', methods=['POST'])
 def add_data_provider():
     """Add or update a data provider configuration.
-
-    Request Body (JSON):
-        provider_id (str): Provider identifier (e.g. 'alpha_vantage').
-        api_key (str): API key for the provider.
-        config (dict, optional): Additional provider-specific configuration.
-
-    Returns:
-        JSON object with 'success' boolean.
+    ---
+    tags:
+      - Settings
+    summary: Add or update a data provider
+    consumes:
+      - application/json
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - provider_id
+          properties:
+            provider_id:
+              type: string
+              example: alpha_vantage
+            api_key:
+              type: string
+            config:
+              type: object
+              description: Provider-specific configuration key-value pairs.
+    responses:
+      200:
+        description: Provider configuration saved.
+        schema:
+          $ref: '#/definitions/SuccessResponse'
+      400:
+        description: Missing or invalid request body.
+        schema:
+          $ref: '#/definitions/Error'
     """
     data = request.json
     if not data:
@@ -438,3 +617,129 @@ def set_agent_framework():
         'framework': framework,
         'message': f'Agent framework set to {framework} (stub implementation)'
     })
+
+
+# ---------------------------------------------------------------------------
+# Price Refresh Interval endpoints
+# ---------------------------------------------------------------------------
+
+@settings_bp.route('/settings/refresh-interval', methods=['GET'])
+def get_refresh_interval():
+    """Get the current price refresh interval.
+    ---
+    tags:
+      - Settings
+    summary: Get price refresh interval
+    description: >
+      Returns the configured price refresh interval in seconds.
+      Source is 'db' when a value has been saved, 'default' when falling
+      back to the application default.
+    responses:
+      200:
+        description: Current interval configuration.
+        schema:
+          type: object
+          properties:
+            interval:
+              type: integer
+              description: Interval in seconds. 0 means manual mode (no auto-refresh).
+            source:
+              type: string
+              enum: [db, default]
+              description: Whether the value came from the database or config default.
+    """
+    try:
+        conn = sqlite3.connect(Config.DB_PATH)
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            "SELECT value FROM settings WHERE key = 'price_refresh_interval'"
+        ).fetchone()
+        conn.close()
+        if row:
+            return jsonify({'interval': int(row['value']), 'source': 'db'})
+    except Exception as e:
+        logger.error("Error reading refresh interval from DB: %s", e)
+
+    return jsonify({'interval': Config.PRICE_REFRESH_INTERVAL_SECONDS, 'source': 'default'})
+
+
+@settings_bp.route('/settings/refresh-interval', methods=['PUT'])
+def set_refresh_interval():
+    """Update the price refresh interval.
+    ---
+    tags:
+      - Settings
+    summary: Set price refresh interval
+    consumes:
+      - application/json
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - interval
+          properties:
+            interval:
+              type: integer
+              description: >
+                Interval in seconds. Use 0 for manual mode (disables auto-refresh).
+                When non-zero, must be between 15 and 3600 seconds.
+    responses:
+      200:
+        description: Interval updated successfully.
+        schema:
+          type: object
+          properties:
+            success:
+              type: boolean
+            interval:
+              type: integer
+      400:
+        description: Missing or invalid interval value.
+        schema:
+          $ref: '#/definitions/Error'
+      500:
+        description: Database write error.
+        schema:
+          $ref: '#/definitions/Error'
+    """
+    from backend.scheduler import scheduler_manager
+
+    data = request.json
+    if not data or 'interval' not in data:
+        return jsonify({'success': False, 'error': 'Missing required field: interval'}), 400
+
+    interval = data['interval']
+
+    if not isinstance(interval, int):
+        return jsonify({'success': False, 'error': 'interval must be an integer'}), 400
+
+    if interval != 0 and (interval < 15 or interval > 3600):
+        return jsonify({
+            'success': False,
+            'error': 'interval must be 0 (manual mode) or between 15 and 3600 seconds',
+        }), 400
+
+    try:
+        conn = sqlite3.connect(Config.DB_PATH)
+        conn.execute(
+            "INSERT OR REPLACE INTO settings (key, value, updated_at) "
+            "VALUES ('price_refresh_interval', ?, CURRENT_TIMESTAMP)",
+            (str(interval),),
+        )
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        logger.error("Error writing refresh interval to DB: %s", e)
+        return jsonify({'success': False, 'error': 'Database error'}), 500
+
+    # Reschedule the live job; non-fatal if scheduler is not yet running
+    try:
+        scheduler_manager.reschedule_job('price_refresh', seconds=interval)
+    except Exception as e:
+        logger.warning("Could not reschedule price_refresh job: %s", e)
+
+    return jsonify({'success': True, 'interval': interval})
+```

@@ -1,3 +1,4 @@
+```typescript
 // ============================================================
 // TickerPulse AI v3.0 - API Client
 // ============================================================
@@ -26,6 +27,8 @@ import type {
   ProviderRateLimitsResponse,
   ExportFormat,
   ComparisonResult,
+  PriceUpdateEvent,
+  PortfolioPoint,
 } from './types';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? '';
@@ -106,6 +109,10 @@ export async function getStockDetail(ticker: string, timeframe: Timeframe): Prom
   return request<StockDetail>(
     `/api/stocks/${ticker.toUpperCase()}/detail?timeframe=${timeframe}`
   );
+}
+
+export async function getBulkPrices(): Promise<Record<string, PriceUpdateEvent>> {
+  return request<Record<string, PriceUpdateEvent>>('/api/stocks/prices');
 }
 
 // ---- News ----
@@ -221,6 +228,19 @@ export async function getAIProviders(): Promise<AIProvider[]> {
   return (data as { data: AIProvider[] }).data || [];
 }
 
+export async function getRefreshInterval(): Promise<{ interval: number; source: string }> {
+  return request<{ interval: number; source: string }>('/api/settings/refresh-interval');
+}
+
+export async function setRefreshInterval(
+  interval: number
+): Promise<{ success: boolean; interval: number }> {
+  return request<{ success: boolean; interval: number }>('/api/settings/refresh-interval', {
+    method: 'PUT',
+    body: JSON.stringify({ interval }),
+  });
+}
+
 // ---- Health ----
 
 export async function getHealth(): Promise<HealthCheck> {
@@ -317,6 +337,16 @@ export async function getComparisonData(
   return request<ComparisonResult>(`/api/stocks/compare?${params.toString()}`);
 }
 
+// ---- Portfolio History ----
+
+export async function getPortfolioHistory(days = 30): Promise<PortfolioPoint[]> {
+  const data = await request<{ points: PortfolioPoint[] } | PortfolioPoint[]>(
+    `/api/stocks/portfolio-history?days=${days}`
+  );
+  if (Array.isArray(data)) return data;
+  return (data as { points: PortfolioPoint[] }).points || [];
+}
+
 // ---- Watchlist ----
 
 export async function getWatchlistOrder(watchlistId: number = 1): Promise<string[]> {
@@ -342,3 +372,4 @@ export async function getProviderRateLimits(): Promise<ProviderRateLimitsRespons
 }
 
 export { ApiError };
+```
