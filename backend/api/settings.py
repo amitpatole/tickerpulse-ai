@@ -1,4 +1,3 @@
-```python
 """
 TickerPulse AI v3.0 - Settings API Routes
 Blueprint for AI provider settings, data provider settings, and agent framework configuration.
@@ -518,13 +517,47 @@ def add_data_provider():
 @settings_bp.route('/settings/data-provider/test', methods=['POST'])
 def test_data_provider():
     """Test a data provider connection.
-
-    Request Body (JSON):
-        provider_id (str): Provider identifier to test.
-        api_key (str, optional): API key to test with.
-
-    Returns:
-        JSON object with 'success' boolean and optional 'error' message.
+    ---
+    tags:
+      - Settings
+    summary: Test a data provider connection
+    consumes:
+      - application/json
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - provider_id
+          properties:
+            provider_id:
+              type: string
+              description: Provider identifier to test.
+              example: yahoo_finance
+            api_key:
+              type: string
+              description: API key to test with (optional for providers that don't require one).
+    responses:
+      200:
+        description: Connection test result.
+        schema:
+          type: object
+          properties:
+            success:
+              type: boolean
+              example: true
+            provider:
+              type: string
+              example: Yahoo Finance
+            message:
+              type: string
+              example: Connection successful
+      400:
+        description: Missing or invalid request body.
+        schema:
+          $ref: '#/definitions/Error'
     """
     data = request.json
     if not data:
@@ -559,10 +592,39 @@ def test_data_provider():
 @settings_bp.route('/settings/agent-framework', methods=['GET'])
 def get_agent_framework():
     """Get the current agent framework configuration.
-
-    Returns:
-        JSON object with current framework name, available frameworks,
-        and status information.
+    ---
+    tags:
+      - Settings
+    summary: Get agent framework configuration
+    responses:
+      200:
+        description: Current and available agent framework details.
+        schema:
+          type: object
+          properties:
+            current_framework:
+              type: string
+              enum: [crewai, openclaw]
+              example: crewai
+            available_frameworks:
+              type: array
+              items:
+                type: object
+                properties:
+                  id:
+                    type: string
+                  name:
+                    type: string
+                  description:
+                    type: string
+                  status:
+                    type: string
+                    enum: [available, unavailable]
+            is_configured:
+              type: boolean
+              example: false
+            message:
+              type: string
     """
     return jsonify({
         'current_framework': 'crewai',
@@ -590,12 +652,44 @@ def get_agent_framework():
 @settings_bp.route('/settings/agent-framework', methods=['POST'])
 def set_agent_framework():
     """Set the active agent framework.
-
-    Request Body (JSON):
-        framework (str): Framework identifier ('crewai' or 'openclaw').
-
-    Returns:
-        JSON object with 'success' boolean and the activated framework name.
+    ---
+    tags:
+      - Settings
+    summary: Set active agent framework
+    consumes:
+      - application/json
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - framework
+          properties:
+            framework:
+              type: string
+              enum: [crewai, openclaw]
+              description: Framework identifier to activate.
+              example: crewai
+    responses:
+      200:
+        description: Framework activated.
+        schema:
+          type: object
+          properties:
+            success:
+              type: boolean
+              example: true
+            framework:
+              type: string
+              example: crewai
+            message:
+              type: string
+      400:
+        description: Missing or invalid framework identifier.
+        schema:
+          $ref: '#/definitions/Error'
     """
     data = request.json
     if not data or 'framework' not in data:
@@ -742,4 +836,3 @@ def set_refresh_interval():
         logger.warning("Could not reschedule price_refresh job: %s", e)
 
     return jsonify({'success': True, 'interval': interval})
-```

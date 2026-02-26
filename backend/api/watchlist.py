@@ -1,4 +1,3 @@
-```python
 """
 TickerPulse AI v3.0 - Watchlist API
 Blueprint exposing watchlist group management endpoints, including CSV import
@@ -40,9 +39,17 @@ _MAX_NAME_LEN = 100
 @watchlist_bp.route('/', methods=['GET'])
 def list_watchlists():
     """Return all watchlist groups ordered by sort_order with their stock counts.
-
-    Returns:
-        200  [{id, name, sort_order, created_at, stock_count}, ...]
+    ---
+    tags:
+      - Watchlist
+    summary: List all watchlist groups
+    responses:
+      200:
+        description: All watchlist groups ordered by sort_order.
+        schema:
+          type: array
+          items:
+            $ref: '#/definitions/WatchlistGroup'
     """
     groups = get_all_watchlists()
     return jsonify(groups), 200
@@ -51,12 +58,33 @@ def list_watchlists():
 @watchlist_bp.route('/', methods=['POST'])
 def create_watchlist_route():
     """Create a new named watchlist group.
-
-    Request body: {"name": "Tech Stocks"}
-
-    Returns:
-        201  {id, name, sort_order, stock_count}
-        400  Missing or empty name, name too long, or duplicate name
+    ---
+    tags:
+      - Watchlist
+    summary: Create a watchlist group
+    consumes:
+      - application/json
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - name
+          properties:
+            name:
+              type: string
+              example: Tech Stocks
+    responses:
+      201:
+        description: Watchlist group created.
+        schema:
+          $ref: '#/definitions/WatchlistGroup'
+      400:
+        description: Missing or empty name, name too long, or duplicate name.
+        schema:
+          $ref: '#/definitions/Error'
     """
     body = request.get_json(silent=True) or {}
     name: str = (body.get('name') or '').strip()
@@ -74,10 +102,26 @@ def create_watchlist_route():
 @watchlist_bp.route('/<int:watchlist_id>', methods=['GET'])
 def get_watchlist_route(watchlist_id: int):
     """Return a watchlist with its ordered ticker list.
-
-    Returns:
-        200  {id, name, sort_order, created_at, tickers}
-        404  Watchlist not found
+    ---
+    tags:
+      - Watchlist
+    summary: Get a watchlist with its tickers
+    parameters:
+      - name: watchlist_id
+        in: path
+        type: integer
+        required: true
+        description: Watchlist identifier.
+        example: 1
+    responses:
+      200:
+        description: Watchlist with ordered ticker list.
+        schema:
+          $ref: '#/definitions/WatchlistDetail'
+      404:
+        description: Watchlist not found.
+        schema:
+          $ref: '#/definitions/Error'
     """
     wl = get_watchlist(watchlist_id)
     if wl is None:
@@ -88,13 +132,43 @@ def get_watchlist_route(watchlist_id: int):
 @watchlist_bp.route('/<int:watchlist_id>', methods=['PUT'])
 def rename_watchlist_route(watchlist_id: int):
     """Rename a watchlist group.
-
-    Request body: {"name": "New Name"}
-
-    Returns:
-        200  {id, name, sort_order, created_at}
-        400  Missing or empty name, name too long, or duplicate name
-        404  Watchlist not found
+    ---
+    tags:
+      - Watchlist
+    summary: Rename a watchlist group
+    consumes:
+      - application/json
+    parameters:
+      - name: watchlist_id
+        in: path
+        type: integer
+        required: true
+        description: Watchlist identifier.
+        example: 1
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - name
+          properties:
+            name:
+              type: string
+              example: New Name
+    responses:
+      200:
+        description: Watchlist renamed.
+        schema:
+          $ref: '#/definitions/WatchlistGroup'
+      400:
+        description: Missing or empty name, name too long, or duplicate name.
+        schema:
+          $ref: '#/definitions/Error'
+      404:
+        description: Watchlist not found.
+        schema:
+          $ref: '#/definitions/Error'
     """
     body = request.get_json(silent=True) or {}
     name: str = (body.get('name') or '').strip()
@@ -114,13 +188,33 @@ def rename_watchlist_route(watchlist_id: int):
 @watchlist_bp.route('/<int:watchlist_id>', methods=['DELETE'])
 def delete_watchlist_route(watchlist_id: int):
     """Delete a watchlist group and all its stock associations.
-
-    The last watchlist cannot be deleted.
-
-    Returns:
-        200  {"ok": true}
-        400  Cannot delete the last watchlist
-        404  Watchlist not found
+    ---
+    tags:
+      - Watchlist
+    summary: Delete a watchlist group
+    description: >
+      Deletes the watchlist and all stock membership records for it.
+      The last remaining watchlist cannot be deleted.
+    parameters:
+      - name: watchlist_id
+        in: path
+        type: integer
+        required: true
+        description: Watchlist identifier.
+        example: 1
+    responses:
+      200:
+        description: Watchlist deleted.
+        schema:
+          $ref: '#/definitions/SuccessResponse'
+      400:
+        description: Cannot delete the last watchlist.
+        schema:
+          $ref: '#/definitions/Error'
+      404:
+        description: Watchlist not found.
+        schema:
+          $ref: '#/definitions/Error'
     """
     try:
         deleted = delete_watchlist(watchlist_id)
@@ -138,13 +232,38 @@ def delete_watchlist_route(watchlist_id: int):
 @watchlist_bp.route('/reorder', methods=['PUT'])
 def reorder_groups():
     """Persist a new drag-and-drop sort order for watchlist groups.
-
-    Request body: {"ids": [3, 1, 2]}
-    Each ID is assigned sort_order equal to its index in the list.
-
-    Returns:
-        200  {"ok": true}
-        400  Missing or invalid ids field
+    ---
+    tags:
+      - Watchlist
+    summary: Reorder watchlist groups
+    description: >
+      Assigns each group a new sort_order equal to its index in the
+      supplied ids list.  Used to persist drag-and-drop reordering.
+    consumes:
+      - application/json
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - ids
+          properties:
+            ids:
+              type: array
+              items:
+                type: integer
+              example: [3, 1, 2]
+    responses:
+      200:
+        description: Groups reordered successfully.
+        schema:
+          $ref: '#/definitions/SuccessResponse'
+      400:
+        description: Missing or invalid ids field.
+        schema:
+          $ref: '#/definitions/Error'
     """
     body = request.get_json(silent=True) or {}
     ids = body.get('ids')
@@ -168,14 +287,55 @@ def reorder_groups():
 @watchlist_bp.route('/<int:watchlist_id>/stocks', methods=['POST'])
 def add_stock_to_group(watchlist_id: int):
     """Add a ticker to a specific watchlist group.
-
-    Request body: {"ticker": "AAPL", "name": "Apple Inc."}
-    ``name`` is optional — it will be looked up from Yahoo Finance when omitted.
-
-    Returns:
-        200  {"ok": true, "ticker": "AAPL"}
-        400  Missing ticker
-        404  Watchlist not found or ticker unresolvable
+    ---
+    tags:
+      - Watchlist
+    summary: Add a ticker to a watchlist
+    consumes:
+      - application/json
+    parameters:
+      - name: watchlist_id
+        in: path
+        type: integer
+        required: true
+        description: Watchlist identifier.
+        example: 1
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - ticker
+          properties:
+            ticker:
+              type: string
+              example: AAPL
+            name:
+              type: string
+              description: >
+                Company name. Optional — looked up from Yahoo Finance when omitted.
+              example: Apple Inc.
+    responses:
+      200:
+        description: Ticker added to watchlist.
+        schema:
+          type: object
+          properties:
+            ok:
+              type: boolean
+              example: true
+            ticker:
+              type: string
+              example: AAPL
+      400:
+        description: Missing ticker field.
+        schema:
+          $ref: '#/definitions/Error'
+      404:
+        description: Watchlist not found or ticker unresolvable.
+        schema:
+          $ref: '#/definitions/Error'
     """
     body = request.get_json(silent=True) or {}
     ticker: str = (body.get('ticker') or '').strip().upper()
@@ -195,13 +355,36 @@ def add_stock_to_group(watchlist_id: int):
 
 @watchlist_bp.route('/<int:watchlist_id>/stocks/<string:ticker>', methods=['DELETE'])
 def remove_stock_from_group(watchlist_id: int, ticker: str):
-    """Remove a ticker from a specific watchlist group (junction row only).
-
-    The stock record in the ``stocks`` table is not deleted.
-
-    Returns:
-        200  {"ok": true}
-        404  Watchlist or stock membership not found
+    """Remove a ticker from a specific watchlist group.
+    ---
+    tags:
+      - Watchlist
+    summary: Remove a ticker from a watchlist
+    description: >
+      Removes the stock membership record only. The stock record in the
+      stocks table is not deleted.
+    parameters:
+      - name: watchlist_id
+        in: path
+        type: integer
+        required: true
+        description: Watchlist identifier.
+        example: 1
+      - name: ticker
+        in: path
+        type: string
+        required: true
+        description: Ticker symbol to remove.
+        example: AAPL
+    responses:
+      200:
+        description: Ticker removed from watchlist.
+        schema:
+          $ref: '#/definitions/SuccessResponse'
+      404:
+        description: Watchlist or stock membership not found.
+        schema:
+          $ref: '#/definitions/Error'
     """
     ticker = ticker.strip().upper()
     wl = get_watchlist(watchlist_id)
@@ -221,14 +404,48 @@ def remove_stock_from_group(watchlist_id: int, ticker: str):
 @watchlist_bp.route('/<int:watchlist_id>/reorder', methods=['PUT'])
 def reorder_stocks(watchlist_id: int):
     """Persist a new drag-and-drop sort order for stocks in a watchlist.
-
-    Request body: {"tickers": ["AAPL", "MSFT", ...]}
-    Each ticker is assigned sort_order equal to its index in the list.
-
-    Returns:
-        200  {"ok": true}
-        400  Missing or invalid tickers field
-        404  Watchlist not found
+    ---
+    tags:
+      - Watchlist
+    summary: Reorder stocks within a watchlist
+    description: >
+      Assigns each ticker a new sort_order equal to its index in the
+      supplied tickers list.
+    consumes:
+      - application/json
+    parameters:
+      - name: watchlist_id
+        in: path
+        type: integer
+        required: true
+        description: Watchlist identifier.
+        example: 1
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - tickers
+          properties:
+            tickers:
+              type: array
+              items:
+                type: string
+              example: [AAPL, MSFT, GOOG]
+    responses:
+      200:
+        description: Stocks reordered successfully.
+        schema:
+          $ref: '#/definitions/SuccessResponse'
+      400:
+        description: Missing or invalid tickers field.
+        schema:
+          $ref: '#/definitions/Error'
+      404:
+        description: Watchlist not found.
+        schema:
+          $ref: '#/definitions/Error'
     """
     body = request.get_json(silent=True) or {}
     tickers = body.get('tickers')
@@ -256,16 +473,61 @@ def reorder_stocks(watchlist_id: int):
 @watchlist_bp.route('/<int:watchlist_id>/import', methods=['POST'])
 def import_csv(watchlist_id: int):
     """Import tickers from a CSV file into a watchlist.
-
-    Request: multipart/form-data with field ``file`` (.csv, ≤ 1 MB).
-    The CSV must contain a column whose header is ``symbol`` (case-insensitive).
-    Each value is stripped of whitespace and uppercased before lookup.
-
-    Returns:
-        200  {added, skipped_duplicates, skipped_invalid, invalid_symbols}
-        400  Bad file type / empty file / no symbol column / too many rows
-        404  Watchlist not found
-        413  File too large
+    ---
+    tags:
+      - Watchlist
+    summary: Import tickers from CSV
+    description: >
+      Accepts a multipart/form-data upload with a CSV file (field name: file,
+      max 1 MB). The CSV must contain a column whose header is 'symbol'
+      (case-insensitive). Each value is stripped and uppercased before lookup.
+      Only symbols already present in the stocks table are accepted.
+    consumes:
+      - multipart/form-data
+    parameters:
+      - name: watchlist_id
+        in: path
+        type: integer
+        required: true
+        description: Watchlist identifier.
+        example: 1
+      - in: formData
+        name: file
+        type: file
+        required: true
+        description: CSV file with a 'symbol' column (max 1 MB, max 500 rows).
+    responses:
+      200:
+        description: Import summary with counts of added and skipped symbols.
+        schema:
+          type: object
+          properties:
+            added:
+              type: integer
+              example: 10
+            skipped_duplicates:
+              type: integer
+              example: 2
+            skipped_invalid:
+              type: integer
+              example: 1
+            invalid_symbols:
+              type: array
+              items:
+                type: string
+              example: [FAKE]
+      400:
+        description: Bad file type, empty file, missing symbol column, or too many rows.
+        schema:
+          $ref: '#/definitions/Error'
+      404:
+        description: Watchlist not found.
+        schema:
+          $ref: '#/definitions/Error'
+      413:
+        description: File exceeds the 1 MB size limit.
+        schema:
+          $ref: '#/definitions/Error'
     """
     # Verify watchlist exists
     wl = get_watchlist(watchlist_id)
@@ -358,4 +620,3 @@ def import_csv(watchlist_id: int):
         'skipped_invalid': skipped_invalid,
         'invalid_symbols': invalid_symbols,
     }), 200
-```

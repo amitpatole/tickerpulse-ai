@@ -30,9 +30,23 @@ def _get_scheduler_manager():
 @scheduler_bp.route('/jobs', methods=['GET'])
 def list_jobs():
     """List all registered jobs with their current status.
-
-    Returns:
-        JSON object with ``jobs`` array and ``total`` count.
+    ---
+    tags:
+      - Scheduler
+    summary: List all scheduled jobs
+    responses:
+      200:
+        description: All registered jobs with status and schedule metadata.
+        schema:
+          type: object
+          properties:
+            jobs:
+              type: array
+              items:
+                $ref: '#/definitions/SchedulerJob'
+            total:
+              type: integer
+              example: 6
     """
     sm = _get_scheduler_manager()
     jobs = sm.get_all_jobs()
@@ -44,17 +58,31 @@ def list_jobs():
 
 @scheduler_bp.route('/jobs/<job_id>', methods=['GET'])
 def get_job(job_id):
-    """Get detailed information about a specific job.
-
-    Path Parameters:
-        job_id (str): The unique job identifier.
-
-    Returns:
-        JSON object with job details.
-
-    Errors:
-        400: Invalid job_id format.
-        404: Job not found.
+    """Get detailed information about a specific scheduled job.
+    ---
+    tags:
+      - Scheduler
+    summary: Get job details
+    parameters:
+      - name: job_id
+        in: path
+        type: string
+        required: true
+        description: Unique job identifier.
+        example: news_monitor
+    responses:
+      200:
+        description: Job details including recent execution history.
+        schema:
+          $ref: '#/definitions/SchedulerJob'
+      400:
+        description: Invalid job_id format.
+        schema:
+          $ref: '#/definitions/Error'
+      404:
+        description: Job not found.
+        schema:
+          $ref: '#/definitions/Error'
     """
     ok, err = validate_job_id(job_id)
     if not ok:
@@ -78,15 +106,26 @@ def get_job(job_id):
 @scheduler_bp.route('/jobs/<job_id>/pause', methods=['POST'])
 def pause_job(job_id):
     """Pause a scheduled job.
-
-    Path Parameters:
-        job_id (str): The job to pause.
-
-    Returns:
-        JSON object with ``success`` boolean and optional ``error``.
-
-    Errors:
-        400: Invalid job_id format.
+    ---
+    tags:
+      - Scheduler
+    summary: Pause a scheduled job
+    parameters:
+      - name: job_id
+        in: path
+        type: string
+        required: true
+        description: Job identifier to pause.
+        example: news_monitor
+    responses:
+      200:
+        description: Job paused successfully.
+        schema:
+          $ref: '#/definitions/SuccessResponse'
+      400:
+        description: Invalid job_id or pause failed.
+        schema:
+          $ref: '#/definitions/Error'
     """
     ok, err = validate_job_id(job_id)
     if not ok:
@@ -101,16 +140,27 @@ def pause_job(job_id):
 
 @scheduler_bp.route('/jobs/<job_id>/resume', methods=['POST'])
 def resume_job(job_id):
-    """Resume a paused job.
-
-    Path Parameters:
-        job_id (str): The job to resume.
-
-    Returns:
-        JSON object with ``success`` boolean and optional ``error``.
-
-    Errors:
-        400: Invalid job_id format.
+    """Resume a paused scheduled job.
+    ---
+    tags:
+      - Scheduler
+    summary: Resume a paused job
+    parameters:
+      - name: job_id
+        in: path
+        type: string
+        required: true
+        description: Job identifier to resume.
+        example: news_monitor
+    responses:
+      200:
+        description: Job resumed successfully.
+        schema:
+          $ref: '#/definitions/SuccessResponse'
+      400:
+        description: Invalid job_id or resume failed.
+        schema:
+          $ref: '#/definitions/Error'
     """
     ok, err = validate_job_id(job_id)
     if not ok:
@@ -125,16 +175,27 @@ def resume_job(job_id):
 
 @scheduler_bp.route('/jobs/<job_id>/trigger', methods=['POST'])
 def trigger_job(job_id):
-    """Trigger immediate execution of a job.
-
-    Path Parameters:
-        job_id (str): The job to trigger.
-
-    Returns:
-        JSON object with ``success`` boolean.
-
-    Errors:
-        400: Invalid job_id format.
+    """Trigger immediate execution of a scheduled job.
+    ---
+    tags:
+      - Scheduler
+    summary: Trigger a job immediately
+    parameters:
+      - name: job_id
+        in: path
+        type: string
+        required: true
+        description: Job identifier to trigger.
+        example: news_monitor
+    responses:
+      200:
+        description: Job triggered for immediate execution.
+        schema:
+          $ref: '#/definitions/SuccessResponse'
+      400:
+        description: Invalid job_id or trigger failed.
+        schema:
+          $ref: '#/definitions/Error'
     """
     ok, err = validate_job_id(job_id)
     if not ok:
@@ -153,27 +214,54 @@ def trigger_job(job_id):
 
 @scheduler_bp.route('/jobs/<job_id>/schedule', methods=['PUT'])
 def update_schedule(job_id):
-    """Update a job's schedule.
-
-    Path Parameters:
-        job_id (str): The job to reschedule.
-
-    Request Body (JSON):
-        trigger (str): Trigger type (``'cron'`` or ``'interval'``).
-        Additional keys are forwarded as trigger arguments.
-        For cron: hour, minute, day_of_week, etc.
-        For interval: minutes, hours, seconds, etc.
-
-    Example bodies::
-
-        {"trigger": "cron", "hour": 9, "minute": 0, "day_of_week": "mon-fri"}
-        {"trigger": "interval", "minutes": 30}
-
-    Returns:
-        JSON object with ``success`` boolean.
-
-    Errors:
-        400: Invalid job_id format, missing/invalid trigger, or invalid trigger args.
+    """Update a job's schedule trigger.
+    ---
+    tags:
+      - Scheduler
+    summary: Reschedule a job
+    consumes:
+      - application/json
+    parameters:
+      - name: job_id
+        in: path
+        type: string
+        required: true
+        description: Job identifier to reschedule.
+        example: news_monitor
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - trigger
+          properties:
+            trigger:
+              type: string
+              enum: [cron, interval, date]
+              description: Trigger type.
+              example: cron
+            hour:
+              type: integer
+              description: Cron hour field (0–23).
+            minute:
+              type: integer
+              description: Cron minute field (0–59).
+            day_of_week:
+              type: string
+              description: Cron day_of_week field (e.g. 'mon-fri').
+            minutes:
+              type: integer
+              description: Interval trigger — repeat every N minutes.
+    responses:
+      200:
+        description: Schedule updated successfully.
+        schema:
+          $ref: '#/definitions/SuccessResponse'
+      400:
+        description: Invalid job_id, missing trigger, or invalid trigger arguments.
+        schema:
+          $ref: '#/definitions/Error'
     """
     ok, err = validate_job_id(job_id)
     if not ok:
@@ -216,13 +304,64 @@ def update_schedule(job_id):
 @scheduler_bp.route('/history', methods=['GET'])
 def job_execution_history():
     """Get job execution history.
-
-    Query Parameters:
-        job_id (str, optional): Filter by job ID.
-        limit (int, optional): Max records to return (default 50, max 200).
-
-    Returns:
-        JSON object with ``history`` array and ``total`` count.
+    ---
+    tags:
+      - Scheduler
+    summary: Get job execution history
+    description: >
+      Returns past job execution records, optionally filtered by job ID.
+      Results are ordered by most recent execution first.
+    parameters:
+      - in: query
+        name: job_id
+        type: string
+        required: false
+        description: Filter records to a specific job ID.
+        example: news_monitor
+      - in: query
+        name: limit
+        type: integer
+        required: false
+        default: 50
+        description: Maximum number of records to return (capped at 200).
+    responses:
+      200:
+        description: Execution history with applied filter metadata.
+        schema:
+          type: object
+          properties:
+            history:
+              type: array
+              items:
+                type: object
+                properties:
+                  job_id:
+                    type: string
+                    example: news_monitor
+                  status:
+                    type: string
+                    enum: [completed, failed, running]
+                    example: completed
+                  executed_at:
+                    type: string
+                    format: date-time
+                  result_summary:
+                    type: string
+                    example: Processed 12 articles
+            total:
+              type: integer
+              example: 50
+            filters:
+              type: object
+              properties:
+                job_id:
+                  type: string
+                limit:
+                  type: integer
+      400:
+        description: Invalid limit parameter.
+        schema:
+          $ref: '#/definitions/Error'
     """
     job_id = request.args.get('job_id', None)
     raw_limit = request.args.get('limit', 50)

@@ -1,4 +1,3 @@
-```python
 """
 TickerPulse AI v3.0 - Shared Swagger/OpenAPI Schema Definitions
 Reusable $ref schemas centralised here and imported into the Flasgger
@@ -20,6 +19,207 @@ SWAGGER_DEFINITIONS: dict = {
             'error': {
                 'type': 'string',
                 'example': 'A descriptive error message',
+            },
+        },
+    },
+
+    # -------------------------------------------------------------------------
+    # Generic success envelope — used in scheduler, settings, alerts blueprints
+    # -------------------------------------------------------------------------
+    'SuccessResponse': {
+        'type': 'object',
+        'required': ['success'],
+        'properties': {
+            'success': {
+                'type': 'boolean',
+                'example': True,
+            },
+            'message': {
+                'type': 'string',
+                'example': 'Operation completed successfully.',
+            },
+        },
+    },
+
+    # -------------------------------------------------------------------------
+    # Stock price record — used in stocks.py and price_refresh SSE events
+    # -------------------------------------------------------------------------
+    'StockPrice': {
+        'type': 'object',
+        'properties': {
+            'ticker': {
+                'type': 'string',
+                'example': 'AAPL',
+            },
+            'name': {
+                'type': 'string',
+                'example': 'Apple Inc.',
+            },
+            'price': {
+                'type': 'number',
+                'format': 'float',
+                'example': 192.35,
+            },
+            'change': {
+                'type': 'number',
+                'format': 'float',
+                'description': 'Absolute price change.',
+                'example': 1.25,
+            },
+            'change_pct': {
+                'type': 'number',
+                'format': 'float',
+                'description': 'Percentage price change.',
+                'example': 0.65,
+            },
+            'market': {
+                'type': 'string',
+                'enum': ['US', 'India'],
+                'example': 'US',
+            },
+            'last_updated': {
+                'type': 'string',
+                'format': 'date-time',
+            },
+        },
+    },
+
+    # -------------------------------------------------------------------------
+    # Price alert — used in alerts.py CRUD responses
+    # -------------------------------------------------------------------------
+    'Alert': {
+        'type': 'object',
+        'properties': {
+            'id': {
+                'type': 'integer',
+                'example': 1,
+            },
+            'ticker': {
+                'type': 'string',
+                'example': 'AAPL',
+            },
+            'condition_type': {
+                'type': 'string',
+                'enum': ['price_above', 'price_below', 'pct_change'],
+                'example': 'price_above',
+            },
+            'threshold': {
+                'type': 'number',
+                'format': 'float',
+                'example': 200.0,
+            },
+            'enabled': {
+                'type': 'boolean',
+                'example': True,
+            },
+            'sound_type': {
+                'type': 'string',
+                'enum': ['default', 'chime', 'alarm', 'silent'],
+                'example': 'chime',
+            },
+            'created_at': {
+                'type': 'string',
+                'format': 'date-time',
+            },
+        },
+    },
+
+    # -------------------------------------------------------------------------
+    # Watchlist group summary — used in watchlist.py list/create responses
+    # -------------------------------------------------------------------------
+    'WatchlistGroup': {
+        'type': 'object',
+        'properties': {
+            'id': {
+                'type': 'integer',
+                'example': 1,
+            },
+            'name': {
+                'type': 'string',
+                'example': 'Tech Stocks',
+            },
+            'sort_order': {
+                'type': 'integer',
+                'example': 0,
+            },
+            'stock_count': {
+                'type': 'integer',
+                'example': 5,
+            },
+            'created_at': {
+                'type': 'string',
+                'format': 'date-time',
+            },
+        },
+    },
+
+    # -------------------------------------------------------------------------
+    # Watchlist detail — used in watchlist.py GET /<id> response
+    # -------------------------------------------------------------------------
+    'WatchlistDetail': {
+        'type': 'object',
+        'properties': {
+            'id': {
+                'type': 'integer',
+                'example': 1,
+            },
+            'name': {
+                'type': 'string',
+                'example': 'Tech Stocks',
+            },
+            'sort_order': {
+                'type': 'integer',
+                'example': 0,
+            },
+            'created_at': {
+                'type': 'string',
+                'format': 'date-time',
+            },
+            'tickers': {
+                'type': 'array',
+                'description': 'Ordered list of ticker symbols in this watchlist.',
+                'items': {
+                    'type': 'string',
+                    'example': 'AAPL',
+                },
+            },
+        },
+    },
+
+    # -------------------------------------------------------------------------
+    # Scheduled job — used in scheduler_routes.py list/detail responses
+    # -------------------------------------------------------------------------
+    'SchedulerJob': {
+        'type': 'object',
+        'properties': {
+            'id': {
+                'type': 'string',
+                'example': 'news_monitor',
+            },
+            'name': {
+                'type': 'string',
+                'example': 'News Monitor',
+            },
+            'status': {
+                'type': 'string',
+                'enum': ['running', 'paused', 'scheduled', 'disabled'],
+                'example': 'scheduled',
+            },
+            'trigger': {
+                'type': 'string',
+                'example': 'interval',
+            },
+            'next_run': {
+                'type': 'string',
+                'format': 'date-time',
+            },
+            'last_run': {
+                'type': 'string',
+                'format': 'date-time',
+            },
+            'timezone': {
+                'type': 'string',
+                'example': 'US/Eastern',
             },
         },
     },
@@ -290,4 +490,3 @@ SWAGGER_DEFINITIONS: dict = {
         },
     },
 }
-```
