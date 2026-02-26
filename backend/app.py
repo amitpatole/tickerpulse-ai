@@ -1,3 +1,4 @@
+```python
 """
 TickerPulse AI v3.0 - Flask Application Factory
 Creates and configures the Flask app, registers blueprints, sets up SSE,
@@ -19,6 +20,42 @@ from backend.database import db_session, init_all_tables
 
 logger = logging.getLogger(__name__)
 
+# ---------------------------------------------------------------------------
+# OpenAPI / Swagger metadata (consumed by Flasgger)
+# ---------------------------------------------------------------------------
+
+_SWAGGER_TEMPLATE: dict = {
+    'swagger': '2.0',
+    'info': {
+        'title': 'TickerPulse AI API',
+        'description': (
+            'REST API for TickerPulse AI v3.0 — stock monitoring, price alerts, '
+            'AI ratings, agent management, and real-time SSE updates.'
+        ),
+        'version': '3.0.0',
+        'contact': {'email': 'support@tickerpulse.ai'},
+        'license': {'name': 'Proprietary'},
+    },
+    'basePath': '/',
+    'schemes': ['http', 'https'],
+    'consumes': ['application/json'],
+    'produces': ['application/json'],
+    'tags': [
+        {'name': 'Stocks',   'description': 'Watchlist management and price data'},
+        {'name': 'Alerts',   'description': 'Price alert CRUD and sound settings'},
+        {'name': 'Analysis', 'description': 'AI ratings and chart data'},
+        {'name': 'Agents',   'description': 'Agent management, execution, and cost tracking'},
+        {'name': 'System',   'description': 'Health check and real-time SSE stream'},
+    ],
+    'definitions': {
+        'Error': {
+            'type': 'object',
+            'properties': {
+                'error': {'type': 'string', 'example': 'Descriptive error message'},
+            },
+        },
+    },
+}
 
 # ---------------------------------------------------------------------------
 # SSE (Server-Sent Events) infrastructure -- simple queue-based, no Redis
@@ -31,7 +68,7 @@ _ALLOWED_EVENT_TYPES = frozenset({
     'heartbeat', 'alert', 'provider_fallback', 'job_completed',
     'technical_alerts', 'regime_update', 'morning_briefing',
     'daily_summary', 'weekly_review', 'reddit_trending', 'download_tracker',
-    'snapshot', 'rate_limit_update',
+    'snapshot', 'rate_limit_update', 'price_update',
 })
 _MAX_PAYLOAD_BYTES = 65_536  # 64 KB
 
@@ -146,6 +183,18 @@ def create_app() -> Flask:
             "flask-cors is not installed -- CORS headers will NOT be added. "
             "Install with: pip install flask-cors"
         )
+
+    # -- Swagger / OpenAPI (Flasgger) ----------------------------------------
+    if Config.SWAGGER_ENABLED:
+        try:
+            from flasgger import Swagger
+            Swagger(app, template=_SWAGGER_TEMPLATE)
+            logger.info("Swagger UI available at /apidocs  |  spec at /apispec_1.json")
+        except ImportError:
+            logger.warning(
+                "flasgger is not installed -- Swagger UI disabled. "
+                "Install with: pip install flasgger"
+            )
 
     # -- Database ------------------------------------------------------------
     with app.app_context():
@@ -402,3 +451,4 @@ if __name__ == '__main__':
         port=Config.FLASK_PORT,
         debug=Config.FLASK_DEBUG,
     )
+```

@@ -1,3 +1,4 @@
+```typescript
 // ============================================================
 // TickerPulse AI v3.0 - TypeScript Type Definitions
 // ============================================================
@@ -287,7 +288,15 @@ export interface ComparisonResult {
 }
 
 // SSE Event Types
-export type SSEEventType = 'agent_status' | 'alert' | 'job_complete' | 'heartbeat' | 'news' | 'rating_update' | 'snapshot';
+export type SSEEventType =
+  | 'agent_status'
+  | 'alert'
+  | 'job_complete'
+  | 'heartbeat'
+  | 'news'
+  | 'rating_update'
+  | 'snapshot'
+  | 'price_update';
 
 export interface SSEEvent {
   type: SSEEventType;
@@ -313,6 +322,14 @@ export interface JobCompleteEvent {
   job_name: string;
   status: string;
   duration_ms?: number;
+}
+
+export interface PriceUpdateEvent {
+  ticker: string;
+  price: number;
+  change: number;
+  change_pct: number;
+  timestamp: string;
 }
 
 export interface AlertSoundSettings {
@@ -352,3 +369,4 @@ export const AGENT_STATUS_COLORS: Record<string, string> = {
   error: 'bg-red-500',
   disabled: 'bg-slate-500',
 };
+```

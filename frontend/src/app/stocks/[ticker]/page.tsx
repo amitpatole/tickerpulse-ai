@@ -1,6 +1,7 @@
+```typescript
 'use client';
 
-import { use, useCallback, useEffect } from 'react';
+import { use, useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { ArrowLeft, TrendingUp, TrendingDown, Minus, Loader2 } from 'lucide-react';
@@ -11,6 +12,7 @@ import SentimentBadge from '@/components/stocks/SentimentBadge';
 import { useApi } from '@/hooks/useApi';
 import { useSSE } from '@/hooks/useSSE';
 import { getStockDetail } from '@/lib/api';
+import type { PriceUpdateEvent } from '@/lib/types';
 
 interface StockDetailPageProps {
   params: Promise<{ ticker: string }>;
@@ -49,7 +51,10 @@ export default function StockDetailPage({ params }: StockDetailPageProps) {
     enabled: !isInvalidTicker,
   });
 
-  // Refetch stock detail when a snapshot or ticker-matching news SSE event arrives.
+  // Live price overlay from SSE — applied without triggering a full refetch.
+  const [livePriceData, setLivePriceData] = useState<PriceUpdateEvent | null>(null);
+
+  // Refetch stock detail on snapshot/news events; apply live price on price_update.
   const { lastEvent } = useSSE();
   useEffect(() => {
     if (isInvalidTicker || !lastEvent) return;
@@ -62,16 +67,30 @@ export default function StockDetailPage({ params }: StockDetailPageProps) {
       if (eventTicker === upperTicker) {
         refetch();
       }
+      return;
+    }
+    if (lastEvent.type === 'price_update') {
+      const eventTicker = (lastEvent.data?.ticker as string | undefined)?.toUpperCase();
+      if (eventTicker === upperTicker) {
+        setLivePriceData(lastEvent.data as unknown as PriceUpdateEvent);
+      }
     }
   }, [lastEvent, refetch, upperTicker, isInvalidTicker]);
+
+  // Clear live price overlay when the underlying data is refreshed.
+  useEffect(() => {
+    setLivePriceData(null);
+  }, [data]);
 
   if (isInvalidTicker) {
     return null;
   }
 
   const quote = data?.quote;
-  const isPositive = (quote?.change_pct ?? 0) > 0;
-  const isNegative = (quote?.change_pct ?? 0) < 0;
+  const displayPrice = livePriceData?.price ?? quote?.price;
+  const displayChangePct = livePriceData?.change_pct ?? quote?.change_pct ?? 0;
+  const isPositive = displayChangePct > 0;
+  const isNegative = displayChangePct < 0;
   const currencyPrefix = quote?.currency === 'USD' ? '$' : '';
 
   return (
@@ -81,7 +100,7 @@ export default function StockDetailPage({ params }: StockDetailPageProps) {
         subtitle={quote?.name ? upperTicker : 'Stock detail'}
       />
 
-      <div className="flex-1 p-6">
+      <div className="flex-1 p-4 md:p-6">
         <Link
           href="/"
           className="mb-6 inline-flex items-center gap-2 text-sm text-slate-400 transition-colors hover:text-white"
@@ -107,12 +126,12 @@ export default function StockDetailPage({ params }: StockDetailPageProps) {
           </div>
         )}
 
-        {quote && (
+        {quote && displayPrice != null && (
           <div className="mb-6">
             <div className="flex flex-wrap items-baseline gap-3">
-              <span className="font-mono text-4xl font-bold text-white">
+              <span className="font-mono text-3xl md:text-4xl font-bold text-white">
                 {currencyPrefix}
-                {quote.price.toFixed(2)}
+                {displayPrice.toFixed(2)}
                 {quote.currency !== 'USD' && (
                   <span className="ml-1 text-sm text-slate-400">{quote.currency}</span>
                 )}
@@ -125,7 +144,7 @@ export default function StockDetailPage({ params }: StockDetailPageProps) {
                   isNegative && 'bg-red-500/10 text-red-400',
                   !isPositive && !isNegative && 'bg-slate-500/10 text-slate-400'
                 )}
-                aria-label={`${isPositive ? '+' : ''}${quote.change_pct.toFixed(2)}% change`}
+                aria-label={`${isPositive ? '+' : ''}${displayChangePct.toFixed(2)}% change`}
               >
                 {isPositive ? (
                   <TrendingUp className="h-4 w-4" aria-hidden="true" />
@@ -136,14 +155,14 @@ export default function StockDetailPage({ params }: StockDetailPageProps) {
                 )}
                 <span className="font-mono">
                   {isPositive ? '+' : ''}
-                  {quote.change_pct.toFixed(2)}%
+                  {displayChangePct.toFixed(2)}%
                 </span>
               </div>
 
               <SentimentBadge ticker={upperTicker} />
             </div>
 
-            <dl className="mt-4 flex flex-wrap gap-6">
+            <dl className="mt-4 grid grid-cols-2 gap-4 sm:flex sm:flex-wrap sm:gap-6">
               <div>
                 <dt className="text-[10px] uppercase tracking-wider text-slate-500">Volume</dt>
                 <dd className="font-mono text-sm font-semibold text-white">
@@ -195,7 +214,9 @@ export default function StockDetailPage({ params }: StockDetailPageProps) {
         )}
 
         {/* Multi-timeframe chart — owns its own timeframe state */}
-        <StockPriceChart ticker={upperTicker} />
+        <div className="min-w-0 overflow-hidden">
+          <StockPriceChart ticker={upperTicker} />
+        </div>
 
         {/* Loading placeholder when we have no quote yet */}
         {loading && !data && (
@@ -208,3 +229,4 @@ export default function StockDetailPage({ params }: StockDetailPageProps) {
     </div>
   );
 }
+```

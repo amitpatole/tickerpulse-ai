@@ -1,7 +1,8 @@
+```typescript
 'use client';
 
 import { useEffect, useState, useRef, useCallback } from 'react';
-import type { SSEEvent, SSEEventType, AgentStatusEvent, AlertEvent, JobCompleteEvent } from '@/lib/types';
+import type { SSEEvent, SSEEventType, AgentStatusEvent, AlertEvent, JobCompleteEvent, PriceUpdateEvent } from '@/lib/types';
 import type { AlertSoundSettings } from '@/lib/types';
 import { getAlertSoundSettings } from '@/lib/api';
 
@@ -14,6 +15,7 @@ interface SSEState {
   agentStatus: Record<string, AgentStatusEvent>;
   recentAlerts: AlertEvent[];
   recentJobCompletes: JobCompleteEvent[];
+  priceUpdates: Record<string, PriceUpdateEvent>;
   eventLog: SSEEvent[];
   announcement: { assertive: string; polite: string };
 }
@@ -36,6 +38,7 @@ export function useSSE() {
     agentStatus: {},
     recentAlerts: [],
     recentJobCompletes: [],
+    priceUpdates: {},
     eventLog: [],
     announcement: { assertive: '', polite: '' },
   });
@@ -105,7 +108,10 @@ export function useSSE() {
       };
 
       // Listen for specific named events
-      const eventTypes: SSEEventType[] = ['agent_status', 'alert', 'job_complete', 'heartbeat', 'news', 'rating_update', 'snapshot'];
+      const eventTypes: SSEEventType[] = [
+        'agent_status', 'alert', 'job_complete', 'heartbeat',
+        'news', 'rating_update', 'snapshot', 'price_update',
+      ];
       eventTypes.forEach((type) => {
         es.addEventListener(type, (event: MessageEvent) => {
           if (!mountedRef.current) return;
@@ -189,6 +195,14 @@ export function useSSE() {
           next.recentJobCompletes = [jobEvent, ...prev.recentJobCompletes].slice(0, 50);
           break;
         }
+        case 'price_update': {
+          const priceEvent = event.data as unknown as PriceUpdateEvent;
+          next.priceUpdates = {
+            ...prev.priceUpdates,
+            [priceEvent.ticker]: priceEvent,
+          };
+          break;
+        }
         default:
           break;
       }
@@ -225,3 +239,4 @@ export function useSSE() {
 
   return state;
 }
+```

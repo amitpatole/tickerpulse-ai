@@ -1,8 +1,10 @@
+```typescript
 'use client';
 
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { Search, Plus, Loader2, X, ChevronUp, ChevronDown } from 'lucide-react';
 import { useApi } from '@/hooks/useApi';
+import { useSSE } from '@/hooks/useSSE';
 import { getRatings, addStock, deleteStock, searchStocks, ApiError } from '@/lib/api';
 import type { AIRating, StockSearchResult } from '@/lib/types';
 import StockCard from './StockCard';
@@ -11,6 +13,7 @@ export default function StockGrid() {
   const { data: ratings, loading, error, refetch } = useApi<AIRating[]>(getRatings, [], {
     refreshInterval: 30000,
   });
+  const { priceUpdates } = useSSE();
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<StockSearchResult[]>([]);
   const [searching, setSearching] = useState(false);
@@ -37,13 +40,24 @@ export default function StockGrid() {
     });
   }, [ratings]);
 
-  // Derive sorted ratings from custom order
+  // Derive sorted ratings from custom order, merging in any live SSE price updates
   const sortedRatings = useMemo(() => {
     if (!ratings) return [];
     return order
-      .map((ticker) => ratings.find((r) => r.ticker === ticker))
+      .map((ticker) => {
+        const rating = ratings.find((r) => r.ticker === ticker);
+        if (!rating) return null;
+        const live = priceUpdates[ticker];
+        if (!live) return rating;
+        return {
+          ...rating,
+          current_price: live.price,
+          price_change: live.change,
+          price_change_pct: live.change_pct,
+        };
+      })
       .filter((r): r is AIRating => r != null);
-  }, [ratings, order]);
+  }, [ratings, order, priceUpdates]);
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -341,3 +355,4 @@ export default function StockGrid() {
     }
   }
 }
+```

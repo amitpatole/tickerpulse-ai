@@ -1,3 +1,4 @@
+```python
 """
 Job definitions for TickerPulse AI scheduler.
 
@@ -12,6 +13,8 @@ from backend.jobs.daily_summary import run_daily_summary
 from backend.jobs.weekly_review import run_weekly_review
 from backend.jobs.regime_check import run_regime_check
 from backend.jobs.download_tracker import run_download_tracker
+from backend.jobs.price_refresh import run_price_refresh
+from backend.config import Config
 
 
 def register_all_jobs(scheduler_manager) -> None:
@@ -124,6 +127,20 @@ def register_all_jobs(scheduler_manager) -> None:
         minute=0,
     )
 
+    # ---- Price Refresh: Configurable interval (default 60s) ----
+    scheduler_manager.register_job(
+        job_id='price_refresh',
+        func=run_price_refresh,
+        trigger='interval',
+        name='Price Refresh',
+        description=(
+            'Fetches live prices for all watchlist tickers and pushes '
+            'real-time price_update SSE events to connected clients. '
+            'Interval is configurable via Settings; set to 0 for manual mode.'
+        ),
+        seconds=Config.PRICE_REFRESH_INTERVAL_SECONDS,
+    )
+
 
 __all__ = [
     'register_all_jobs',
@@ -134,4 +151,6 @@ __all__ = [
     'run_weekly_review',
     'run_regime_check',
     'run_download_tracker',
+    'run_price_refresh',
 ]
+```
