@@ -1,3 +1,4 @@
+```python
 """
 TickerPulse AI v3.0 - Database Connection Manager
 Thread-safe SQLite helper with context-manager support and table initialisation.
@@ -263,6 +264,7 @@ _NEW_TABLES_SQL = [
     CREATE TABLE IF NOT EXISTS watchlists (
         id         INTEGER PRIMARY KEY AUTOINCREMENT,
         name       TEXT NOT NULL UNIQUE,
+        sort_order INTEGER NOT NULL DEFAULT 0,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
     """,
@@ -333,6 +335,7 @@ _INDEXES_SQL = [
     "CREATE INDEX IF NOT EXISTS idx_download_daily_date    ON download_daily (date)",
     "CREATE INDEX IF NOT EXISTS idx_watchlist_stocks_wl    ON watchlist_stocks (watchlist_id)",
     "CREATE INDEX IF NOT EXISTS idx_watchlist_stocks_tk    ON watchlist_stocks (ticker)",
+    "CREATE INDEX IF NOT EXISTS idx_watchlists_sort_order  ON watchlists (sort_order)",
     "CREATE INDEX IF NOT EXISTS idx_price_alerts_enabled   ON price_alerts (enabled, ticker)",
     "CREATE INDEX IF NOT EXISTS idx_sentiment_ticker       ON sentiment_cache (ticker)",
     "CREATE INDEX IF NOT EXISTS idx_earnings_date          ON earnings_events (earnings_date)",
@@ -425,6 +428,18 @@ def _migrate_data_providers_config(cursor) -> None:
         logger.info(f"Migration applied: {sql}")
 
 
+def _migrate_watchlists(cursor) -> None:
+    """Add sort_order column to watchlists table if missing."""
+    cols = {row[1] for row in cursor.execute("PRAGMA table_info(watchlists)").fetchall()}
+    if not cols:
+        return  # table doesn't exist yet; CREATE TABLE will handle it
+    if 'sort_order' not in cols:
+        cursor.execute(
+            "ALTER TABLE watchlists ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0"
+        )
+        logger.info("Migration applied: added sort_order to watchlists table")
+
+
 def init_all_tables(db_path: str | None = None) -> None:
     """Create every table (existing + new v3.0) and apply indexes.
 
@@ -442,6 +457,7 @@ def init_all_tables(db_path: str | None = None) -> None:
         _migrate_news(cursor)
         _migrate_watchlist_stocks(cursor)
         _migrate_data_providers_config(cursor)
+        _migrate_watchlists(cursor)
 
         for sql in _NEW_TABLES_SQL:
             cursor.execute(sql)
@@ -464,3 +480,4 @@ def init_all_tables(db_path: str | None = None) -> None:
         raise
     finally:
         conn.close()
+```

@@ -29,6 +29,8 @@ import type {
   ComparisonResult,
   PriceUpdateEvent,
   PortfolioPoint,
+  Watchlist,
+  WatchlistDetail,
 } from './types';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? '';
@@ -347,10 +349,36 @@ export async function getPortfolioHistory(days = 30): Promise<PortfolioPoint[]> 
   return (data as { points: PortfolioPoint[] }).points || [];
 }
 
-// ---- Watchlist ----
+// ---- Watchlist Groups ----
+
+export async function listWatchlists(): Promise<Watchlist[]> {
+  return request<Watchlist[]>('/api/watchlist/');
+}
+
+export async function createWatchlist(name: string): Promise<Watchlist> {
+  return request<Watchlist>('/api/watchlist/', {
+    method: 'POST',
+    body: JSON.stringify({ name }),
+  });
+}
+
+export async function renameWatchlistGroup(id: number, name: string): Promise<Watchlist> {
+  return request<Watchlist>(`/api/watchlist/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify({ name }),
+  });
+}
+
+export async function deleteWatchlistGroup(id: number): Promise<void> {
+  await request<{ ok: boolean }>(`/api/watchlist/${id}`, { method: 'DELETE' });
+}
+
+export async function getWatchlistDetail(watchlistId: number): Promise<WatchlistDetail> {
+  return request<WatchlistDetail>(`/api/watchlist/${watchlistId}`);
+}
 
 export async function getWatchlistOrder(watchlistId: number = 1): Promise<string[]> {
-  const data = await request<{ tickers: string[] }>(`/api/watchlist/${watchlistId}`);
+  const data = await request<WatchlistDetail>(`/api/watchlist/${watchlistId}`);
   return data.tickers ?? [];
 }
 
@@ -359,6 +387,36 @@ export async function reorderWatchlist(watchlistId: number = 1, tickers: string[
     method: 'PUT',
     body: JSON.stringify({ tickers }),
   });
+}
+
+export async function reorderWatchlistGroups(ids: number[]): Promise<void> {
+  await request<{ ok: boolean }>('/api/watchlist/reorder', {
+    method: 'PUT',
+    body: JSON.stringify({ ids }),
+  });
+}
+
+export async function addStockToWatchlist(
+  watchlistId: number,
+  ticker: string,
+  name?: string
+): Promise<void> {
+  const body: Record<string, string> = { ticker: ticker.toUpperCase() };
+  if (name) body.name = name;
+  await request<{ ok: boolean }>(`/api/watchlist/${watchlistId}/stocks`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export async function removeStockFromWatchlist(
+  watchlistId: number,
+  ticker: string
+): Promise<void> {
+  await request<{ ok: boolean }>(
+    `/api/watchlist/${watchlistId}/stocks/${ticker.toUpperCase()}`,
+    { method: 'DELETE' }
+  );
 }
 
 // ---- Data Provider Status ----

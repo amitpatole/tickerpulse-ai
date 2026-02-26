@@ -5,15 +5,29 @@ import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { Search, Plus, Loader2, X, ChevronUp, ChevronDown } from 'lucide-react';
 import { useApi } from '@/hooks/useApi';
 import { useSSE } from '@/hooks/useSSE';
-import { getRatings, addStock, deleteStock, searchStocks, ApiError } from '@/lib/api';
-import type { AIRating, StockSearchResult } from '@/lib/types';
+import {
+  getRatings,
+  getWatchlistOrder,
+  reorderWatchlist,
+  addStockToWatchlist,
+  removeStockFromWatchlist,
+  searchStocks,
+  getBulkPrices,
+  ApiError,
+} from '@/lib/api';
+import type { AIRating, StockSearchResult, PriceUpdateEvent } from '@/lib/types';
 import StockCard from './StockCard';
 
-export default function StockGrid() {
+interface StockGridProps {
+  watchlistId?: number;
+}
+
+export default function StockGrid({ watchlistId = 1 }: StockGridProps) {
   const { data: ratings, loading, error, refetch } = useApi<AIRating[]>(getRatings, [], {
     refreshInterval: 30000,
   });
   const { priceUpdates } = useSSE();
+  const [initPrices, setInitPrices] = useState<Record<string, PriceUpdateEvent>>({});
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<StockSearchResult[]>([]);
   const [searching, setSearching] = useState(false);
@@ -29,25 +43,41 @@ export default function StockGrid() {
   const inputRef = useRef<HTMLInputElement>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
-  // Sync order when ratings change: preserve custom order, append new, drop removed
+  // Fetch current prices on mount so cards show live data before first SSE price_update
+  useEffect(() => {
+    getBulkPrices()
+      .then(setInitPrices)
+      .catch(() => {});
+  }, []);
+
+  // Load ordered ticker list for the active watchlist
+  useEffect(() => {
+    let cancelled = false;
+    getWatchlistOrder(watchlistId)
+      .then((tickers) => {
+        if (!cancelled) setOrder(tickers);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [watchlistId]);
+
+  // Prune order to only tickers that have ratings (rating job may not have run yet)
   useEffect(() => {
     if (!ratings) return;
-    setOrder((prev) => {
-      const tickers = ratings.map((r) => r.ticker);
-      const kept = prev.filter((t) => tickers.includes(t));
-      const added = tickers.filter((t) => !prev.includes(t));
-      return [...kept, ...added];
-    });
+    const ratingTickers = new Set(ratings.map((r) => r.ticker));
+    setOrder((prev) => prev.filter((t) => ratingTickers.has(t)));
   }, [ratings]);
 
-  // Derive sorted ratings from custom order, merging in any live SSE price updates
+  // Merge live SSE price updates into the sorted ratings list
   const sortedRatings = useMemo(() => {
     if (!ratings) return [];
     return order
       .map((ticker) => {
         const rating = ratings.find((r) => r.ticker === ticker);
         if (!rating) return null;
-        const live = priceUpdates[ticker];
+        const live = priceUpdates[ticker] ?? initPrices[ticker];
         if (!live) return rating;
         return {
           ...rating,
@@ -57,7 +87,7 @@ export default function StockGrid() {
         };
       })
       .filter((r): r is AIRating => r != null);
-  }, [ratings, order, priceUpdates]);
+  }, [ratings, order, priceUpdates, initPrices]);
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -111,7 +141,10 @@ export default function StockGrid() {
     setAdding(true);
     setAddError(null);
     try {
-      await addStock(result.ticker, result.name);
+      await addStockToWatchlist(watchlistId, result.ticker, result.name);
+      setOrder((prev) =>
+        prev.includes(result.ticker) ? prev : [...prev, result.ticker]
+      );
       refetch();
       setAnnounceMsg(`${result.ticker} added to watchlist`);
     } catch (err) {
@@ -146,33 +179,38 @@ export default function StockGrid() {
   };
 
   function moveUp(ticker: string) {
-    setOrder((prev) => {
-      const idx = prev.indexOf(ticker);
-      if (idx <= 0) return prev;
-      const next = [...prev];
-      [next[idx - 1], next[idx]] = [next[idx], next[idx - 1]];
-      return next;
-    });
+    const idx = order.indexOf(ticker);
+    if (idx <= 0) return;
+    const next = [...order];
+    [next[idx - 1], next[idx]] = [next[idx], next[idx - 1]];
+    setOrder(next);
+    reorderWatchlist(watchlistId, next).catch(() => {});
   }
 
   function moveDown(ticker: string) {
-    setOrder((prev) => {
-      const idx = prev.indexOf(ticker);
-      if (idx >= prev.length - 1) return prev;
-      const next = [...prev];
-      [next[idx], next[idx + 1]] = [next[idx + 1], next[idx]];
-      return next;
-    });
+    const idx = order.indexOf(ticker);
+    if (idx >= order.length - 1) return;
+    const next = [...order];
+    [next[idx], next[idx + 1]] = [next[idx + 1], next[idx]];
+    setOrder(next);
+    reorderWatchlist(watchlistId, next).catch(() => {});
+  }
+
+  async function handleRemoveStock(tickerToRemove: string) {
+    try {
+      await removeStockFromWatchlist(watchlistId, tickerToRemove);
+      setOrder((prev) => prev.filter((t) => t !== tickerToRemove));
+      refetch();
+      setAnnounceMsg(`${tickerToRemove} removed from watchlist`);
+    } catch {
+      // Silently handle for now
+    }
   }
 
   return (
     <div>
       {/* Screen reader live announcement region */}
-      <div
-        aria-live="polite"
-        aria-atomic="true"
-        className="sr-only"
-      >
+      <div aria-live="polite" aria-atomic="true" className="sr-only">
         {announceMsg}
       </div>
 
@@ -183,9 +221,13 @@ export default function StockGrid() {
             <label htmlFor="stock-search-input" className="sr-only">
               Search stocks to add to watchlist
             </label>
-            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" aria-hidden="true" />
+            <Search
+              className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500"
+              aria-hidden="true"
+            />
             <input
               id="stock-search-input"
+              ref={inputRef}
               type="text"
               role="combobox"
               value={query}
@@ -211,7 +253,12 @@ export default function StockGrid() {
             )}
             {!searching && !adding && query && (
               <button
-                onClick={() => { setQuery(''); setResults([]); setShowDropdown(false); setAddError(null); }}
+                onClick={() => {
+                  setQuery('');
+                  setResults([]);
+                  setShowDropdown(false);
+                  setAddError(null);
+                }}
                 aria-label="Clear search"
                 className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300"
               >
@@ -277,20 +324,30 @@ export default function StockGrid() {
 
       {/* Loading State */}
       {loading && !ratings && (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3" aria-busy="true" aria-label="Loading watchlist">
+        <div
+          className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3"
+          aria-busy="true"
+          aria-label="Loading watchlist"
+        >
           {Array.from({ length: 6 }).map((_, i) => (
-            <div key={i} className="h-48 animate-pulse rounded-xl border border-slate-700/50 bg-slate-800/30" />
+            <div
+              key={i}
+              className="h-48 animate-pulse rounded-xl border border-slate-700/50 bg-slate-800/30"
+            />
           ))}
         </div>
       )}
 
       {/* Error State */}
       {error && !ratings && (
-        <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-6 text-center" role="alert">
+        <div
+          className="rounded-xl border border-red-500/30 bg-red-500/10 p-6 text-center"
+          role="alert"
+        >
           <p className="text-sm text-red-400">{error}</p>
           <button
             onClick={refetch}
-            className="mt-3 rounded-lg bg-slate-700 px-4 py-2 text-sm text-white hover:bg-slate-600 transition-colors"
+            className="mt-3 rounded-lg bg-slate-700 px-4 py-2 text-sm text-white transition-colors hover:bg-slate-600"
           >
             Retry
           </button>
@@ -302,8 +359,10 @@ export default function StockGrid() {
         <>
           {sortedRatings.length === 0 ? (
             <div className="rounded-xl border border-dashed border-slate-700 bg-slate-800/20 p-12 text-center">
-              <p className="text-sm text-slate-400">No stocks monitored yet.</p>
-              <p className="mt-1 text-xs text-slate-500">Search for a stock above to get started.</p>
+              <p className="text-sm text-slate-400">No stocks in this group yet.</p>
+              <p className="mt-1 text-xs text-slate-500">
+                Search for a stock above to add it.
+              </p>
             </div>
           ) : (
             <ul
@@ -313,10 +372,7 @@ export default function StockGrid() {
             >
               {sortedRatings.map((rating, idx) => (
                 <li key={rating.ticker} className="group relative">
-                  <StockCard
-                    rating={rating}
-                    onRemove={handleRemoveStock}
-                  />
+                  <StockCard rating={rating} onRemove={handleRemoveStock} />
                   {/* Reorder controls — visible on keyboard focus-within */}
                   <div className="absolute bottom-2 left-2 z-10 flex gap-1 opacity-0 transition-opacity group-focus-within:opacity-100">
                     <button
@@ -344,15 +400,5 @@ export default function StockGrid() {
       )}
     </div>
   );
-
-  async function handleRemoveStock(tickerToRemove: string) {
-    try {
-      await deleteStock(tickerToRemove);
-      refetch();
-      setAnnounceMsg(`${tickerToRemove} removed from watchlist`);
-    } catch {
-      // Silently handle for now
-    }
-  }
 }
 ```

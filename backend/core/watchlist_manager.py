@@ -1,3 +1,4 @@
+```python
 """
 TickerPulse AI v3.0 - Watchlist Manager
 CRUD operations for named watchlist portfolio groups.
@@ -14,16 +15,16 @@ logger = logging.getLogger(__name__)
 
 
 def get_all_watchlists() -> List[Dict]:
-    """Return all watchlists with a stock_count field."""
+    """Return all watchlists ordered by sort_order with a stock_count field."""
     with db_session() as conn:
         rows = conn.execute(
             """
-            SELECT w.id, w.name, w.created_at,
+            SELECT w.id, w.name, w.sort_order, w.created_at,
                    COUNT(ws.ticker) AS stock_count
             FROM watchlists w
             LEFT JOIN watchlist_stocks ws ON ws.watchlist_id = w.id
             GROUP BY w.id
-            ORDER BY w.id
+            ORDER BY w.sort_order ASC, w.id ASC
             """
         ).fetchall()
     return [dict(r) for r in rows]
@@ -36,11 +37,16 @@ def create_watchlist(name: str) -> Dict:
         raise ValueError("Watchlist name cannot be empty")
     try:
         with db_session() as conn:
+            # Place new group at the end of the current sort order
+            max_order = conn.execute(
+                "SELECT COALESCE(MAX(sort_order) + 1, 0) FROM watchlists"
+            ).fetchone()[0]
             cursor = conn.execute(
-                "INSERT INTO watchlists (name) VALUES (?)", (name,)
+                "INSERT INTO watchlists (name, sort_order) VALUES (?, ?)",
+                (name, max_order),
             )
             wid = cursor.lastrowid
-        return {"id": wid, "name": name, "stock_count": 0}
+        return {"id": wid, "name": name, "sort_order": max_order, "stock_count": 0}
     except sqlite3.IntegrityError:
         raise ValueError(f"Watchlist '{name}' already exists")
 
@@ -49,7 +55,7 @@ def get_watchlist(watchlist_id: int) -> Optional[Dict]:
     """Return a watchlist with its list of tickers ordered by sort_order, or None if not found."""
     with db_session() as conn:
         row = conn.execute(
-            "SELECT id, name, created_at FROM watchlists WHERE id = ?",
+            "SELECT id, name, sort_order, created_at FROM watchlists WHERE id = ?",
             (watchlist_id,),
         ).fetchone()
         if row is None:
@@ -82,7 +88,7 @@ def rename_watchlist(watchlist_id: int, new_name: str) -> Optional[Dict]:
             if result.rowcount == 0:
                 return None
             row = conn.execute(
-                "SELECT id, name, created_at FROM watchlists WHERE id = ?",
+                "SELECT id, name, sort_order, created_at FROM watchlists WHERE id = ?",
                 (watchlist_id,),
             ).fetchone()
         return dict(row)
@@ -103,6 +109,23 @@ def delete_watchlist(watchlist_id: int) -> bool:
             "DELETE FROM watchlists WHERE id = ?", (watchlist_id,)
         )
     return result.rowcount > 0
+
+
+def reorder_watchlist_groups(ids: List[int]) -> bool:
+    """Persist a new sort order for watchlist groups.
+
+    Each ID in *ids* receives ``sort_order = index``.  IDs not present in
+    *ids* are left unchanged.  Returns False if no watchlists exist.
+    """
+    if not ids:
+        return False
+    with db_session() as conn:
+        for sort_order, wl_id in enumerate(ids):
+            conn.execute(
+                "UPDATE watchlists SET sort_order = ? WHERE id = ?",
+                (sort_order, wl_id),
+            )
+    return True
 
 
 def add_stock_to_watchlist(watchlist_id: int, ticker: str, name: Optional[str] = None) -> bool:
@@ -192,3 +215,4 @@ def reorder_watchlist(watchlist_id: int, tickers: List[str]) -> bool:
                 (i, watchlist_id, ticker.strip().upper()),
             )
     return True
+```

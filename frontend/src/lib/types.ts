@@ -267,6 +267,23 @@ export interface ProviderRateLimitsResponse {
   polled_at: string;
 }
 
+// Portfolio History Types
+
+export interface PortfolioPoint {
+  date: string;  // 'YYYY-MM-DD'
+  value: number; // aggregate close price sum across watchlist
+}
+
+// Sector (Rating) Breakdown Types
+
+export interface SectorSummary {
+  label: string;  // Display label, e.g. 'STRONG BUY'
+  key: string;    // Raw rating key, e.g. 'STRONG_BUY'
+  count: number;
+  pct: number;
+  color: string;
+}
+
 // Performance Comparison Types
 
 export interface ComparisonCandle {
@@ -329,6 +346,7 @@ export interface PriceUpdateEvent {
   price: number;
   change: number;
   change_pct: number;
+  volume?: number;
   timestamp: string;
 }
 
@@ -337,6 +355,24 @@ export interface AlertSoundSettings {
   sound_type: 'chime' | 'bell' | 'beep';
   volume: number;
   mute_when_active: boolean;
+}
+
+// Watchlist Group Types
+
+export interface Watchlist {
+  id: number;
+  name: string;
+  sort_order: number;
+  created_at: string;
+  stock_count: number;
+}
+
+export interface WatchlistDetail {
+  id: number;
+  name: string;
+  sort_order: number;
+  created_at: string;
+  tickers: string[];
 }
 
 // Rating color mapping
