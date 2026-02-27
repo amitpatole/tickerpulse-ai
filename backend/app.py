@@ -1,4 +1,3 @@
-
 """
 TickerPulse AI v3.0 - Flask Application Factory
 Creates and configures the Flask app, registers blueprints, sets up SSE,
@@ -427,8 +426,9 @@ def create_app() -> Flask:
     # -- Health check --------------------------------------------------------
     @app.route('/api/health')
     def health():
-        """Simple health-check endpoint for load balancers / monitoring."""
+        """Health-check endpoint with per-subsystem status for monitoring."""
         import sqlite3
+
         db_status = 'error'
         try:
             conn = sqlite3.connect(Config.DB_PATH)
@@ -438,11 +438,26 @@ def create_app() -> Flask:
         except Exception:
             pass
 
+        scheduler_status = 'error'
+        try:
+            sched = getattr(app, 'scheduler', None)
+            if sched is None:
+                # Scheduler not initialised (e.g. flask-apscheduler not installed);
+                # treat as ok since it's optional.
+                scheduler_status = 'ok'
+            elif sched.running:
+                scheduler_status = 'ok'
+        except Exception:
+            pass
+
+        overall = 'ok' if db_status == 'ok' else 'degraded'
+
         return jsonify({
-            'status': 'ok',
+            'status': overall,
             'version': '3.0.0',
             'timestamp': datetime.utcnow().isoformat() + 'Z',
-            'database': db_status,
+            'db': db_status,
+            'scheduler': scheduler_status,
         })
 
     # -- Legacy dashboard fallback -------------------------------------------
@@ -465,15 +480,20 @@ def create_app() -> Flask:
 # ---------------------------------------------------------------------------
 
 def _setup_logging(app: Flask) -> None:
-    """Configure application-wide logging with rotating file handler."""
+    """Configure application-wide logging with rotating file handler.
+
+    Also installs a ``sys.excepthook`` so that any Python exception that
+    escapes the web-framework (e.g. from a background job thread) is written
+    to the structured log file rather than silently printed to stderr.
+    """
+    import sys
+
     log_dir = Path(Config.LOG_DIR)
     log_dir.mkdir(parents=True, exist_ok=True)
 
     log_level = getattr(logging, Config.LOG_LEVEL.upper(), logging.INFO)
 
-    # Optional structured JSON output (set LOG_JSON=true in environment)
-    use_json = os.getenv('LOG_JSON', 'false').lower() == 'true'
-    if use_json:
+    if Config.LOG_FORMAT_JSON:
         try:
             from backend.middleware.request_logging import JsonFormatter
             formatter: logging.Formatter = JsonFormatter()
@@ -504,6 +524,19 @@ def _setup_logging(app: Flask) -> None:
 
     app.logger.setLevel(log_level)
 
+    # Catch exceptions that escape the web framework (background threads, etc.)
+    _original_excepthook = sys.excepthook
+
+    def _uncaught_exception_handler(exc_type, exc_value, exc_tb):
+        if not issubclass(exc_type, KeyboardInterrupt):
+            logging.getLogger(__name__).critical(
+                "Uncaught exception",
+                exc_info=(exc_type, exc_value, exc_tb),
+            )
+        _original_excepthook(exc_type, exc_value, exc_tb)
+
+    sys.excepthook = _uncaught_exception_handler
+
 
 def _register_blueprints(app: Flask) -> None:
     """Import and register API blueprints.
@@ -529,6 +562,7 @@ def _register_blueprints(app: Flask) -> None:
         'backend.api.providers':        'providers_bp',
         'backend.api.compare':          'compare_bp',
         'backend.api.watchlist':        'watchlist_bp',
+        'backend.api.errors':           'errors_bp',
     }
 
     for module_path, bp_name in blueprint_map.items():

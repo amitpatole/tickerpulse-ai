@@ -130,3 +130,27 @@ class Config:
     LOG_FORMAT = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     LOG_MAX_BYTES = int(os.getenv('LOG_MAX_BYTES', 10_485_760))  # 10 MB
     LOG_BACKUP_COUNT = int(os.getenv('LOG_BACKUP_COUNT', 5))
+    # Emit structured JSON logs instead of plaintext (set LOG_FORMAT_JSON=true).
+    # Accepts LOG_JSON as a legacy alias so existing deployments keep working.
+    LOG_FORMAT_JSON: bool = (
+        os.getenv('LOG_FORMAT_JSON', os.getenv('LOG_JSON', 'false')).lower() == 'true'
+    )
+    # Log the request body on POST/PUT requests (disabled by default — may
+    # contain sensitive data).
+    LOG_REQUEST_BODY: bool = os.getenv('LOG_REQUEST_BODY', 'false').lower() == 'true'
+
+    # -------------------------------------------------------------------------
+    # Swagger / OpenAPI
+    # -------------------------------------------------------------------------
+    SWAGGER_ENABLED: bool = os.getenv('SWAGGER_ENABLED', 'true').lower() == 'true'
+
+    # -------------------------------------------------------------------------
+    # Price refresh (real-time WebSocket updates)
+    # -------------------------------------------------------------------------
+    # Default polling interval in seconds used when no DB override is stored.
+    # 0 means manual mode (auto-refresh disabled).
+    # The value is persisted to the settings table via PUT /api/settings/refresh-interval
+    # so users can change it at runtime without restarting the server.
+    PRICE_REFRESH_INTERVAL_SECONDS: int = int(
+        os.getenv('PRICE_REFRESH_INTERVAL_SECONDS', 30)
+    )

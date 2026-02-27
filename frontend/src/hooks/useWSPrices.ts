@@ -99,7 +99,7 @@ export function useWSPrices({
     ws.onerror = () => {
       if (!mountedRef.current) return;
       setStatus('error');
-      ws.onclose = null; // Prevent duplicate reconnect in production
+      ws.onclose = null; // Prevent duplicate reconnect triggered by the close that follows an error
       ws.close();
       const delay = BACKOFF_STEPS[Math.min(retryCountRef.current, BACKOFF_STEPS.length - 1)];
       retryCountRef.current += 1;

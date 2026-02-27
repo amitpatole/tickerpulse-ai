@@ -1,4 +1,3 @@
-```tsx
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
@@ -20,7 +19,12 @@ function isKnownInterval(v: number): v is IntervalValue {
   return INTERVAL_OPTIONS.some((o) => o.value === v);
 }
 
-export default function RefreshIntervalControl() {
+interface RefreshIntervalControlProps {
+  /** Called after a successful interval save so the parent can reset polling timers. */
+  onIntervalChanged?: () => void;
+}
+
+export default function RefreshIntervalControl({ onIntervalChanged }: RefreshIntervalControlProps = {}) {
   const [interval, setIntervalValue] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -39,6 +43,7 @@ export default function RefreshIntervalControl() {
       setSaving(true);
       try {
         await setRefreshInterval(newInterval);
+        onIntervalChanged?.();
       } catch {
         setIntervalValue(previous);
         setError('Save failed');
@@ -46,7 +51,7 @@ export default function RefreshIntervalControl() {
         setSaving(false);
       }
     },
-    [interval]
+    [interval, onIntervalChanged]
   );
 
   const isStreaming = interval !== null && interval > 0;
@@ -100,4 +105,3 @@ export default function RefreshIntervalControl() {
     </div>
   );
 }
-```

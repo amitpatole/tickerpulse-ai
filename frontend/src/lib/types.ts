@@ -44,6 +44,10 @@ export interface StockDetailQuote {
   week_52_low?: number | null;
   pe_ratio?: number | null;
   eps?: number | null;
+  dividend_yield?: number | null;
+  beta?: number | null;
+  avg_volume?: number | null;
+  book_value?: number | null;
   name: string;
   currency: string;
 }
@@ -113,8 +117,15 @@ export interface CompareResponse {
 
 export interface ComparisonSeries {
   ticker: string;
-  data: Array<{ date: string; price: number; normalized?: number }>;
-  color: string;
+  candles: Array<{ time: number; value: number }>;
+  delta_pct: number;
+  error?: string | null;
+}
+
+export interface ComparisonTicker {
+  ticker: string;
+  name: string;
+  error: string | null;
 }
 
 // ---- Alerts ------------------------------------------------------------------
@@ -383,9 +394,12 @@ export interface RefreshIntervalConfig {
 // ---- Health ------------------------------------------------------------------
 
 export interface HealthCheck {
-  status: 'healthy' | 'degraded' | 'down';
+  status: 'ok' | 'healthy' | 'degraded' | 'down';
   timestamp: string;
   version?: string;
+  /** Per-subsystem statuses added in v3.0 */
+  db?: 'ok' | 'error';
+  scheduler?: 'ok' | 'error';
   services?: Record<string, string>;
 }
 
@@ -441,6 +455,16 @@ export interface PriceUpdateEvent {
   change: number;
   change_pct: number;
   timestamp?: string;
+}
+
+export interface PriceUpdate {
+  type: 'price_update';
+  ticker: string;
+  price: number;
+  change: number;
+  change_pct: number;
+  volume: number;
+  timestamp: string;
 }
 
 export interface AlertSoundSettings {

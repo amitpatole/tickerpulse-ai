@@ -33,8 +33,12 @@ import type {
   RefreshIntervalConfig,
   DashboardSummary,
 } from './types';
+import { toast } from '@/lib/toastBus';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? '';
+
+const MAX_RETRIES = 2;
+const RETRY_BASE_MS = 500;
 
 export class ApiError extends Error {
   status: number;
@@ -50,39 +54,60 @@ export class ApiError extends Error {
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const url = `${API_BASE}${path}`;
-  try {
-    const res = await fetch(url, {
-      ...options,
-      headers: {
-        'Content-Type': 'application/json',
-        ...options?.headers,
-      },
-    });
+  let lastError: ApiError | null = null;
 
-    if (!res.ok) {
-      const body = await res.text();
-      let message = `API error: ${res.status}`;
-      let code: string | undefined;
-      try {
-        const json = JSON.parse(body);
-        message = json.error || json.message || message;
-        code = json.code;
-      } catch {
-        if (body) message = body;
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      const res = await fetch(url, {
+        ...options,
+        headers: {
+          'Content-Type': 'application/json',
+          ...options?.headers,
+        },
+      });
+
+      if (!res.ok) {
+        const body = await res.text();
+        let message = `API error: ${res.status}`;
+        let code: string | undefined;
+        try {
+          const json = JSON.parse(body);
+          message = json.error || json.message || message;
+          code = json.code;
+        } catch {
+          if (body) message = body;
+        }
+        throw new ApiError(message, res.status, code);
       }
-      throw new ApiError(message, res.status, code);
+
+      const text = await res.text();
+      if (!text) return {} as T;
+      return JSON.parse(text) as T;
+    } catch (err) {
+      if (err instanceof ApiError) {
+        // 4xx: client error — do not retry, surface immediately
+        if (err.status >= 400 && err.status < 500) throw err;
+        lastError = err;
+      } else {
+        lastError = new ApiError(
+          `Failed to connect to API: ${err instanceof Error ? err.message : 'Unknown error'}`,
+          0
+        );
+      }
     }
 
-    const text = await res.text();
-    if (!text) return {} as T;
-    return JSON.parse(text) as T;
-  } catch (err) {
-    if (err instanceof ApiError) throw err;
-    throw new ApiError(
-      `Failed to connect to API: ${err instanceof Error ? err.message : 'Unknown error'}`,
-      0
-    );
+    // Exponential backoff before next attempt
+    if (attempt < MAX_RETRIES) {
+      await new Promise<void>((resolve) =>
+        setTimeout(resolve, RETRY_BASE_MS * (attempt + 1))
+      );
+    }
   }
+
+  // All retries exhausted — notify the user and re-throw
+  const finalError = lastError ?? new ApiError('Unknown API error', 0);
+  toast(finalError.message, 'error');
+  throw finalError;
 }
 
 // ---- Stocks ----

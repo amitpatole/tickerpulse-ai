@@ -5,6 +5,7 @@ Blueprint for stock management endpoints: list, add, remove, and search stocks.
 
 import math
 import logging
+from datetime import datetime, timezone
 
 from flask import Blueprint, jsonify, request
 
@@ -96,6 +97,47 @@ def remove_stock_endpoint(ticker):
     return jsonify({'success': success})
 
 
+@stocks_bp.route('/stocks/prices', methods=['GET'])
+def get_bulk_prices():
+    """Get the most-recent cached prices for all active stocks.
+
+    Reads from the ``ai_ratings`` table, which is updated by the
+    ``price_refresh`` job on its configured schedule.  For continuous
+    real-time streaming use the WebSocket endpoint at ``/api/ws/prices``.
+
+    Returns:
+        JSON object mapping ticker → {ticker, price, change, change_pct, timestamp}.
+        Tickers with no cached price are omitted.
+    """
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            '''SELECT ar.ticker, ar.current_price, ar.price_change,
+                      ar.price_change_pct, ar.updated_at
+               FROM ai_ratings ar
+               INNER JOIN stocks s ON s.ticker = ar.ticker
+               WHERE s.active = 1
+                 AND ar.current_price IS NOT NULL'''
+        )
+        rows = cursor.fetchall()
+        conn.close()
+
+        result = {}
+        for row in rows:
+            result[row['ticker']] = {
+                'ticker': row['ticker'],
+                'price': row['current_price'],
+                'change': row['price_change'] or 0.0,
+                'change_pct': row['price_change_pct'] or 0.0,
+                'timestamp': row['updated_at'],
+            }
+        return jsonify(result)
+    except Exception as e:
+        logger.error("Error fetching bulk prices: %s", e)
+        return jsonify({}), 500
+
+
 _TIMEFRAME_MAP = {
     '1D': ('1d', '5m'),
     '1W': ('5d', '15m'),
@@ -165,15 +207,32 @@ def get_stock_detail(ticker):
         currency = getattr(fast_info, 'currency', 'USD') or 'USD'
         volume = int(getattr(fast_info, 'last_volume', 0) or 0)
 
-        # Extended info for P/E, EPS, and name (best-effort)
+        # Extended info for P/E, EPS, name, and additional fields (best-effort)
         pe_ratio = None
         eps = None
         name = ticker
+        dividend_yield = None
+        beta = None
+        avg_volume = None
+        book_value = None
         try:
             info = tk.info
             pe_ratio = info.get('trailingPE')
             eps = info.get('trailingEps')
             name = info.get('shortName') or info.get('longName') or ticker
+            # dividend_yield from yfinance is a decimal (e.g. 0.0055 = 0.55%); convert to pct
+            raw_yield = info.get('dividendYield')
+            if raw_yield is not None:
+                dividend_yield = round(float(raw_yield) * 100, 4)
+            beta_raw = info.get('beta')
+            if beta_raw is not None:
+                beta = round(float(beta_raw), 4)
+            avg_vol_raw = info.get('averageVolume')
+            if avg_vol_raw is not None:
+                avg_volume = int(avg_vol_raw)
+            bv_raw = info.get('bookValue')
+            if bv_raw is not None:
+                book_value = round(float(bv_raw), 4)
         except Exception:
             pass
 
@@ -186,6 +245,10 @@ def get_stock_detail(ticker):
             'week_52_low': week_52_low,
             'pe_ratio': pe_ratio,
             'eps': eps,
+            'dividend_yield': dividend_yield,
+            'beta': beta,
+            'avg_volume': avg_volume,
+            'book_value': book_value,
             'name': name,
             'currency': currency,
         }
