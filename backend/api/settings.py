@@ -1,3 +1,4 @@
+```python
 """
 TickerPulse AI v3.0 - Settings API Routes
 Blueprint for AI provider settings, data provider settings, and agent framework configuration.
@@ -8,6 +9,7 @@ import logging
 
 from flask import Blueprint, jsonify, request
 
+from backend.api.error_codes import ErrorCode
 from backend.api.validators.provider_validators import (
     validate_add_provider_request,
     validate_test_provider_request,
@@ -754,7 +756,7 @@ def get_refresh_interval():
     except Exception as e:
         logger.error("Error reading refresh interval from DB: %s", e)
 
-    return jsonify({'interval': Config.PRICE_REFRESH_INTERVAL_SECONDS, 'source': 'default'})
+    return jsonify({'interval': Config.REFRESH_INTERVAL_DEFAULT_SEC, 'source': 'default'})
 
 
 @settings_bp.route('/settings/refresh-interval', methods=['PUT'])
@@ -779,7 +781,7 @@ def set_refresh_interval():
               type: integer
               description: >
                 Interval in seconds. Use 0 for manual mode (disables auto-refresh).
-                When non-zero, must be between 15 and 3600 seconds.
+                When non-zero, must be between 10 and 300 seconds.
     responses:
       200:
         description: Interval updated successfully.
@@ -808,12 +810,15 @@ def set_refresh_interval():
     interval = data['interval']
 
     if not isinstance(interval, int):
-        return jsonify({'success': False, 'error': 'interval must be an integer'}), 400
-
-    if interval != 0 and (interval < 15 or interval > 3600):
         return jsonify({
-            'success': False,
-            'error': 'interval must be 0 (manual mode) or between 15 and 3600 seconds',
+            'error': 'interval must be an integer',
+            'code': ErrorCode.INVALID_TYPE,
+        }), 400
+
+    if interval != 0 and (interval < 10 or interval > 300):
+        return jsonify({
+            'error': 'interval must be 0 (manual mode) or between 10 and 300 seconds',
+            'code': ErrorCode.INVALID_TYPE,
         }), 400
 
     try:
@@ -836,3 +841,4 @@ def set_refresh_interval():
         logger.warning("Could not reschedule price_refresh job: %s", e)
 
     return jsonify({'success': True, 'interval': interval})
+```

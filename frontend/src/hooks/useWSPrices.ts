@@ -41,6 +41,12 @@ export interface UseWSPricesResult {
  * when the connection drops.  Re-subscribes when the tickers list changes
  * while connected.  Cleans up on unmount.
  *
+ * Handles two server-initiated message types:
+ *   - price_update: single-ticker update, forwarded directly to onPriceUpdate.
+ *   - price_batch:  multi-ticker update; each entry is unwrapped and forwarded
+ *     individually so callers receive a uniform PriceUpdate interface regardless
+ *     of which broadcast mode the server uses.
+ *
  * Returns the current connection status for surfacing in UI indicators.
  */
 export function useWSPrices({
@@ -83,8 +89,36 @@ export function useWSPrices({
     ws.onmessage = (event: MessageEvent) => {
       try {
         const msg = JSON.parse(event.data as string) as Record<string, unknown>;
+
         if (msg.type === 'price_update') {
+          // Single-ticker update — forward as-is.
           onPriceUpdateRef.current(msg as unknown as PriceUpdate);
+        } else if (
+          msg.type === 'price_batch' &&
+          msg.data !== null &&
+          typeof msg.data === 'object'
+        ) {
+          // Multi-ticker batch from broadcast_prices().
+          // Protocol: { type: "price_batch", data: { TICKER: { price, change, change_pct, volume, ts } } }
+          // Unwrap each entry and forward as a normalised PriceUpdate so callers
+          // receive the same interface regardless of server broadcast mode.
+          const batch = msg.data as Record<string, Record<string, unknown>>;
+          const now = new Date().toISOString();
+          for (const [ticker, data] of Object.entries(batch)) {
+            const ts =
+              typeof data.ts === 'number'
+                ? new Date(data.ts * 1000).toISOString()
+                : now;
+            onPriceUpdateRef.current({
+              type: 'price_update',
+              ticker,
+              price: data.price as number,
+              change: (data.change as number) ?? 0,
+              change_pct: (data.change_pct as number) ?? 0,
+              volume: (data.volume as number) ?? 0,
+              timestamp: ts,
+            });
+          }
         }
       } catch {
         // Ignore unparseable messages

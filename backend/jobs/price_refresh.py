@@ -1,7 +1,8 @@
 ```python
 """
 TickerPulse AI v3.0 - Price Refresh Job
-Fetches live prices for all active tickers and pushes ``price_update`` SSE events.
+Fetches live prices for all active tickers and pushes ``price_update`` SSE events
+plus a single ``price_batch`` WebSocket broadcast per refresh cycle.
 The refresh interval is configurable via GET/PUT /api/settings/refresh-interval.
 When interval is 0 (manual mode) this job is a no-op.
 """
@@ -125,9 +126,14 @@ def run_price_refresh() -> None:
     This function is designed to be called by APScheduler at a configurable
     interval. When the interval is 0 (manual mode) it exits immediately.
 
-    In addition to broadcasting SSE events, each fetched price is persisted
-    back to the ``ai_ratings`` table so that a fresh page load shows the
-    most-recent live price rather than the stale value from the last AI run.
+    In addition to broadcasting SSE events, after all tickers are fetched a
+    single ``price_batch`` WebSocket message is sent to each connected client
+    containing only the tickers it has subscribed to.  This batch approach
+    replaces per-ticker WS messages and reduces connection overhead.
+
+    Each fetched price is also persisted back to the ``ai_ratings`` table so
+    that a fresh page load shows the most-recent live price rather than the
+    stale value from the last AI run.
 
     After persisting prices, enabled price alerts are evaluated against the
     freshly written values so alerts fire on every live price cycle.
@@ -143,9 +149,12 @@ def run_price_refresh() -> None:
         return
 
     timestamp = datetime.now(timezone.utc).isoformat()
+    cycle_ts = int(datetime.now(timezone.utc).timestamp())
     fetched = 0
     failed = 0
     fetched_tickers: list[str] = []
+    # Accumulates all fetched prices for a single batch WS broadcast after the loop.
+    fetched_prices_map: dict = {}
 
     # Open one DB connection for all ai_ratings persistence writes this cycle.
     # A failure to open the connection is non-fatal: SSE events still fire.
@@ -175,17 +184,16 @@ def run_price_refresh() -> None:
 
             _send_sse('price_update', event_payload)
 
-            # Broadcast to WebSocket clients subscribed to this ticker.
-            # Import is deferred to avoid circular imports at module load time
-            # (ws_manager has no upstream dependencies on this module).
-            try:
-                from backend.core.ws_manager import ws_manager
-                ws_manager.broadcast_to_subscribers(
-                    ticker,
-                    {'type': 'price_update', **event_payload},
-                )
-            except Exception as exc:
-                logger.debug("WS broadcast skipped for %s: %s", ticker, exc)
+            # Accumulate for the post-loop batch WS broadcast.
+            # The 'ts' field is an integer Unix timestamp as expected by the
+            # price_batch protocol: { TICKER: { price, change, change_pct, volume, ts } }
+            fetched_prices_map[ticker] = {
+                'price': price_data['price'],
+                'change': price_data['change'],
+                'change_pct': price_data['change_pct'],
+                'volume': price_data.get('volume', 0),
+                'ts': cycle_ts,
+            }
 
             # Persist live price to ai_ratings so page reload hydration is current.
             # Critical constraint: ONLY price fields are updated — score, confidence,
@@ -225,6 +233,16 @@ def run_price_refresh() -> None:
                 db_conn.close()
             except Exception:
                 pass
+
+    # Broadcast a single price_batch WS message per client after all tickers
+    # are fetched.  One message per client is more efficient than N per-ticker
+    # messages (the previous approach).
+    if fetched_prices_map:
+        try:
+            from backend.core.ws_manager import ws_manager
+            ws_manager.broadcast_prices(fetched_prices_map)
+        except Exception as exc:
+            logger.debug("WS broadcast_prices skipped: %s", exc)
 
     # Evaluate price alerts against freshly persisted prices.
     # Import is deferred to avoid circular imports at module load time.

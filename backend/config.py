@@ -156,9 +156,21 @@ class Config:
         os.getenv('PRICE_REFRESH_INTERVAL_SECONDS', 30)
     )
 
+    # Canonical alias referenced by the settings endpoint and scheduler when
+    # computing the effective default.  Mirrors PRICE_REFRESH_INTERVAL_SECONDS.
+    REFRESH_INTERVAL_DEFAULT_SEC: int = int(
+        os.getenv('PRICE_REFRESH_INTERVAL_SECONDS', 30)
+    )
+
     # Maximum number of tickers a single WebSocket client may subscribe to.
     # Protects against accidental (or malicious) subscription flooding.
     WS_MAX_SUBSCRIPTIONS_PER_CLIENT: int = int(
         os.getenv('WS_MAX_SUBSCRIPTIONS_PER_CLIENT', 50)
     )
+
+    # When True (default), the price_refresh job fans out a ``price_batch``
+    # WebSocket message to every subscribed client after each fetch cycle.
+    # Set WS_PRICE_BROADCAST=false to disable WS broadcasting without stopping
+    # the SSE price_update feed.
+    WS_PRICE_BROADCAST: bool = os.getenv('WS_PRICE_BROADCAST', 'true').lower() == 'true'
 ```

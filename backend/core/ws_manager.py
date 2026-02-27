@@ -1,5 +1,4 @@
 ```python
-
 """
 TickerPulse AI v3.0 - WebSocket Connection Manager
 Thread-safe registry for WebSocket connections with per-client ticker subscriptions.
@@ -184,6 +183,79 @@ class WsManager:
 
         for client_id in dead:
             self.unregister(client_id)
+
+        return sent
+
+    def broadcast_prices(self, prices: dict) -> int:
+        """Broadcast a price batch to each subscribed client as a single message.
+
+        ``prices`` maps ticker string → price-data dict (already JSON-serialisable).
+        Each client receives one ``price_batch`` message containing only the
+        tickers it has subscribed to, which reduces per-cycle message count from
+        N×C (tickers × clients) to at most C (one per client).
+
+        The lock is released before any ``send()`` calls so a stalled client
+        cannot block broadcasts to others.
+
+        Returns the number of clients successfully notified.
+        Stalled or broken connections are removed from the registry automatically.
+        """
+        if not prices:
+            return 0
+
+        from backend.config import Config  # local import avoids circular at module load
+        if not Config.WS_PRICE_BROADCAST:
+            return 0
+
+        normalised = {
+            k.strip().upper(): v
+            for k, v in prices.items()
+            if isinstance(k, str) and k.strip()
+        }
+        if not normalised:
+            return 0
+
+        # Snapshot per-client batches and ws objects under the lock, then
+        # release before calling ws.send() to avoid holding it during I/O.
+        client_sends: list[tuple[str, Any, str]] = []
+        with self._lock:
+            for client_id, subs in self._subscriptions.items():
+                batch = {t: normalised[t] for t in subs if t in normalised}
+                if not batch or client_id not in self._connections:
+                    continue
+                ws = self._connections[client_id]
+                payload = {'type': 'price_batch', 'data': batch}
+                try:
+                    serialised = json.dumps(payload)
+                except (TypeError, ValueError) as exc:
+                    logger.debug(
+                        "WS price_batch: non-serialisable payload for client %s: %s",
+                        client_id, exc,
+                    )
+                    continue
+                if len(serialised.encode()) > _MAX_PAYLOAD_BYTES:
+                    logger.debug(
+                        "WS price_batch for client %s exceeds %d bytes, skipping",
+                        client_id, _MAX_PAYLOAD_BYTES,
+                    )
+                    continue
+                client_sends.append((client_id, ws, serialised))
+
+        sent = 0
+        dead: list[str] = []
+        for client_id, ws, serialised in client_sends:
+            try:
+                ws.send(serialised)
+                sent += 1
+            except Exception as exc:
+                logger.debug("WS price_batch send failed for %s: %s", client_id, exc)
+                dead.append(client_id)
+
+        for client_id in dead:
+            self.unregister(client_id)
+
+        if sent > 0:
+            logger.debug("WS price_batch broadcast: %d clients notified", sent)
 
         return sent
 
