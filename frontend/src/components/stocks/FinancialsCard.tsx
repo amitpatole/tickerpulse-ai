@@ -1,3 +1,4 @@
+```tsx
 'use client';
 
 import { BarChart2 } from 'lucide-react';
@@ -57,19 +58,46 @@ export default function FinancialsCard({ quote }: FinancialsCardProps) {
           <StatRow label="EPS (TTM)" value={quote.eps.toFixed(2)} />
         )}
 
-        {quote.week_52_high != null && quote.week_52_low != null && (
+        {quote.week_52_high != null && quote.week_52_low != null ? (
           <StatRow
             label="52W Range"
             value={`${quote.week_52_low.toFixed(2)} – ${quote.week_52_high.toFixed(2)}`}
           />
+        ) : (
+          <>
+            {quote.week_52_high != null && (
+              <StatRow label="52W High" value={`${quote.week_52_high.toFixed(2)}`} />
+            )}
+            {quote.week_52_low != null && (
+              <StatRow label="52W Low" value={`${quote.week_52_low.toFixed(2)}`} />
+            )}
+          </>
         )}
 
-        {quote.week_52_high != null && (
-          <StatRow label="52W High" value={`${quote.week_52_high.toFixed(2)}`} />
+        {/* Extended fields */}
+        {quote.dividend_yield != null && (
+          <StatRow
+            label="Dividend Yield"
+            value={`${parseFloat(quote.dividend_yield.toFixed(2))}%`}
+          />
         )}
 
-        {quote.week_52_low != null && (
-          <StatRow label="52W Low" value={`${quote.week_52_low.toFixed(2)}`} />
+        {quote.beta != null && (
+          <StatRow label="Beta" value={quote.beta.toFixed(2)} />
+        )}
+
+        {quote.avg_volume != null && (
+          <StatRow label="Average Volume" value={formatVolume(quote.avg_volume)} />
+        )}
+
+        {quote.book_value != null && (
+          <StatRow
+            label="Book Value"
+            value={`$${quote.book_value.toLocaleString(undefined, {
+              minimumFractionDigits: 2,
+              maximumFractionDigits: 2,
+            })}`}
+          />
         )}
 
         <StatRow label="Currency" value={quote.currency} />
@@ -77,3 +105,4 @@ export default function FinancialsCard({ quote }: FinancialsCardProps) {
     </div>
   );
 }
+```

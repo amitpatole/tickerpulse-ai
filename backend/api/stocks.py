@@ -1,3 +1,4 @@
+```python
 """
 TickerPulse AI v3.0 - Stocks API Routes
 Blueprint for stock management endpoints: list, add, remove, and search stocks.
@@ -160,6 +161,7 @@ def get_stock_detail(ticker):
 
     Returns:
         JSON with quote, candles, indicators, and news. Returns 404 for invalid tickers.
+        indicators and news are best-effort: null/[] if unavailable, quote is always present.
     """
     ticker = ticker.upper().strip()
     timeframe = request.args.get('timeframe', '1M')
@@ -260,29 +262,36 @@ def get_stock_detail(ticker):
         logger.error(f"Error fetching stock detail for {ticker}: {e}")
         return jsonify({'error': 'ticker not found'}), 404
 
-    # Technical indicators via ai_analytics
-    analytics = StockAnalytics()
-    indicators = analytics.get_technical_indicators(ticker)
+    # Technical indicators via ai_analytics (best-effort — don't fail the endpoint)
+    indicators = None
+    try:
+        analytics = StockAnalytics()
+        indicators = analytics.get_technical_indicators(ticker)
+    except Exception as e:
+        logger.warning("Could not compute technical indicators for %s: %s", ticker, e)
 
-    # Recent news from database
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute(
-        '''SELECT title, source, published_date, url, sentiment_label, sentiment_score
-           FROM news WHERE ticker = ? ORDER BY created_at DESC LIMIT 10''',
-        (ticker,)
-    )
-    news_rows = cursor.fetchall()
-    conn.close()
-
-    news = [{
-        'title': row['title'],
-        'source': row['source'],
-        'published_date': row['published_date'],
-        'url': row['url'],
-        'sentiment_label': row['sentiment_label'],
-        'sentiment_score': row['sentiment_score'],
-    } for row in news_rows]
+    # Recent news from database (best-effort — don't fail the endpoint)
+    news = []
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            '''SELECT title, source, published_date, url, sentiment_label, sentiment_score
+               FROM news WHERE ticker = ? ORDER BY created_at DESC LIMIT 10''',
+            (ticker,)
+        )
+        news_rows = cursor.fetchall()
+        conn.close()
+        news = [{
+            'title': row['title'],
+            'source': row['source'],
+            'published_date': row['published_date'],
+            'url': row['url'],
+            'sentiment_label': row['sentiment_label'],
+            'sentiment_score': row['sentiment_score'],
+        } for row in news_rows]
+    except Exception as e:
+        logger.warning("Could not fetch news for %s: %s", ticker, e)
 
     return jsonify({
         'quote': quote,
@@ -309,3 +318,4 @@ def search_stocks():
 
     results = search_stock_ticker(query)
     return jsonify(results)
+```
