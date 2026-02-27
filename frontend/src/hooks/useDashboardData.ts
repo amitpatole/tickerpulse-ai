@@ -18,6 +18,8 @@ export interface DashboardData {
   wsStatus?: WSStatus;
   wsConnected?: boolean;
   lastPriceAt?: string | null;
+  /** Live price map keyed by ticker, updated on every WebSocket tick. */
+  wsPrices: Record<string, PriceUpdate>;
 }
 
 /**
@@ -49,6 +51,7 @@ export function useDashboardData(activeWatchlistId?: number): DashboardData {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [lastPriceAt, setLastPriceAt] = useState<string | null>(null);
+  const [wsPrices, setWsPrices] = useState<Record<string, PriceUpdate>>({});
   // Separate ticker list for WebSocket subscription; only updated on full ratings sync
   // so live price merges never trigger re-subscriptions.
   const [wsTickers, setWsTickers] = useState<string[]>([]);
@@ -109,6 +112,7 @@ export function useDashboardData(activeWatchlistId?: number): DashboardData {
   const handlePriceUpdate = useCallback((update: PriceUpdate) => {
     if (!mountedRef.current) return;
     setLastPriceAt(update.timestamp);
+    setWsPrices((prev) => ({ ...prev, [update.ticker]: update }));
     setRatings((prev) => {
       if (!prev) return prev;
       const idx = prev.findIndex((r) => r.ticker === update.ticker);
@@ -226,6 +230,7 @@ export function useDashboardData(activeWatchlistId?: number): DashboardData {
     wsStatus,
     wsConnected,
     lastPriceAt,
+    wsPrices,
   };
 }
 ```

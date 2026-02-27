@@ -24,7 +24,7 @@ import { useDashboardData } from '@/hooks/useDashboardData';
 export default function DashboardPage() {
   const [activeWatchlistId, setActiveWatchlistId] = useState<number>(1);
   const router = useRouter();
-  const { ratings, alerts, summary, wsStatus, refetch, lastPriceAt } = useDashboardData(activeWatchlistId);
+  const { ratings, alerts, summary, wsStatus, refetch, lastPriceAt, wsPrices } = useDashboardData(activeWatchlistId);
 
   return (
     <div className="flex flex-col">
@@ -86,7 +86,7 @@ export default function DashboardPage() {
 
         {/* AI Ratings Panel */}
         <div className="mt-6">
-          <AIRatingsPanel ratings={ratings} />
+          <AIRatingsPanel ratings={ratings} wsPrices={wsPrices} />
         </div>
 
         {/* Alerts Table — initialData eliminates cold-start loading flash */}

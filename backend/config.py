@@ -1,5 +1,4 @@
 ```python
-
 """
 TickerPulse AI v3.0 - Central Configuration
 All settings are driven by environment variables with sensible defaults.
