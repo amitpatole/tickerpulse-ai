@@ -1,33 +1,27 @@
 ## Summary
 
-<!-- Describe what this PR does and what problem it solves. -->
+<!-- Describe what this PR does and why. -->
 
-## Changes
+## Type of Change
 
--
-
-## Type of change
-
-- [ ] Bug fix
-- [ ] New feature
-- [ ] Refactor / cleanup
-- [ ] Tests
-- [ ] CI/CD / Infrastructure
+- [ ] Bug fix (non-breaking change that fixes an issue)
+- [ ] New feature (non-breaking change that adds functionality)
+- [ ] Breaking change (fix or feature that would cause existing functionality to change)
+- [ ] Refactor / tech debt
+- [ ] CI/CD / infrastructure
 - [ ] Documentation
 
-## Testing
+## Test Plan
 
-<!-- How was this tested? List the relevant test files or commands used. -->
+- [ ] Backend tests pass (`pytest backend/ --cov=backend --cov-fail-under=80`)
+- [ ] Frontend tests pass (`npm run test:ci` in `frontend/`)
+- [ ] Electron type check passes (`npx tsc --noEmit` in `electron/`)
+- [ ] Manually tested locally (describe below)
 
-- [ ] Backend tests pass locally (`python -m pytest backend/ -v --tb=short`)
-- [ ] Frontend tests pass locally (`npm run test:ci`)
-- [ ] Frontend build succeeds (`npm run build`)
-- [ ] Manually verified in browser / Electron
+## Checklist
 
-## Screenshots / Logs
-
-<!-- Add screenshots, log snippets, or API responses if relevant. -->
-
-## Related Issues
-
-<!-- Closes #XX -->
+- [ ] My changes follow the existing code style and conventions
+- [ ] I have added tests that cover my changes
+- [ ] All existing tests pass
+- [ ] I have updated relevant documentation
+- [ ] No secrets or credentials are included in this PR

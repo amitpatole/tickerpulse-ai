@@ -1,4 +1,3 @@
-```dockerfile
 # ── Stage 1: Build — install Python dependencies ───────────────────────────
 FROM python:3.12-slim AS builder
 
@@ -50,4 +49,3 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
 CMD ["python", "-m", "flask", "run", \
      "--host=0.0.0.0", "--port=5000", \
      "--without-debugger", "--no-reload"]
-```
