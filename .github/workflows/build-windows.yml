@@ -1,9 +1,20 @@
+```yaml
 name: Build Windows Installer
 
+# Triggered by two paths:
+#   1. workflow_run on "CI" — fires after CI completes on a version tag (v*).
+#      The job condition ensures we only build when CI passed and the head ref
+#      is a semver tag (starts with 'v' and contains '.'), so routine branch
+#      merges to main do not spin up expensive Windows runners.
+#   2. workflow_dispatch — manual builds for testing the installer pipeline.
+#
+# The previous `push: tags: v*` trigger is replaced by workflow_run so that
+# the Windows installer build is always gated on green CI (including the
+# electron-type-check and compile verification jobs).
 on:
-  push:
-    tags:
-      - 'v*'
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
   workflow_dispatch:
     inputs:
       version:
@@ -18,10 +29,22 @@ jobs:
   build:
     runs-on: windows-latest
     timeout-minutes: 45
+    # For workflow_run: only build when CI passed on a version tag (e.g. v3.0.0).
+    # The head_branch for a tag-triggered CI run is the tag name itself.
+    # The startsWith + contains guard prevents feature branches like 'v2-redesign'
+    # from accidentally triggering installer builds.
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       startsWith(github.event.workflow_run.head_branch, 'v') &&
+       contains(github.event.workflow_run.head_branch, '.'))
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          # For workflow_run, check out the exact commit that CI validated.
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
@@ -123,17 +146,27 @@ jobs:
           # match the release tag, regardless of what package.json says.  Using
           # --config.extraMetadata.version overrides the version for this build only.
           $TagVersion = ""
-          if ("${{ github.ref }}".StartsWith("refs/tags/v")) {
-            $TagVersion = "${{ github.ref_name }}" -replace "^v", ""
-            Write-Host "Building version from tag: $TagVersion" -ForegroundColor Cyan
-            # Patch package.json in-place so electron-updater embeds the correct version
+          $HeadBranch = "${{ github.event.workflow_run.head_branch }}"
+          $RefName = "${{ github.ref_name }}"
+
+          # Resolve version from whichever trigger fired
+          if ($HeadBranch -match '^v\d') {
+            $TagVersion = $HeadBranch -replace "^v", ""
+            Write-Host "Building version from workflow_run tag: $TagVersion" -ForegroundColor Cyan
+          } elseif ($RefName -match '^v\d') {
+            $TagVersion = $RefName -replace "^v", ""
+            Write-Host "Building version from ref_name: $TagVersion" -ForegroundColor Cyan
+          }
+
+          if ($TagVersion) {
             $PkgPath = "package.json"
             $Pkg = Get-Content $PkgPath | ConvertFrom-Json
             $Pkg.version = $TagVersion
             $Pkg | ConvertTo-Json -Depth 10 | Set-Content $PkgPath
           }
 
-          if ("${{ github.ref }}".StartsWith("refs/tags/")) {
+          $IsTagBuild = ($HeadBranch -match '^v\d') -or ($RefName -match '^v\d')
+          if ($IsTagBuild) {
             Write-Host "Tag build detected — publishing to GitHub Releases" -ForegroundColor Green
             npx electron-builder --win --config electron-builder.yml --publish always
           } else {
@@ -162,3 +195,4 @@ jobs:
           name: TickerPulse-AI-Windows-Installer
           path: ${{ steps.find-exe.outputs.EXE_PATH }}
           retention-days: 30
+```

@@ -1,8 +1,11 @@
+```yaml
 name: CI
 
 on:
   push:
     branches: [main]
+    tags:
+      - 'v*'
   pull_request:
     branches: [main]
 
@@ -56,6 +59,15 @@ jobs:
           path: coverage-backend.xml
           retention-days: 7
 
+      - name: Upload backend coverage to Codecov
+        uses: codecov/codecov-action@v4
+        if: always()
+        with:
+          files: coverage-backend.xml
+          flags: backend
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: false
+
   frontend-test:
     name: Frontend Tests (Node 24)
     runs-on: ubuntu-latest
@@ -96,6 +108,15 @@ jobs:
           path: frontend/coverage/
           retention-days: 7
 
+      - name: Upload frontend coverage to Codecov
+        uses: codecov/codecov-action@v4
+        if: always()
+        with:
+          directory: frontend/coverage
+          flags: frontend
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: false
+
       - name: Build check
         working-directory: frontend
         run: npm run build
@@ -124,3 +145,14 @@ jobs:
       - name: Type check
         working-directory: electron
         run: npx tsc --noEmit
+
+      - name: Compile TypeScript (verify emitted output)
+        # Runs a full emit compile (same as build-windows.yml does) to verify
+        # the TypeScript produces valid JavaScript artifacts in CI, not just
+        # passes type checking with --noEmit.
+        working-directory: electron
+        run: |
+          npx tsc
+          echo "Electron compile succeeded — emitted files:"
+          find . -name '*.js' -not -path '*/node_modules/*' | head -10
+```
