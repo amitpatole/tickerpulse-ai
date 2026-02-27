@@ -1,4 +1,4 @@
-```python
+
 """
 TickerPulse AI v3.0 - Watchlist Manager
 CRUD operations for named watchlist portfolio groups.
@@ -215,4 +215,3 @@ def reorder_watchlist(watchlist_id: int, tickers: List[str]) -> bool:
                 (i, watchlist_id, ticker.strip().upper()),
             )
     return True
-```

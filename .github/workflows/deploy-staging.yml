@@ -1,0 +1,26 @@
+```yaml
+name: Deploy Staging
+
+on:
+  workflow_run:
+    workflows: ["Deploy"]
+    types: [completed]
+    branches: [main]
+
+jobs:
+  deploy-staging:
+    name: Deploy to Staging
+    # ... deploy steps ...
+    outputs:
+      image-tag: ${{ steps.tag.outputs.value }}
+
+  staging-smoke:
+    name: Staging Smoke Tests
+    needs: deploy-staging
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Validate STAGING_BASE_URL
+      - name: Smoke test staging endpoints
+        # curls /api/health, /watchlist, /stocks, /earnings, /portfolio, /api/chat/health
+```

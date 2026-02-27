@@ -1,0 +1,35 @@
+```yaml
+version: 2
+updates:
+  - package-ecosystem: pip
+    directory: /backend
+    schedule:
+      interval: weekly
+    labels:
+      - dependencies
+      - python
+
+  - package-ecosystem: npm
+    directory: /frontend
+    schedule:
+      interval: weekly
+    labels:
+      - dependencies
+      - javascript
+
+  - package-ecosystem: npm
+    directory: /electron
+    schedule:
+      interval: weekly
+    labels:
+      - dependencies
+      - javascript
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    labels:
+      - dependencies
+      - github-actions
+```

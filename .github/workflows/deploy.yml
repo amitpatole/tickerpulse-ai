@@ -1,0 +1,13 @@
+```yaml
+# ... existing jobs ...
+  create-release:
+    name: Create GitHub Release
+    needs: deploy-production
+    permissions:
+      contents: write
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create GitHub Release
+        run: gh release create "${{ github.ref_name }}" --title "TickerPulse AI ${{ github.ref_name }}" --generate-notes --verify-tag
+```
