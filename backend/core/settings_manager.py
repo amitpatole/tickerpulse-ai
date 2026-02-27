@@ -119,6 +119,7 @@ def get_active_ai_provider() -> Optional[Dict]:
     providers even though one is about to be activated.
     """
     with _lock:
+        conn: Optional[sqlite3.Connection] = None
         try:
             conn = sqlite3.connect(Config.DB_PATH)
             conn.row_factory = sqlite3.Row
@@ -132,19 +133,20 @@ def get_active_ai_provider() -> Optional[Dict]:
             ''')
 
             result = cursor.fetchone()
-            conn.close()
-
             if result:
                 return {
                     'id': result['id'],
                     'provider_name': result['provider_name'],
                     'api_key': result['api_key'],
-                    'model': result['model']
+                    'model': result['model'],
                 }
             return None
         except Exception as e:
-            logger.error(f"Error getting active AI provider: {e}")
+            logger.error("Error getting active AI provider: %s", e)
             return None
+        finally:
+            if conn is not None:
+                conn.close()
 
 
 def get_all_ai_providers() -> list:
@@ -155,6 +157,7 @@ def get_all_ai_providers() -> list:
     transitional state where ``is_active`` counts are inconsistent.
     """
     with _lock:
+        conn: Optional[sqlite3.Connection] = None
         try:
             conn = sqlite3.connect(Config.DB_PATH)
             conn.row_factory = sqlite3.Row
@@ -167,24 +170,26 @@ def get_all_ai_providers() -> list:
             ''')
 
             results = cursor.fetchall()
-            conn.close()
-
             return [{
                 'id': row['id'],
                 'provider_name': row['provider_name'],
                 'model': row['model'],
                 'is_active': row['is_active'],
                 'created_at': row['created_at'],
-                'updated_at': row['updated_at']
+                'updated_at': row['updated_at'],
             } for row in results]
         except Exception as e:
-            logger.error(f"Error getting AI providers: {e}")
+            logger.error("Error getting AI providers: %s", e)
             return []
+        finally:
+            if conn is not None:
+                conn.close()
 
 
 def add_ai_provider(provider_name: str, api_key: str, model: Optional[str] = None, set_active: bool = True) -> bool:
     """Add or update an AI provider"""
     with _lock:
+        conn: Optional[sqlite3.Connection] = None
         try:
             conn = sqlite3.connect(Config.DB_PATH)
             cursor = conn.cursor()
@@ -194,39 +199,40 @@ def add_ai_provider(provider_name: str, api_key: str, model: Optional[str] = Non
                 cursor.execute('UPDATE ai_providers SET is_active = 0')
 
             # Check if provider already exists
-            cursor.execute('''
-                SELECT id FROM ai_providers
-                WHERE provider_name = ?
-            ''', (provider_name,))
-
+            cursor.execute(
+                'SELECT id FROM ai_providers WHERE provider_name = ?',
+                (provider_name,),
+            )
             existing = cursor.fetchone()
 
             if existing:
-                # Update existing
-                cursor.execute('''
-                    UPDATE ai_providers
-                    SET api_key = ?, model = ?, is_active = ?, updated_at = datetime('now')
-                    WHERE provider_name = ?
-                ''', (api_key, model, 1 if set_active else 0, provider_name))
+                cursor.execute(
+                    '''UPDATE ai_providers
+                       SET api_key = ?, model = ?, is_active = ?, updated_at = datetime('now')
+                       WHERE provider_name = ?''',
+                    (api_key, model, 1 if set_active else 0, provider_name),
+                )
             else:
-                # Insert new
-                cursor.execute('''
-                    INSERT INTO ai_providers (provider_name, api_key, model, is_active)
-                    VALUES (?, ?, ?, ?)
-                ''', (provider_name, api_key, model, 1 if set_active else 0))
+                cursor.execute(
+                    'INSERT INTO ai_providers (provider_name, api_key, model, is_active) VALUES (?, ?, ?, ?)',
+                    (provider_name, api_key, model, 1 if set_active else 0),
+                )
 
             conn.commit()
-            conn.close()
-            logger.info(f"AI provider {provider_name} added/updated")
+            logger.info("AI provider %s added/updated", provider_name)
             return True
         except Exception as e:
-            logger.error(f"Error adding AI provider: {e}")
+            logger.error("Error adding AI provider: %s", e)
             return False
+        finally:
+            if conn is not None:
+                conn.close()
 
 
 def set_active_provider(provider_id: int) -> bool:
     """Set a provider as active"""
     with _lock:
+        conn: Optional[sqlite3.Connection] = None
         try:
             conn = sqlite3.connect(Config.DB_PATH)
             cursor = conn.cursor()
@@ -234,32 +240,31 @@ def set_active_provider(provider_id: int) -> bool:
             # Verify the target provider exists before modifying any state
             cursor.execute('SELECT id FROM ai_providers WHERE id = ?', (provider_id,))
             if cursor.fetchone() is None:
-                conn.close()
-                logger.warning(f"Provider {provider_id} not found — no state changed")
+                logger.warning("Provider %d not found — no state changed", provider_id)
                 return False
 
-            # Deactivate all
+            # Deactivate all, then activate the selected one
             cursor.execute('UPDATE ai_providers SET is_active = 0')
-
-            # Activate selected
-            cursor.execute('''
-                UPDATE ai_providers
-                SET is_active = 1, updated_at = datetime('now')
-                WHERE id = ?
-            ''', (provider_id,))
+            cursor.execute(
+                "UPDATE ai_providers SET is_active = 1, updated_at = datetime('now') WHERE id = ?",
+                (provider_id,),
+            )
 
             conn.commit()
-            conn.close()
-            logger.info(f"Provider {provider_id} set as active")
+            logger.info("Provider %d set as active", provider_id)
             return True
         except Exception as e:
-            logger.error(f"Error setting active provider: {e}")
+            logger.error("Error setting active provider: %s", e)
             return False
+        finally:
+            if conn is not None:
+                conn.close()
 
 
 def delete_ai_provider(provider_id: int) -> bool:
     """Delete an AI provider"""
     with _lock:
+        conn: Optional[sqlite3.Connection] = None
         try:
             conn = sqlite3.connect(Config.DB_PATH)
             cursor = conn.cursor()
@@ -267,12 +272,14 @@ def delete_ai_provider(provider_id: int) -> bool:
             cursor.execute('DELETE FROM ai_providers WHERE id = ?', (provider_id,))
 
             conn.commit()
-            conn.close()
-            logger.info(f"Provider {provider_id} deleted")
+            logger.info("Provider %d deleted", provider_id)
             return True
         except Exception as e:
-            logger.error(f"Error deleting provider: {e}")
+            logger.error("Error deleting provider: %s", e)
             return False
+        finally:
+            if conn is not None:
+                conn.close()
 
 
 def get_all_configured_providers() -> list[dict[str, Any]]:
