@@ -1,26 +1,96 @@
 ```yaml
 name: Deploy Staging
 
+# Fires automatically after CI passes on main. Using workflow_run (not push)
+# ensures staging never receives a commit that failed its test suite.
 on:
   workflow_run:
-    workflows: ["Deploy"]
+    workflows: ["CI"]
     types: [completed]
     branches: [main]
 
 jobs:
   deploy-staging:
     name: Deploy to Staging
-    # ... deploy steps ...
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Skip if CI failed or was cancelled — only deploy green builds.
+    if: github.event.workflow_run.conclusion == 'success'
+    environment:
+      name: staging
+      url: ${{ vars.STAGING_BASE_URL }}
     outputs:
       image-tag: ${{ steps.tag.outputs.value }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Check out the exact commit that CI validated, not HEAD.
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Resolve image tag
+        id: tag
+        run: |
+          echo "value=${{ github.event.workflow_run.head_sha }}" >> "$GITHUB_OUTPUT"
+          echo "Deploying commit: ${{ github.event.workflow_run.head_sha }}"
+
+      - name: Deploy to staging environment
+        # Replace this step with your platform-specific deploy command.
+        # Credentials belong in repository/environment secrets — never inline.
+        # Examples:
+        #   AWS ECS:  aws ecs update-service --cluster staging ...
+        #   Fly.io:   flyctl deploy --remote-only --image ...
+        #   Heroku:   heroku container:release web -a tickerpulse-staging
+        run: |
+          echo "Deploying ${{ steps.tag.outputs.value }} to staging"
+        env:
+          DEPLOY_TOKEN: ${{ secrets.STAGING_DEPLOY_TOKEN }}
 
   staging-smoke:
     name: Staging Smoke Tests
     needs: deploy-staging
     runs-on: ubuntu-latest
     timeout-minutes: 5
+
     steps:
       - name: Validate STAGING_BASE_URL
+        run: |
+          if [ -z "$STAGING_BASE_URL" ]; then
+            echo "ERROR: STAGING_BASE_URL repository variable is not configured" >&2
+            exit 1
+          fi
+          echo "Smoke testing: $STAGING_BASE_URL"
+        env:
+          STAGING_BASE_URL: ${{ vars.STAGING_BASE_URL }}
+
       - name: Smoke test staging endpoints
-        # curls /api/health, /watchlist, /stocks, /earnings, /portfolio, /api/chat/health
+        run: |
+          BASE="$STAGING_BASE_URL"
+          endpoints=(
+            "/api/health"
+            "/api/watchlist"
+            "/api/stocks"
+            "/api/earnings"
+            "/api/portfolio"
+            "/api/chat/health"
+          )
+          failed=0
+          for endpoint in "${endpoints[@]}"; do
+            url="${BASE}${endpoint}"
+            status=$(curl -s -o /dev/null -w "%{http_code}" \
+              --max-time 10 --retry 3 --retry-delay 5 "$url")
+            if [ "$status" -ge 200 ] && [ "$status" -lt 400 ]; then
+              echo "PASS  ${endpoint}  (HTTP ${status})"
+            else
+              echo "FAIL  ${endpoint}  (HTTP ${status})" >&2
+              failed=$((failed + 1))
+            fi
+          done
+          if [ "$failed" -gt 0 ]; then
+            echo "ERROR: $failed of ${#endpoints[@]} smoke test(s) failed" >&2
+            exit 1
+          fi
+          echo "All ${#endpoints[@]} smoke tests passed"
+        env:
+          STAGING_BASE_URL: ${{ vars.STAGING_BASE_URL }}
 ```

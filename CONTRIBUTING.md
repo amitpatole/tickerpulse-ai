@@ -1,3 +1,4 @@
+```markdown
 # Contributing to TickerPulse AI
 
 Thanks for your interest in contributing to TickerPulse AI! This guide covers everything you need to get started locally and submit a pull request.
@@ -72,16 +73,14 @@ cd frontend
 npm run test:ci   # Jest with --ci --coverage
 ```
 
-Coverage threshold: **70%** (enforced in CI).
+Coverage threshold: **80%** (enforced in CI).
 
 ### Electron
 
 ```bash
 cd electron
-npm run test:ci
+npx tsc --noEmit   # type-check only; unit tests via npm run test:ci when configured
 ```
-
-Coverage threshold: **60%** (enforced in CI).
 
 ---
 
@@ -149,19 +148,18 @@ WIP: still working on this       # WIP PRs should be opened as drafts
 
 - Branch from `main` using the naming convention above.
 - Keep PRs focused — one feature or fix per PR.
-- All 5 CI checks must pass before merge.
+- All 4 CI checks must pass before merge.
 
 ### 2. Required CI Checks
 
 | Check | Command | Threshold |
 |---|---|---|
-| `Backend Tests (Python 3.12)` | `pytest` | 80% coverage |
-| `Frontend Tests (Node 24)` | `npm run test:ci` | 70% coverage |
-| `Electron Type Check (Node 24)` | `npx tsc --noEmit` | zero errors |
-| `Electron Unit Tests (Node 24)` | `npm run test:ci` | 60% coverage |
-| `Windows Build Check (PR)` | `npx tsc --noEmit` | zero errors |
+| `backend-test` — Backend Tests (Python 3.12) | `pytest` | 80% coverage |
+| `frontend-test` — Frontend Tests (Node 24) | `npm run test:ci` | 80% coverage |
+| `build-windows-pr` — Windows Build Check (PR) | `npx tsc --noEmit` | zero errors |
+| `staging-smoke` — Staging Smoke Tests | automated post-deploy | all 6 endpoints 2xx |
 
-All 5 are required status checks — the PR cannot be merged until all pass.
+All 4 are required status checks — the PR cannot be merged until all pass.
 
 ### 3. Code Review
 
@@ -253,3 +251,4 @@ All contributions must include attribution to the original project and maintain 
 ## Questions?
 
 Open an issue on [GitHub](https://github.com/amitpatole/tickerpulse-ai/issues) for questions, bug reports, or feature requests.
+```

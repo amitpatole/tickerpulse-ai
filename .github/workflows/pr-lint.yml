@@ -1,3 +1,4 @@
+```yaml
 name: PR Lint
 
 on:
@@ -48,3 +49,4 @@ jobs:
           wip: false
           # Single-commit PRs are validated against the PR title, not the commit.
           validateSingleCommit: false
+```

@@ -37,10 +37,10 @@ jobs:
           pip install -r backend/requirements-test.txt
 
       - name: Run tests
-        # pytest.ini supplies: testpaths, --cov=backend, --cov-fail-under=80,
-        # --ignore=backend/agents, --ignore=backend/data_providers.
-        # --cov-fail-under=80 enforces the 80% coverage gate on every run.
-        # Only CI-specific output flags are passed here.
+        # pytest.ini supplies: testpaths, --cov=backend, --ignore=backend/agents,
+        # --ignore=backend/data_providers. CI-specific output flags are passed here.
+        # --cov-fail-under=80 enforces the 80% coverage gate and fails the job if
+        # coverage drops below the threshold.
         run: |
           python -m pytest -q --tb=short \
             --cov-fail-under=80 \
@@ -51,25 +51,93 @@ jobs:
           DB_PATH: /tmp/tickerpulse-ci.db
           FLASK_DEBUG: 'false'
           SECRET_KEY: ci-test-key-not-for-production
-      # ... (upload artifact and codecov steps unchanged)
+
+      - name: Upload backend coverage artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-coverage
+          path: coverage-backend.xml
+          retention-days: 7
+
+      - name: Upload to Codecov
+        if: always()
+        uses: codecov/codecov-action@v4
+        with:
+          files: coverage-backend.xml
+          flags: backend
+          fail_ci_if_error: false
+
+  frontend-test:
+    name: Frontend Tests (Node 24)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Run tests with coverage
+        # --coverageThreshold enforces the 80% gate across lines/branches/
+        # functions/statements, equivalent to pytest's --cov-fail-under=80.
+        working-directory: frontend
+        run: |
+          npm test -- --coverage --ci \
+            --coverageReporters=lcov \
+            --coverageReporters=text \
+            '--coverageThreshold={"global":{"lines":80,"branches":80,"functions":80,"statements":80}}'
+        env:
+          CI: 'true'
+
+      - name: Upload frontend coverage artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-coverage
+          path: frontend/coverage/lcov.info
+          retention-days: 7
+
+      - name: Upload to Codecov
+        if: always()
+        uses: codecov/codecov-action@v4
+        with:
+          files: frontend/coverage/lcov.info
+          flags: frontend
+          fail_ci_if_error: false
 
   build-windows-pr:
     name: Windows Build Check (PR)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     # Blocking check: ensures Electron TypeScript compiles clean before merge.
+    # Branch protection must list this job as a required status check so that
+    # a tsc failure prevents the PR from being merged.
     if: github.event_name == 'pull_request'
+
     steps:
       - uses: actions/checkout@v4
+
       - name: Set up Node.js 24
         uses: actions/setup-node@v4
         with:
           node-version: '24'
           cache: npm
           cache-dependency-path: electron/package-lock.json
+
       - name: Install Electron dependencies
         working-directory: electron
         run: npm install
+
       - name: Compile Electron TypeScript (Windows build prerequisite)
         working-directory: electron
         run: npx tsc --noEmit
