@@ -18,6 +18,12 @@ _AI_RATINGS_TTL_SECONDS = 1800  # 30 minutes
 # Default cooldown period between repeated firings of the same alert.
 _DEFAULT_COOLDOWN_MINUTES = 15
 
+# Allowlists used for defense-in-depth validation in core functions.
+# The API layer also validates these, but core functions must not trust callers.
+_VALID_CONDITION_TYPES = frozenset({'price_above', 'price_below', 'pct_change'})
+_VALID_SOUND_TYPES = frozenset({'default', 'chime', 'alarm', 'silent'})
+_THRESHOLD_MAX = 1_000_000
+
 
 # ---------------------------------------------------------------------------
 # Internal helpers
@@ -74,7 +80,28 @@ def create_alert(ticker: str, condition_type: str, threshold: float, sound_type:
     -------
     dict
         The newly created alert row.
+
+    Raises
+    ------
+    ValueError
+        If any argument fails validation.
     """
+    if condition_type not in _VALID_CONDITION_TYPES:
+        raise ValueError(
+            f"Invalid condition_type {condition_type!r}. "
+            f"Must be one of: {', '.join(sorted(_VALID_CONDITION_TYPES))}"
+        )
+    if sound_type not in _VALID_SOUND_TYPES:
+        raise ValueError(
+            f"Invalid sound_type {sound_type!r}. "
+            f"Must be one of: {', '.join(sorted(_VALID_SOUND_TYPES))}"
+        )
+    threshold = float(threshold)
+    if not (0 < threshold <= _THRESHOLD_MAX):
+        raise ValueError(f"threshold must be > 0 and <= {_THRESHOLD_MAX}")
+    if condition_type == 'pct_change' and threshold > 100:
+        raise ValueError("threshold for pct_change must be <= 100")
+
     with db_session() as conn:
         cursor = conn.execute(
             '''INSERT INTO price_alerts (ticker, condition_type, threshold, sound_type)
@@ -104,7 +131,27 @@ def update_alert(
     -------
     dict or None
         Updated alert row, or None if the ID was not found.
+
+    Raises
+    ------
+    ValueError
+        If any supplied argument fails validation.
     """
+    if condition_type is not None and condition_type not in _VALID_CONDITION_TYPES:
+        raise ValueError(
+            f"Invalid condition_type {condition_type!r}. "
+            f"Must be one of: {', '.join(sorted(_VALID_CONDITION_TYPES))}"
+        )
+    if sound_type is not None and sound_type not in _VALID_SOUND_TYPES:
+        raise ValueError(
+            f"Invalid sound_type {sound_type!r}. "
+            f"Must be one of: {', '.join(sorted(_VALID_SOUND_TYPES))}"
+        )
+    if threshold is not None:
+        threshold = float(threshold)
+        if not (0 < threshold <= _THRESHOLD_MAX):
+            raise ValueError(f"threshold must be > 0 and <= {_THRESHOLD_MAX}")
+
     with db_session() as conn:
         row = conn.execute(
             'SELECT * FROM price_alerts WHERE id = ?', (alert_id,)
@@ -148,7 +195,18 @@ def update_alert_sound_type(alert_id: int, sound_type: str) -> Optional[dict]:
     -------
     dict or None
         Updated alert row, or None if the ID was not found.
+
+    Raises
+    ------
+    ValueError
+        If ``sound_type`` is not a recognised value.
     """
+    if sound_type not in _VALID_SOUND_TYPES:
+        raise ValueError(
+            f"Invalid sound_type {sound_type!r}. "
+            f"Must be one of: {', '.join(sorted(_VALID_SOUND_TYPES))}"
+        )
+
     with db_session() as conn:
         cursor = conn.execute(
             'UPDATE price_alerts SET sound_type = ? WHERE id = ?',
@@ -240,9 +298,11 @@ def fire_test_alert(alert_id: int) -> Optional[dict]:
     cond_labels = {
         'price_above': f"price rose above ${threshold:.2f}",
         'price_below': f"price fell below ${threshold:.2f}",
-        'pct_change': f"moved ±{threshold:.1f}%",
+        'pct_change': f"moved \u00b1{threshold:.1f}%",
     }
-    message = f"[TEST] {ticker} alert: {cond_labels.get(condition, condition)}"
+    # Use a safe static fallback instead of the raw condition value to prevent
+    # untrusted DB content from being injected into notification messages.
+    message = f"[TEST] {ticker} alert: {cond_labels.get(condition, 'condition triggered')}"
 
     try:
         send_sse_event('alert', {
@@ -378,13 +438,15 @@ def evaluate_price_alerts(tickers: list[str]) -> None:
                 alert['id'], ticker, condition, threshold, current_price, current_fire_count + 1,
             )
 
-            # Build human-readable message
+            # Build human-readable message. Use a safe static fallback instead of
+            # the raw condition value to prevent untrusted DB content from being
+            # injected into notification messages sent via SSE.
             cond_labels = {
                 'price_above': f"price rose above ${threshold:.2f}",
                 'price_below': f"price fell below ${threshold:.2f}",
-                'pct_change': f"moved {pct_change:+.2f}% (threshold ±{threshold:.1f}%)",
+                'pct_change': f"moved {pct_change:+.2f}% (threshold \u00b1{threshold:.1f}%)",
             }
-            message = f"{ticker} alert: {cond_labels.get(condition, condition)}"
+            message = f"{ticker} alert: {cond_labels.get(condition, 'condition triggered')}"
 
             if send_sse_event is not None:
                 try:

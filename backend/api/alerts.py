@@ -80,7 +80,9 @@ def _enrich_alert(alert: dict) -> dict:
     # Compute a human-readable message for active (not-yet-triggered) alerts.
     # Triggered alerts already have their message set when the SSE fired.
     if not alert.get('message'):
-        label = _CONDITION_LABELS.get(condition, condition)
+        # Use a safe static fallback instead of the raw condition string to prevent
+        # untrusted DB content from appearing in API responses.
+        label = _CONDITION_LABELS.get(condition, 'Alert')
         if condition == 'pct_change':
             alert['message'] = f"{ticker}: {label}{threshold:.1f}%"
         else:
@@ -204,8 +206,18 @@ def update_alert_endpoint(alert_id: int):
             return jsonify({'error': 'threshold must be a valid number'}), 400
         if not (0 < threshold <= _THRESHOLD_MAX):
             return jsonify({'error': f'threshold must be > 0 and \u2264 {_THRESHOLD_MAX}'}), 400
-        effective_condition = condition_type or 'price_above'  # used only for pct_change guard
-        if effective_condition == 'pct_change' and threshold > 100:
+
+        # For the pct_change 100% cap: use the new condition_type if being changed,
+        # otherwise look up the stored condition to avoid bypassing the cap when
+        # only the threshold is updated.
+        check_condition = condition_type
+        if check_condition is None:
+            with db_session() as conn:
+                existing = conn.execute(
+                    'SELECT condition_type FROM price_alerts WHERE id = ?', (alert_id,)
+                ).fetchone()
+            check_condition = existing['condition_type'] if existing else None
+        if check_condition == 'pct_change' and threshold > 100:
             return jsonify({'error': 'threshold for pct_change must be \u2264 100'}), 400
 
     if sound_type is not None and sound_type not in _VALID_SOUND_TYPES:
