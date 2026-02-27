@@ -1,3 +1,4 @@
+```typescript
 // ============================================================
 // TickerPulse AI v3.0 - API Client
 // ============================================================
@@ -8,6 +9,7 @@ import type {
   StockDetail,
   Timeframe,
   AIRating,
+  AIAnalysis,
   Agent,
   AgentRun,
   ScheduledJob,
@@ -20,7 +22,9 @@ import type {
   ResearchBriefsResponse,
   ExportCapabilities,
   AlertSoundSettings,
+  EarningsEvent,
   EarningsResponse,
+  TickerEarningsResponse,
   SentimentData,
   ProviderStatusResponse,
   ProviderRateLimitsResponse,
@@ -33,7 +37,7 @@ import type {
   RefreshIntervalConfig,
   DashboardSummary,
 } from './types';
-import { toast } from '@/lib/toastBus';
+import { captureException } from '@/lib/errorReporter';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? '';
 
@@ -104,9 +108,10 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
     }
   }
 
-  // All retries exhausted — notify the user and re-throw
+  // All retries exhausted — report to monitoring (captureException surfaces
+  // a toast for 'error' severity) and re-throw for the caller to handle.
   const finalError = lastError ?? new ApiError('Unknown API error', 0);
-  toast(finalError.message, 'error');
+  void captureException(finalError, { code: finalError.code });
   throw finalError;
 }
 
@@ -234,16 +239,45 @@ export async function toggleAlert(id: number): Promise<Alert> {
   return request<Alert>(`/api/alerts/${id}/toggle`, { method: 'PUT' });
 }
 
+export async function updateAlert(
+  id: number,
+  data: {
+    condition_type?: string;
+    threshold?: number;
+    sound_type?: string;
+  }
+): Promise<Alert> {
+  return request<Alert>(`/api/alerts/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function testAlert(id: number): Promise<Alert> {
+  return request<Alert>(`/api/alerts/${id}/test`, { method: 'POST' });
+}
+
+export async function getAlertHistory(): Promise<Alert[]> {
+  const data = await request<{ alerts: Alert[] } | Alert[]>('/api/alerts/history');
+  if (Array.isArray(data)) return data;
+  return (data as { alerts: Alert[] }).alerts || [];
+}
+
 // ---- AI Ratings ----
 
-export async function getRatings(): Promise<AIRating[]> {
-  const data = await request<{ ratings: AIRating[] } | AIRating[]>('/api/ai/ratings');
+export async function getRatings(watchlistId?: number): Promise<AIRating[]> {
+  const params = watchlistId != null ? `?watchlist_id=${watchlistId}` : '';
+  const data = await request<{ ratings: AIRating[] } | AIRating[]>(`/api/ai/ratings${params}`);
   if (Array.isArray(data)) return data;
   return (data as { ratings: AIRating[] }).ratings || [];
 }
 
 export async function getRating(ticker: string): Promise<AIRating> {
   return request<AIRating>(`/api/ai/rating/${ticker.toUpperCase()}`);
+}
+
+export async function getAIAnalysis(ticker: string): Promise<AIAnalysis> {
+  return request<AIAnalysis>(`/api/stocks/${ticker.toUpperCase()}/ai-analysis`);
 }
 
 // ---- Sentiment ----
@@ -418,8 +452,26 @@ export async function askChat(
 
 // ---- Earnings Calendar ----
 
-export async function getEarnings(days = 14): Promise<EarningsResponse> {
-  return request<EarningsResponse>(`/api/earnings?days=${days}`);
+export interface EarningsParams {
+  days?: number;
+  watchlist_id?: number;
+  ticker?: string;
+}
+
+export async function getEarnings(params?: EarningsParams): Promise<EarningsResponse> {
+  const p = new URLSearchParams();
+  if (params?.days != null) p.set('days', String(params.days));
+  if (params?.watchlist_id != null) p.set('watchlist_id', String(params.watchlist_id));
+  if (params?.ticker) p.set('ticker', params.ticker.toUpperCase());
+  const qs = p.toString();
+  return request<EarningsResponse>(`/api/earnings${qs ? `?${qs}` : ''}`);
+}
+
+export async function getTickerEarnings(ticker: string): Promise<EarningsEvent[]> {
+  const data = await request<TickerEarningsResponse>(
+    `/api/earnings/${ticker.toUpperCase()}`
+  );
+  return data.events ?? [];
 }
 
 // ---- Data Provider Status ----
@@ -501,3 +553,4 @@ export async function removeStockFromWatchlist(
     { method: 'DELETE' }
   );
 }
+```

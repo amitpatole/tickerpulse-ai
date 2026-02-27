@@ -1,4 +1,5 @@
 ```python
+
 """
 TickerPulse AI v3.0 - Database Connection Manager
 Thread-safe SQLite helper with context-manager support and table initialisation.
@@ -250,6 +251,8 @@ _NEW_TABLES_SQL = [
         sound_type        TEXT NOT NULL DEFAULT 'default',
         triggered_at      TIMESTAMP,
         notification_sent INTEGER NOT NULL DEFAULT 0,
+        fired_at          TEXT DEFAULT NULL,
+        fire_count        INTEGER NOT NULL DEFAULT 0,
         created_at        TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
     """,
@@ -265,14 +268,18 @@ _NEW_TABLES_SQL = [
     """,
     """
     CREATE TABLE IF NOT EXISTS earnings_events (
-        id              INTEGER PRIMARY KEY AUTOINCREMENT,
-        ticker          TEXT NOT NULL,
-        company         TEXT,
-        earnings_date   TEXT NOT NULL,
-        time_of_day     TEXT,
-        eps_estimate    REAL,
-        fiscal_quarter  TEXT,
-        fetched_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        id               INTEGER PRIMARY KEY AUTOINCREMENT,
+        ticker           TEXT NOT NULL,
+        company          TEXT,
+        earnings_date    TEXT NOT NULL,
+        time_of_day      TEXT,
+        eps_estimate     REAL,
+        eps_actual       REAL,
+        revenue_estimate REAL,
+        revenue_actual   REAL,
+        fiscal_quarter   TEXT,
+        fetched_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at       TEXT DEFAULT (datetime('now')),
         UNIQUE(ticker, earnings_date)
     )
     """,
@@ -286,7 +293,24 @@ _NEW_TABLES_SQL = [
         request_id TEXT,
         context    TEXT,
         severity   TEXT NOT NULL DEFAULT 'error',
+        session_id TEXT,
         created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS financials_cache (
+        ticker         TEXT PRIMARY KEY,
+        pe_ratio       REAL,
+        eps            REAL,
+        market_cap     REAL,
+        dividend_yield REAL,
+        beta           REAL,
+        avg_volume     INTEGER,
+        book_value     REAL,
+        week_52_high   REAL,
+        week_52_low    REAL,
+        name           TEXT,
+        fetched_at     TEXT
     )
     """,
 ]
@@ -316,7 +340,9 @@ _INDEXES_SQL = [
     "CREATE INDEX IF NOT EXISTS idx_error_log_created      ON error_log (created_at)",
     "CREATE INDEX IF NOT EXISTS idx_error_log_code         ON error_log (error_code)",
     "CREATE INDEX IF NOT EXISTS idx_error_log_source       ON error_log (source)",
+    "CREATE INDEX IF NOT EXISTS idx_error_log_session      ON error_log (session_id)",
     "CREATE INDEX IF NOT EXISTS idx_ai_ratings_ticker_updated ON ai_ratings (ticker, updated_at DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_financials_cache_fetched   ON financials_cache (fetched_at)",
 ]
 
 
@@ -411,7 +437,7 @@ def _migrate_watchlists(cursor) -> None:
 
 
 def _migrate_price_alerts(cursor) -> None:
-    """Add notification_sent column to price_alerts if missing."""
+    """Add missing columns to price_alerts table."""
     cols = {row[1] for row in cursor.execute("PRAGMA table_info(price_alerts)").fetchall()}
     if not cols:
         return
@@ -420,6 +446,47 @@ def _migrate_price_alerts(cursor) -> None:
             "ALTER TABLE price_alerts ADD COLUMN notification_sent INTEGER NOT NULL DEFAULT 0"
         )
         logger.info("Migration applied: added notification_sent to price_alerts table")
+    if 'fired_at' not in cols:
+        cursor.execute(
+            "ALTER TABLE price_alerts ADD COLUMN fired_at TEXT DEFAULT NULL"
+        )
+        logger.info("Migration applied: added fired_at to price_alerts table")
+    if 'fire_count' not in cols:
+        cursor.execute(
+            "ALTER TABLE price_alerts ADD COLUMN fire_count INTEGER NOT NULL DEFAULT 0"
+        )
+        logger.info("Migration applied: added fire_count to price_alerts table")
+
+
+def _migrate_error_log(cursor) -> None:
+    """Add session_id column to error_log if missing (schema v3.1)."""
+    cols = {row[1] for row in cursor.execute("PRAGMA table_info(error_log)").fetchall()}
+    if not cols:
+        return
+    if 'session_id' not in cols:
+        cursor.execute("ALTER TABLE error_log ADD COLUMN session_id TEXT")
+        logger.info("Migration applied: added session_id to error_log table")
+
+
+def _migrate_earnings_events(cursor) -> None:
+    """Add eps_actual, revenue_estimate, revenue_actual, updated_at to earnings_events if missing."""
+    cols = {row[1] for row in cursor.execute("PRAGMA table_info(earnings_events)").fetchall()}
+    if not cols:
+        return
+    migrations = []
+    if 'eps_actual' not in cols:
+        migrations.append("ALTER TABLE earnings_events ADD COLUMN eps_actual REAL")
+    if 'revenue_estimate' not in cols:
+        migrations.append("ALTER TABLE earnings_events ADD COLUMN revenue_estimate REAL")
+    if 'revenue_actual' not in cols:
+        migrations.append("ALTER TABLE earnings_events ADD COLUMN revenue_actual REAL")
+    if 'updated_at' not in cols:
+        migrations.append(
+            "ALTER TABLE earnings_events ADD COLUMN updated_at TEXT DEFAULT (datetime('now'))"
+        )
+    for sql in migrations:
+        cursor.execute(sql)
+        logger.info(f"Migration applied: {sql}")
 
 
 def _migrate_ai_ratings_price_columns(cursor) -> None:
@@ -464,6 +531,8 @@ def init_all_tables(db_path: str | None = None) -> None:
         _migrate_watchlists(cursor)
         _migrate_price_alerts(cursor)
         _migrate_ai_ratings_price_columns(cursor)
+        _migrate_error_log(cursor)
+        _migrate_earnings_events(cursor)
 
         for sql in _NEW_TABLES_SQL:
             cursor.execute(sql)
