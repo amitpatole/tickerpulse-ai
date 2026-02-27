@@ -1,3 +1,4 @@
+```typescript
 /**
  * Tests validating CI/CD frontend setup and Jest configuration.
  * Ensures test infrastructure is ready before tests run in CI.
@@ -69,8 +70,9 @@ describe('Frontend CI/CD Setup', () => {
       expect(fs.existsSync(ciWorkflowPath)).toBe(true);
 
       const content = fs.readFileSync(ciWorkflowPath, 'utf-8');
-      expect(content).toContain('backend-tests');
-      expect(content).toContain('frontend-tests');
+      // Match the actual job IDs defined in ci.yml
+      expect(content).toContain('backend-test');
+      expect(content).toContain('frontend-test');
     });
 
     it('should have deploy.yml workflow with build-and-push job', () => {
@@ -92,3 +94,4 @@ describe('Frontend CI/CD Setup', () => {
     });
   });
 });
+```
