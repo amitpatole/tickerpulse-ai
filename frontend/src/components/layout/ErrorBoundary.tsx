@@ -1,17 +1,19 @@
+```tsx
 'use client';
 
 // ============================================================
 // TickerPulse AI v3.0 — React Error Boundary
 // Class component that catches render-time errors, reports them
-// to the backend ingestion endpoint, and displays a fallback UI
-// instead of crashing the entire application.
+// to the backend ingestion endpoint via errorReporter, and
+// displays a fallback UI instead of crashing the application.
 //
-// Also installs global window.onerror / unhandledrejection
-// handlers (via componentDidMount) so that non-render JS errors
-// and unhandled promise rejections are captured automatically.
+// Global window.onerror / unhandledrejection handlers are
+// registered separately via GlobalErrorSetup (layout.tsx) so
+// this boundary stays focused on React render errors only.
 // ============================================================
 
 import { Component, type ReactNode, type ErrorInfo } from 'react';
+import { captureReactError } from '@/lib/errorReporter';
 
 interface Props {
   children: ReactNode;
@@ -41,71 +43,7 @@ export default class ErrorBoundary extends Component<Props, State> {
 
   componentDidCatch(error: Error, info: ErrorInfo): void {
     console.error('[ErrorBoundary] Uncaught render error:', error, info.componentStack);
-
-    // Report to backend — fire-and-forget; failure must not crash the app
-    fetch('/api/errors', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        type: 'react_error',
-        message: error.message,
-        stack: error.stack,
-        component_stack: info.componentStack,
-        timestamp: new Date().toISOString(),
-      }),
-    }).catch(() => {
-      // Silently fail if backend unavailable
-    });
-  }
-
-  // ---------------------------------------------------------------------------
-  // Global handler installation
-  // ---------------------------------------------------------------------------
-
-  private _handleWindowError = (event: ErrorEvent): void => {
-    if (!(event.error instanceof Error)) return;
-    fetch('/api/errors', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        type: 'unhandled_exception',
-        message: event.error.message || 'Unknown error',
-        stack: event.error.stack,
-        url: window.location.href,
-        timestamp: new Date().toISOString(),
-      }),
-    }).catch(() => {});
-  };
-
-  private _handleUnhandledRejection = (event: PromiseRejectionEvent): void => {
-    const reason = event.reason;
-    const message =
-      reason instanceof Error
-        ? reason.message
-        : typeof reason === 'string'
-        ? reason
-        : 'Unhandled promise rejection';
-    fetch('/api/errors', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        type: 'unhandled_rejection',
-        message,
-        stack: reason instanceof Error ? reason.stack : undefined,
-        url: window.location.href,
-        timestamp: new Date().toISOString(),
-      }),
-    }).catch(() => {});
-  };
-
-  componentDidMount(): void {
-    window.addEventListener('error', this._handleWindowError);
-    window.addEventListener('unhandledrejection', this._handleUnhandledRejection);
-  }
-
-  componentWillUnmount(): void {
-    window.removeEventListener('error', this._handleWindowError);
-    window.removeEventListener('unhandledrejection', this._handleUnhandledRejection);
+    captureReactError(error, info.componentStack ?? '');
   }
 
   // ---------------------------------------------------------------------------
@@ -165,3 +103,4 @@ function DefaultFallback({ error }: { error: Error }) {
     </div>
   );
 }
+```

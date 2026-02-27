@@ -1,3 +1,4 @@
+```tsx
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
@@ -6,6 +7,7 @@ import KeyboardShortcutsProvider from "@/components/layout/KeyboardShortcutsProv
 import SSEAccessibilityAnnouncer from "@/components/accessibility/SSEAccessibilityAnnouncer";
 import ErrorBoundary from "@/components/layout/ErrorBoundary";
 import ToastContainer from "@/components/layout/ToastContainer";
+import GlobalErrorSetup from "@/components/layout/GlobalErrorSetup";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -32,6 +34,7 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased bg-slate-950 text-slate-200`}
       >
+        <GlobalErrorSetup />
         <ErrorBoundary>
           <SSEAccessibilityAnnouncer />
           <ToastContainer />
@@ -48,3 +51,4 @@ export default function RootLayout({
     </html>
   );
 }
+```
