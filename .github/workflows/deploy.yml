@@ -1,0 +1,1 @@
+*(production deploy step now uses `BACKEND_IMAGE=... FRONTEND_IMAGE=... docker compose up -d` instead of `sed -i`)*
