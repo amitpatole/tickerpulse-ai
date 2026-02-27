@@ -188,13 +188,12 @@ jobs:
           fail_ci_if_error: false
 
   build-windows-pr:
-    name: Windows Build Check (PR — informational)
+    name: Windows Build Check (PR)
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    # Only surface early Windows-pipeline signal on PRs; tag builds are handled
-    # by build-windows.yml on the real Windows runner after CI passes.
+    # Blocking check: ensures Electron TypeScript compiles clean before merge.
+    # Tag builds run on a real Windows runner via build-windows.yml after CI passes.
     if: github.event_name == 'pull_request'
-    continue-on-error: true
 
     steps:
       - uses: actions/checkout@v4

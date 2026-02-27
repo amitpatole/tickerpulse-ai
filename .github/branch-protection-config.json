@@ -6,7 +6,8 @@
       "backend-test",
       "frontend-test",
       "electron-type-check",
-      "electron-unit-test"
+      "electron-unit-test",
+      "build-windows-pr"
     ]
   },
   "enforce_admins": true,
