@@ -15,15 +15,18 @@ import MarketMoodWidget from '@/components/dashboard/MarketMoodWidget';
 import PortfolioChart from '@/components/dashboard/PortfolioChart';
 import SectorBreakdown from '@/components/dashboard/SectorBreakdown';
 import RefreshIntervalControl from '@/components/dashboard/RefreshIntervalControl';
+import { useDashboardData } from '@/hooks/useDashboardData';
 
 export default function DashboardPage() {
+  const { ratings, alerts, summary } = useDashboardData();
+
   return (
     <div className="flex flex-col">
       <Header title="Dashboard" subtitle="Market overview and stock watchlist" />
 
       <div className="flex-1 p-4 md:p-6">
-        {/* KPI Cards Row */}
-        <KPICards />
+        {/* KPI Cards Row — summary prop eliminates 3 independent API calls */}
+        <KPICards summary={summary} />
 
         {/* API Rate Limit Indicator */}
         <div className="mt-6">
@@ -46,8 +49,8 @@ export default function DashboardPage() {
 
           {/* Right sidebar: AI Panels + News Feed + Earnings */}
           <div className="flex flex-col gap-6 xl:col-span-1">
-            <SectorBreakdown />
-            <MarketMoodWidget />
+            <SectorBreakdown ratings={ratings} />
+            <MarketMoodWidget ratings={ratings} />
             <NewsFeed />
             <EarningsCalendar />
           </div>
@@ -61,12 +64,12 @@ export default function DashboardPage() {
 
         {/* AI Ratings Panel */}
         <div className="mt-6">
-          <AIRatingsPanel />
+          <AIRatingsPanel ratings={ratings} />
         </div>
 
-        {/* Alerts Table */}
+        {/* Alerts Table — initialData eliminates cold-start loading flash */}
         <div className="mt-6">
-          <AlertsTable />
+          <AlertsTable initialData={alerts} />
         </div>
       </div>
     </div>
