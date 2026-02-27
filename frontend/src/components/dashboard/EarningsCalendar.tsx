@@ -1,3 +1,4 @@
+```tsx
 'use client';
 
 import { useState } from 'react';
@@ -60,28 +61,12 @@ function getDaysBadgeClass(dateStr: string, isPast: boolean): string {
   return 'bg-slate-700/50 text-slate-400 border border-slate-600/30';
 }
 
-function SurprisePctBadge({ surprisePct }: { surprisePct: number | null | undefined }) {
-  if (surprisePct == null) {
-    return <span className="text-xs text-slate-600">—</span>;
-  }
-  const isPositive = surprisePct > 0;
-  const isNegative = surprisePct < 0;
-  const cls = isPositive
-    ? 'text-emerald-400'
-    : isNegative
-    ? 'text-red-400'
-    : 'text-slate-400';
-  return (
-    <div className={`flex items-center justify-end gap-0.5 text-xs font-mono ${cls}`}>
-      {isPositive ? (
-        <ChevronUp className="h-3 w-3" />
-      ) : isNegative ? (
-        <ChevronDown className="h-3 w-3" />
-      ) : null}
-      {isPositive ? '+' : ''}
-      {surprisePct.toFixed(1)}%
-    </div>
-  );
+function formatRevenue(value: number | null | undefined): string {
+  if (value == null) return '—';
+  const abs = Math.abs(value);
+  if (abs >= 1e9) return `$${(value / 1e9).toFixed(2)}B`;
+  if (abs >= 1e6) return `$${(value / 1e6).toFixed(0)}M`;
+  return `$${value.toLocaleString()}`;
 }
 
 function EpsBeatBadge({
@@ -118,6 +103,35 @@ function EpsBeatBadge({
   );
 }
 
+function RevenueBadge({
+  actual,
+  estimate,
+}: {
+  actual: number | null;
+  estimate: number | null;
+}) {
+  if (actual == null || estimate == null) {
+    return actual != null ? (
+      <span className="text-xs text-slate-300">{formatRevenue(actual)}</span>
+    ) : null;
+  }
+  const beat = actual > estimate;
+  const met = actual === estimate;
+  const label = beat ? 'Beat' : met ? 'Met' : 'Miss';
+  const cls = beat
+    ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+    : met
+    ? 'bg-slate-600/30 text-slate-400 border border-slate-500/30'
+    : 'bg-red-500/20 text-red-400 border border-red-500/30';
+
+  return (
+    <div className="flex items-center gap-1 justify-end">
+      <span className="text-xs text-slate-300">{formatRevenue(actual)}</span>
+      <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${cls}`}>{label}</span>
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Column header
 // ---------------------------------------------------------------------------
@@ -127,7 +141,7 @@ function TableHeader({ tab }: { tab: TabId }) {
     <div
       className={`grid text-xs font-medium text-slate-500 px-3 py-1.5 border-b border-slate-700/50 ${
         tab === 'past'
-          ? 'grid-cols-[72px_1fr_80px_80px_70px_70px]'
+          ? 'grid-cols-[72px_1fr_90px_90px_110px_110px_70px]'
           : 'grid-cols-[72px_1fr_80px_70px]'
       }`}
     >
@@ -135,7 +149,8 @@ function TableHeader({ tab }: { tab: TabId }) {
       <span>Ticker / Company</span>
       <span className="text-right">EPS Est.</span>
       {tab === 'past' && <span className="text-right">EPS Actual</span>}
-      {tab === 'past' && <span className="text-right">Surprise</span>}
+      {tab === 'past' && <span className="text-right">Rev Est.</span>}
+      {tab === 'past' && <span className="text-right">Rev Actual</span>}
       <span className="text-right">Quarter</span>
     </div>
   );
@@ -151,7 +166,7 @@ function EventRow({ event, tab }: { event: EarningsEvent; tab: TabId }) {
     <div
       className={`grid items-center gap-1 px-3 py-2 rounded-lg ${
         tab === 'past'
-          ? 'grid-cols-[72px_1fr_80px_80px_70px_70px]'
+          ? 'grid-cols-[72px_1fr_90px_90px_110px_110px_70px]'
           : 'grid-cols-[72px_1fr_80px_70px]'
       } ${
         event.on_watchlist
@@ -205,10 +220,17 @@ function EventRow({ event, tab }: { event: EarningsEvent; tab: TabId }) {
         </div>
       )}
 
-      {/* Surprise % (past tab only) */}
+      {/* Revenue Estimate (past tab only) */}
+      {tab === 'past' && (
+        <div className="text-right text-xs text-slate-300">
+          {formatRevenue(event.revenue_estimate)}
+        </div>
+      )}
+
+      {/* Revenue Actual with beat/miss badge (past tab only) */}
       {tab === 'past' && (
         <div className="text-right">
-          <SurprisePctBadge surprisePct={event.surprise_pct} />
+          <RevenueBadge actual={event.revenue_actual} estimate={event.revenue_estimate} />
         </div>
       )}
 
@@ -355,3 +377,4 @@ export default function EarningsCalendar({ watchlistId }: EarningsCalendarProps)
     </div>
   );
 }
+```

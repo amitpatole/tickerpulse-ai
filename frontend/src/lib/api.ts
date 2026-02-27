@@ -1,4 +1,4 @@
-```typescript
+```ts
 // ============================================================
 // TickerPulse AI v3.0 - API Client
 // ============================================================
@@ -472,6 +472,10 @@ export async function getTickerEarnings(ticker: string): Promise<EarningsEvent[]
     `/api/earnings/${ticker.toUpperCase()}`
   );
   return data.events ?? [];
+}
+
+export async function triggerEarningsSync(): Promise<{ ok: boolean; message?: string }> {
+  return request<{ ok: boolean; message?: string }>('/api/earnings/sync', { method: 'POST' });
 }
 
 // ---- Data Provider Status ----

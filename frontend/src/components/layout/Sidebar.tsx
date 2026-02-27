@@ -1,3 +1,4 @@
+```tsx
 'use client';
 
 import { useState } from 'react';
@@ -8,6 +9,7 @@ import {
   Bot,
   FileSearch,
   Calendar,
+  CalendarDays,
   Settings,
   ChevronLeft,
   ChevronRight,
@@ -20,6 +22,7 @@ const NAV_ITEMS = [
   { href: '/', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/agents', label: 'Agents', icon: Bot },
   { href: '/research', label: 'Research', icon: FileSearch },
+  { href: '/earnings', label: 'Earnings', icon: CalendarDays },
   { href: '/scheduler', label: 'Scheduler', icon: Calendar },
   { href: '/settings', label: 'Settings', icon: Settings },
 ];
@@ -98,3 +101,4 @@ export default function Sidebar() {
     </>
   );
 }
+```
