@@ -1,3 +1,4 @@
+```yaml
 name: CI
 
 on:
@@ -36,14 +37,13 @@ jobs:
           pip install -r backend/requirements-test.txt
 
       - name: Run tests
+        # pytest.ini supplies: testpaths, --cov=backend, --cov-fail-under=80,
+        # --ignore=backend/agents, --ignore=backend/data_providers.
+        # Only CI-specific output flags are passed here.
         run: |
-          python -m pytest backend/ -q --tb=short \
-            --ignore=backend/agents \
-            --ignore=backend/data_providers \
-            --cov=backend \
+          python -m pytest -q --tb=short \
             --cov-report=term-missing \
-            --cov-report=xml:coverage-backend.xml \
-            --cov-fail-under=80
+            --cov-report=xml:coverage-backend.xml
         env:
           PYTHONPATH: .
           DB_PATH: /tmp/tickerpulse-ci.db
@@ -154,3 +154,63 @@ jobs:
           npx tsc
           echo "Electron compile succeeded — emitted files:"
           find . -name '*.js' -not -path '*/node_modules/*' | head -10
+
+  electron-unit-test:
+    name: Electron Unit Tests (Node 24)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: electron/package-lock.json
+
+      - name: Install dependencies
+        working-directory: electron
+        run: npm install
+
+      - name: Run tests
+        working-directory: electron
+        run: npm run test:ci
+
+      - name: Upload Electron coverage to Codecov
+        uses: codecov/codecov-action@v4
+        if: always()
+        with:
+          directory: electron/coverage
+          flags: electron
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: false
+
+  build-windows-pr:
+    name: Windows Build Check (PR — informational)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Only surface early Windows-pipeline signal on PRs; tag builds are handled
+    # by build-windows.yml on the real Windows runner after CI passes.
+    if: github.event_name == 'pull_request'
+    continue-on-error: true
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: electron/package-lock.json
+
+      - name: Install Electron dependencies
+        working-directory: electron
+        run: npm install
+
+      - name: Compile Electron TypeScript (Windows build prerequisite)
+        working-directory: electron
+        run: npx tsc --noEmit
+```
