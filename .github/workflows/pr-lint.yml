@@ -20,8 +20,6 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          # Allowed conventional commit types.
-          # Must match the types used across this project's commit history.
           types: |
             feat
             fix
@@ -33,9 +31,7 @@ jobs:
             ci
             perf
             build
-          # Scopes are optional — teams may add them, but they are not required.
           requireScope: false
-          # Subject (everything after ": ") must not be empty.
           subjectPattern: ^.+$
           subjectPatternError: |
             The PR title subject must not be empty.
@@ -45,8 +41,6 @@ jobs:
               fix: correct pagination offset in chart endpoint
               ci: add pr-lint workflow
               docs: update CONTRIBUTING with branch naming guide
-          # Do not allow "WIP: ..." prefixed drafts to skip the check.
           wip: false
-          # Single-commit PRs are validated against the PR title, not the commit.
           validateSingleCommit: false
 ```
