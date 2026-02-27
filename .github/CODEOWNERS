@@ -1,3 +1,4 @@
+```
 # Default owner for everything in the repository.
 # The core team reviews all PRs unless a more specific rule below matches.
 * @tickerpulse/core
@@ -16,3 +17,4 @@ electron/ @tickerpulse/core
 
 # Documentation
 docs/ @tickerpulse/core
+```

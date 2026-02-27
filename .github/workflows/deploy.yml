@@ -1,3 +1,4 @@
+```yaml
 name: Deploy
 
 # Production deploys are triggered by pushing a semver tag (automated
@@ -74,3 +75,4 @@ jobs:
             --verify-tag
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+```

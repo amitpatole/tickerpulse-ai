@@ -1,3 +1,4 @@
+```yaml
 name: Deploy Staging
 
 # Fires automatically after CI passes on main. Using workflow_run (not push)
@@ -92,3 +93,4 @@ jobs:
           echo "All ${#endpoints[@]} smoke tests passed"
         env:
           STAGING_BASE_URL: ${{ vars.STAGING_BASE_URL }}
+```

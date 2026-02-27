@@ -1,3 +1,4 @@
+```json
 {
   "required_status_checks": {
     "strict": true,
@@ -12,3 +13,4 @@
   "allow_force_pushes": false,
   "allow_deletions": false
 }
+```

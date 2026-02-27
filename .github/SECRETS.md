@@ -1,3 +1,4 @@
+```markdown
 # Repository Secrets & Variables
 
 This file documents every secret and repository variable consumed by the
@@ -66,3 +67,4 @@ build-windows.yml
   expires or that person leaves the project.
 - `PRODUCTION_DEPLOY_TOKEN` and `STAGING_DEPLOY_TOKEN` should be scoped
   to the minimum permissions required by the deployment platform.
+```

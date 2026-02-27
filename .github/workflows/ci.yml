@@ -1,3 +1,4 @@
+```yaml
 name: CI
 
 on:
@@ -140,3 +141,4 @@ jobs:
       - name: Compile Electron TypeScript (Windows build prerequisite)
         working-directory: electron
         run: npx tsc --noEmit
+```
