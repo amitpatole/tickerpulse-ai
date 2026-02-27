@@ -40,7 +40,8 @@ jobs:
             --ignore=backend/data_providers \
             --cov=backend \
             --cov-report=term-missing \
-            --cov-report=xml:coverage-backend.xml
+            --cov-report=xml:coverage-backend.xml \
+            --cov-fail-under=80
         env:
           PYTHONPATH: .
           DB_PATH: /tmp/tickerpulse-ci.db

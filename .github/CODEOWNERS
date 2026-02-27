@@ -1,4 +1,3 @@
-```
 # Global fallback — any unmatched path requires core team review
 *                        @tickerpulse/core
 
@@ -15,4 +14,3 @@ electron/                @tickerpulse/electron
 # Infra owns all CI/CD workflows and container orchestration
 .github/                 @tickerpulse/infra
 docker-compose.yml       @tickerpulse/infra
-```
