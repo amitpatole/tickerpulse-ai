@@ -110,62 +110,76 @@ def set_setting(key: str, value: str) -> None:
 
 
 def get_active_ai_provider() -> Optional[Dict]:
-    """Get the currently active AI provider"""
-    try:
-        conn = sqlite3.connect(Config.DB_PATH)
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
+    """Get the currently active AI provider.
 
-        cursor.execute('''
-            SELECT * FROM ai_providers
-            WHERE is_active = 1
-            ORDER BY updated_at DESC
-            LIMIT 1
-        ''')
+    Acquires ``_lock`` to prevent dirty reads during the deactivate-all →
+    upsert → commit write sequence in ``add_ai_provider`` and
+    ``set_active_provider``.  Without the lock a reader landing between the
+    ``UPDATE SET is_active=0`` and the final ``COMMIT`` would see zero active
+    providers even though one is about to be activated.
+    """
+    with _lock:
+        try:
+            conn = sqlite3.connect(Config.DB_PATH)
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
 
-        result = cursor.fetchone()
-        conn.close()
+            cursor.execute('''
+                SELECT * FROM ai_providers
+                WHERE is_active = 1
+                ORDER BY updated_at DESC
+                LIMIT 1
+            ''')
 
-        if result:
-            return {
-                'id': result['id'],
-                'provider_name': result['provider_name'],
-                'api_key': result['api_key'],
-                'model': result['model']
-            }
-        return None
-    except Exception as e:
-        logger.error(f"Error getting active AI provider: {e}")
-        return None
+            result = cursor.fetchone()
+            conn.close()
+
+            if result:
+                return {
+                    'id': result['id'],
+                    'provider_name': result['provider_name'],
+                    'api_key': result['api_key'],
+                    'model': result['model']
+                }
+            return None
+        except Exception as e:
+            logger.error(f"Error getting active AI provider: {e}")
+            return None
 
 
 def get_all_ai_providers() -> list:
-    """Get all configured AI providers"""
-    try:
-        conn = sqlite3.connect(Config.DB_PATH)
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
+    """Get all configured AI providers.
 
-        cursor.execute('''
-            SELECT id, provider_name, model, is_active, created_at, updated_at
-            FROM ai_providers
-            ORDER BY updated_at DESC
-        ''')
+    Acquires ``_lock`` for the same dirty-read reason as
+    ``get_active_ai_provider``: a concurrent write could leave the table in a
+    transitional state where ``is_active`` counts are inconsistent.
+    """
+    with _lock:
+        try:
+            conn = sqlite3.connect(Config.DB_PATH)
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
 
-        results = cursor.fetchall()
-        conn.close()
+            cursor.execute('''
+                SELECT id, provider_name, model, is_active, created_at, updated_at
+                FROM ai_providers
+                ORDER BY updated_at DESC
+            ''')
 
-        return [{
-            'id': row['id'],
-            'provider_name': row['provider_name'],
-            'model': row['model'],
-            'is_active': row['is_active'],
-            'created_at': row['created_at'],
-            'updated_at': row['updated_at']
-        } for row in results]
-    except Exception as e:
-        logger.error(f"Error getting AI providers: {e}")
-        return []
+            results = cursor.fetchall()
+            conn.close()
+
+            return [{
+                'id': row['id'],
+                'provider_name': row['provider_name'],
+                'model': row['model'],
+                'is_active': row['is_active'],
+                'created_at': row['created_at'],
+                'updated_at': row['updated_at']
+            } for row in results]
+        except Exception as e:
+            logger.error(f"Error getting AI providers: {e}")
+            return []
 
 
 def add_ai_provider(provider_name: str, api_key: str, model: Optional[str] = None, set_active: bool = True) -> bool:
@@ -268,29 +282,31 @@ def get_all_configured_providers() -> list[dict[str, Any]]:
     configured provider.  Deliberately omits ``is_active`` since comparison
     runs *all* providers regardless of which one is currently selected.
 
-    Uses ``db_session`` (WAL mode, row_factory=Row) for consistency with the
-    rest of the application.
+    Acquires ``_lock`` so that a concurrent ``add_ai_provider`` or
+    ``delete_ai_provider`` call cannot cause this function to read a
+    transitional snapshot of the table.
 
     Returns:
         List of dicts with keys: provider_name, api_key, model.
         Empty list on error or when no providers are configured.
     """
-    try:
-        with db_session() as conn:
-            rows = conn.execute(
-                "SELECT provider_name, api_key, model FROM ai_providers ORDER BY id ASC"
-            ).fetchall()
-        return [
-            {
-                'provider_name': r['provider_name'],
-                'api_key': r['api_key'],
-                'model': r['model'] or '',
-            }
-            for r in rows
-        ]
-    except Exception as exc:
-        logger.error("get_all_configured_providers failed: %s", exc)
-        return []
+    with _lock:
+        try:
+            with db_session() as conn:
+                rows = conn.execute(
+                    "SELECT provider_name, api_key, model FROM ai_providers ORDER BY id ASC"
+                ).fetchall()
+            return [
+                {
+                    'provider_name': r['provider_name'],
+                    'api_key': r['api_key'],
+                    'model': r['model'] or '',
+                }
+                for r in rows
+            ]
+        except Exception as exc:
+            logger.error("get_all_configured_providers failed: %s", exc)
+            return []
 
 
 def is_ai_enabled() -> bool:
