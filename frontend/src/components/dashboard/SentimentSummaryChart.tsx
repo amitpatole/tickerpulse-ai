@@ -1,8 +1,6 @@
 'use client';
 
 import { clsx } from 'clsx';
-import { useRatings } from '@/hooks/useRatings';
-import { useSSERatings } from '@/hooks/useSSERatings';
 import type { AIRating } from '@/lib/types';
 
 type SentimentBucket = 'bullish' | 'neutral' | 'bearish';
@@ -128,9 +126,14 @@ function RatingDistribution({ ratings }: { ratings: AIRating[] }) {
   );
 }
 
-export default function SentimentSummaryChart() {
-  const { data: baseRatings, loading, error } = useRatings();
-  const ratings = useSSERatings(baseRatings);
+interface SentimentSummaryChartProps {
+  /** Pre-fetched ratings from useDashboardData (already WS-merged).
+   *  null = loading, AIRating[] when data is available. */
+  ratings: AIRating[] | null;
+}
+
+export default function SentimentSummaryChart({ ratings }: SentimentSummaryChartProps) {
+  const isLoading = ratings === null;
 
   const withSentiment = (ratings ?? []).filter((r) => r.sentiment_score != null);
   const total = withSentiment.length;
@@ -154,75 +157,73 @@ export default function SentimentSummaryChart() {
 
   return (
     <div className="rounded-xl border border-slate-700/50 bg-slate-800/50 p-5">
-      <h2 className="mb-4 text-sm font-semibold text-white">Market Sentiment</h2>
-
-      {loading && !ratings && (
+      {isLoading ? (
         <div className="space-y-3">
           {Array.from({ length: 4 }).map((_, i) => (
             <div key={i} className="h-6 animate-pulse rounded bg-slate-700" />
           ))}
         </div>
-      )}
+      ) : (
+        <>
+          <h2 className="mb-4 text-sm font-semibold text-white">Market Sentiment</h2>
 
-      {error && !ratings && (
-        <div className="text-center text-sm text-red-400">{error}</div>
-      )}
+          {ratings !== null && ratings.length === 0 && (
+            <div className="text-center text-sm text-slate-500">No stocks in watchlist.</div>
+          )}
 
-      {ratings && ratings.length === 0 && (
-        <div className="text-center text-sm text-slate-500">No stocks in watchlist.</div>
-      )}
-
-      {ratings && ratings.length > 0 && (
-        <div className="space-y-5">
-          {/* Portfolio average sentiment */}
-          {avgScore != null && avgConfig && (
-            <div
-              className={clsx(
-                'flex items-center justify-between rounded-lg p-3',
-                avgConfig.bgColor
+          {ratings !== null && ratings.length > 0 && (
+            <div className="space-y-5">
+              {/* Portfolio average sentiment — only rendered when sentiment data exists */}
+              {avgScore != null && avgConfig && (
+                <div
+                  className={clsx(
+                    'flex items-center justify-between rounded-lg p-3',
+                    avgConfig.bgColor
+                  )}
+                >
+                  <div>
+                    <p className="text-[10px] uppercase tracking-wider text-slate-400">
+                      Portfolio Avg. Sentiment
+                    </p>
+                    <p className={clsx('mt-0.5 font-mono text-xl font-bold', avgConfig.textColor)}>
+                      {avgScore > 0 ? '+' : ''}{avgScore.toFixed(2)}
+                    </p>
+                  </div>
+                  <span className={clsx('text-sm font-semibold', avgConfig.textColor)}>
+                    {avgConfig.label}
+                  </span>
+                </div>
               )}
-            >
-              <div>
-                <p className="text-[10px] uppercase tracking-wider text-slate-400">
-                  Portfolio Avg. Sentiment
-                </p>
-                <p className={clsx('mt-0.5 font-mono text-xl font-bold', avgConfig.textColor)}>
-                  {avgScore > 0 ? '+' : ''}{avgScore.toFixed(2)}
-                </p>
-              </div>
-              <span className={clsx('text-sm font-semibold', avgConfig.textColor)}>
-                {avgConfig.label}
-              </span>
-            </div>
-          )}
 
-          {/* Sentiment distribution */}
-          {total > 0 && (
-            <div className="space-y-2.5">
-              <p className="text-[10px] uppercase tracking-wider text-slate-500">
-                Sentiment Distribution
-              </p>
-              {(['bullish', 'neutral', 'bearish'] as SentimentBucket[]).map((bucket) => (
-                <SentimentBar
-                  key={bucket}
-                  bucket={bucket}
-                  count={bucketCounts[bucket]}
-                  total={total}
-                />
-              ))}
-            </div>
-          )}
+              {/* Sentiment distribution — only rendered when sentiment data exists */}
+              {total > 0 && (
+                <div className="space-y-2.5">
+                  <p className="text-[10px] uppercase tracking-wider text-slate-500">
+                    Sentiment Distribution
+                  </p>
+                  {(['bullish', 'neutral', 'bearish'] as SentimentBucket[]).map((bucket) => (
+                    <SentimentBar
+                      key={bucket}
+                      bucket={bucket}
+                      count={bucketCounts[bucket]}
+                      total={total}
+                    />
+                  ))}
+                </div>
+              )}
 
-          {/* AI rating breakdown */}
-          {ratings.length > 0 && (
-            <div className="space-y-2 border-t border-slate-700/50 pt-4">
-              <p className="text-[10px] uppercase tracking-wider text-slate-500">
-                AI Rating Distribution
-              </p>
-              <RatingDistribution ratings={ratings} />
+              {/* AI rating breakdown — always shown when ratings are present */}
+              {ratings.length > 0 && (
+                <div className="space-y-2 border-t border-slate-700/50 pt-4">
+                  <p className="text-[10px] uppercase tracking-wider text-slate-500">
+                    AI Rating Distribution
+                  </p>
+                  <RatingDistribution ratings={ratings} />
+                </div>
+              )}
             </div>
           )}
-        </div>
+        </>
       )}
     </div>
   );
