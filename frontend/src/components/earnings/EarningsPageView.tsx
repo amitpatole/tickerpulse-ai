@@ -1,4 +1,3 @@
-```tsx
 'use client';
 
 import { useState, useMemo } from 'react';
@@ -43,7 +42,8 @@ function formatDateLabel(dateStr: string): string {
   if (diff === 0) return 'Today';
   if (diff === 1) return 'Tomorrow';
   if (diff === -1) return 'Yesterday';
-  return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+  // Use browser locale (undefined) so non-US users see their locale's date format
+  return d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
 }
 
 function formatRevenue(value: number | null | undefined): string {
@@ -209,7 +209,8 @@ function PastTableHeader() {
 }
 
 function PastRow({ event }: { event: EarningsEvent }) {
-  const dateLabel = new Date(event.earnings_date + 'T00:00:00').toLocaleDateString('en-US', {
+  // Use browser locale (undefined) so non-US users see their locale's date format
+  const dateLabel = new Date(event.earnings_date + 'T00:00:00').toLocaleDateString(undefined, {
     month: 'short',
     day: 'numeric',
   });
@@ -436,7 +437,8 @@ export default function EarningsPageView({ watchlistId }: EarningsPageViewProps)
                       {formatDateLabel(date)}
                     </span>
                     <span className="text-xs text-slate-500">
-                      {new Date(date + 'T00:00:00').toLocaleDateString('en-US', {
+                      {/* Use browser locale (undefined) so non-US users see their locale's date format */}
+                      {new Date(date + 'T00:00:00').toLocaleDateString(undefined, {
                         weekday: 'short',
                         month: 'long',
                         day: 'numeric',
@@ -493,4 +495,3 @@ export default function EarningsPageView({ watchlistId }: EarningsPageViewProps)
     </div>
   );
 }
-```

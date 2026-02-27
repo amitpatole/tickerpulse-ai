@@ -1,4 +1,3 @@
-```tsx
 'use client';
 
 import { useState } from 'react';
@@ -47,7 +46,8 @@ function formatDate(dateStr: string): string {
   if (diff === 0) return 'Today';
   if (diff === 1) return 'Tomorrow';
   if (diff === -1) return 'Yesterday';
-  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  // Use browser locale (undefined) so non-US users see their locale's date format
+  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }
 
 function getDaysBadgeClass(dateStr: string, isPast: boolean): string {
@@ -377,4 +377,3 @@ export default function EarningsCalendar({ watchlistId }: EarningsCalendarProps)
     </div>
   );
 }
-```
