@@ -1,0 +1,62 @@
+name: Deploy Staging
+
+# Runs after the Deploy workflow successfully builds and pushes Docker images
+# on a push to main. Pulls the published sha-tagged images and updates the
+# staging environment via SSH, keeping builds centralised in deploy.yml.
+on:
+  workflow_run:
+    workflows: ["Deploy"]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  deploy-staging:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: staging
+    # Only proceed when the upstream build succeeded
+    if: github.event.workflow_run.conclusion == 'success'
+
+    steps:
+      - name: Compute image tag
+        id: tag
+        # deploy.yml publishes images tagged sha-<short-sha>; reconstruct that
+        # tag from the workflow_run head SHA so we pull the exact same image.
+        run: |
+          SHA="${{ github.event.workflow_run.head_sha }}"
+          echo "value=sha-${SHA:0:7}" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          IMAGE_TAG: ${{ steps.tag.outputs.value }}
+          GHCR_OWNER: ${{ github.repository_owner }}
+          ACTOR: ${{ github.actor }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          host: ${{ secrets.STAGING_HOST }}
+          username: ${{ secrets.STAGING_SSH_USER }}
+          key: ${{ secrets.STAGING_SSH_KEY }}
+          envs: IMAGE_TAG,GHCR_OWNER,ACTOR,GITHUB_TOKEN
+          script: |
+            set -e
+            cd "${{ secrets.STAGING_DEPLOY_PATH }}"
+
+            echo "${GITHUB_TOKEN}" | docker login ghcr.io -u "${ACTOR}" --password-stdin
+
+            export BACKEND_IMAGE="ghcr.io/${GHCR_OWNER}/tickerpulse-backend:${IMAGE_TAG}"
+            export FRONTEND_IMAGE="ghcr.io/${GHCR_OWNER}/tickerpulse-frontend:${IMAGE_TAG}"
+
+            docker pull "${BACKEND_IMAGE}"
+            docker pull "${FRONTEND_IMAGE}"
+
+            BACKEND_IMAGE="${BACKEND_IMAGE}" FRONTEND_IMAGE="${FRONTEND_IMAGE}" \
+              docker compose up -d --remove-orphans
+
+            docker compose ps
+            echo "Staging deployed: ${IMAGE_TAG}"
