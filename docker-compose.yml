@@ -1,1 +1,58 @@
-*(services now have `image: ${BACKEND_IMAGE:-tickerpulse-backend:local}` and `image: ${FRONTEND_IMAGE:-tickerpulse-frontend:local}` alongside their existing `build:` blocks)*
+```yaml
+services:
+  backend:
+    image: ${BACKEND_IMAGE:-tickerpulse-backend:local}
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    ports:
+      - "5000:5000"
+    environment:
+      FLASK_DEBUG: "false"
+      DB_PATH: /data/stock_news.db
+      SECRET_KEY: ${SECRET_KEY:-tickerpulse-dev-key-change-in-prod}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      GOOGLE_AI_KEY: ${GOOGLE_AI_KEY:-}
+      XAI_API_KEY: ${XAI_API_KEY:-}
+      POLYGON_API_KEY: ${POLYGON_API_KEY:-}
+      ALPHA_VANTAGE_KEY: ${ALPHA_VANTAGE_KEY:-}
+      FINNHUB_API_KEY: ${FINNHUB_API_KEY:-}
+    volumes:
+      - tickerpulse-data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c",
+        "import urllib.request; urllib.request.urlopen('http://localhost:5000/api/health')"]
+      interval: 30s
+      timeout: 10s
+      start_period: 30s
+      retries: 3
+
+  frontend:
+    image: ${FRONTEND_IMAGE:-tickerpulse-frontend:local}
+    build:
+      context: frontend
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:5000}
+    ports:
+      - "3000:3000"
+    environment:
+      BACKEND_URL: http://backend:5000
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e",
+        "require('http').get('http://localhost:3000/',r=>process.exit(r.statusCode<500?0:1)).on('error',()=>process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      start_period: 30s
+      retries: 3
+
+volumes:
+  tickerpulse-data:
+```
