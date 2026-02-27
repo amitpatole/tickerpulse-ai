@@ -1,12 +1,11 @@
+```typescript
 'use client';
 
-import { useState } from 'react';
+import { useState, useRef, useEffect, useMemo } from 'react';
 import Link from 'next/link';
 import { Brain } from 'lucide-react';
 import { clsx } from 'clsx';
-import { useRatings } from '@/hooks/useRatings';
-import { useSSERatings } from '@/hooks/useSSERatings';
-import type { AIRating } from '@/lib/types';
+import type { AIRating, PriceUpdate } from '@/lib/types';
 import { RATING_BG_CLASSES } from '@/lib/types';
 
 type SortKey = 'score' | 'confidence' | 'price_change_pct';
@@ -49,12 +48,18 @@ function scoreColor(score: number): string {
   return 'bg-red-500';
 }
 
+function formatPrice(price: number | null | undefined): string {
+  if (price == null) return '—';
+  return `$${price.toFixed(2)}`;
+}
+
 interface RatingRowProps {
   rating: AIRating;
   rank: number;
+  flashing?: boolean;
 }
 
-function RatingRow({ rating, rank }: RatingRowProps) {
+function RatingRow({ rating, rank, flashing }: RatingRowProps) {
   const badgeClass =
     RATING_BG_CLASSES[rating.rating] ??
     'bg-slate-500/20 text-slate-400 border-slate-500/30';
@@ -99,6 +104,14 @@ function RatingRow({ rating, rank }: RatingRowProps) {
       </span>
       <span
         className={clsx(
+          'w-16 shrink-0 text-right font-mono text-[10px] text-slate-300',
+          flashing && 'animate-price-flash rounded',
+        )}
+      >
+        {formatPrice(rating.current_price)}
+      </span>
+      <span
+        className={clsx(
           'w-14 shrink-0 text-right font-mono text-xs font-semibold',
           pct >= 0 ? 'text-emerald-400' : 'text-red-400',
         )}
@@ -111,28 +124,106 @@ function RatingRow({ rating, rank }: RatingRowProps) {
 }
 
 interface AIRatingsPanelProps {
-  /** Pre-fetched ratings from a parent useDashboardData call.
-   *  Pass null while loading, AIRating[] when ready.
-   *  Omit entirely to have the component self-fetch. */
-  ratings?: AIRating[] | null;
+  /** Base ratings from useDashboardData. null = loading. */
+  ratings: AIRating[] | null;
+  /**
+   * Optional live price map keyed by ticker, sourced from useWSPrices.
+   *
+   * When supplied, price fields (current_price, price_change, price_change_pct)
+   * are overlaid onto display rows WITHOUT affecting sort order — sort is always
+   * computed from the base `ratings` values so WS ticks never re-order the table.
+   * The flash animation is also driven by changes in this map.
+   *
+   * When omitted the component falls back to detecting price changes directly
+   * from the `ratings` prop (pre-merged by useDashboardData) — backward compat.
+   */
+  wsPrices?: Record<string, PriceUpdate>;
 }
 
-export default function AIRatingsPanel({ ratings: ratingsProp }: AIRatingsPanelProps = {}) {
+export default function AIRatingsPanel({ ratings, wsPrices }: AIRatingsPanelProps) {
   const [sortKey, setSortKey] = useState<SortKey>('score');
+  const isLoading = ratings === null;
 
-  const selfFetch = ratingsProp === undefined;
-  const { data: hookRatings, loading, error } = useRatings({ enabled: selfFetch });
+  // Price flash: track which tickers had a recent price change
+  const [flashSet, setFlashSet] = useState<Set<string>>(new Set());
+  const prevPricesRef = useRef<Record<string, number | null | undefined>>({});
+  const flashTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
 
-  const baseRatings = selfFetch ? hookRatings : ratingsProp;
-  const ratings = useSSERatings(baseRatings ?? null);
-  const isLoading = selfFetch ? (loading && !hookRatings) : ratingsProp === null;
-  const displayError = selfFetch ? error : null;
+  function triggerFlash(tickers: Set<string>) {
+    if (tickers.size === 0) return;
+    setFlashSet((prev) => new Set([...prev, ...tickers]));
+    for (const ticker of tickers) {
+      if (flashTimersRef.current[ticker]) clearTimeout(flashTimersRef.current[ticker]);
+      flashTimersRef.current[ticker] = setTimeout(() => {
+        setFlashSet((prev) => {
+          const next = new Set(prev);
+          next.delete(ticker);
+          return next;
+        });
+        delete flashTimersRef.current[ticker];
+      }, 800);
+    }
+  }
 
-  const sorted = [...(ratings ?? [])].sort((a, b) => {
-    if (sortKey === 'score') return b.score - a.score;
-    if (sortKey === 'confidence') return b.confidence - a.confidence;
-    return (b.price_change_pct ?? 0) - (a.price_change_pct ?? 0);
-  });
+  // Flash driven by wsPrices changes (when separate WS map is provided)
+  useEffect(() => {
+    if (!wsPrices) return;
+    const updated = new Set<string>();
+    for (const [ticker, priceData] of Object.entries(wsPrices)) {
+      const prev = prevPricesRef.current[ticker];
+      if (prev !== undefined && prev !== priceData.price) {
+        updated.add(ticker);
+      }
+      prevPricesRef.current[ticker] = priceData.price;
+    }
+    triggerFlash(updated);
+  }, [wsPrices]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Flash driven by ratings price changes (backward-compat when wsPrices not provided)
+  useEffect(() => {
+    if (wsPrices !== undefined || !ratings) return;
+    const updated = new Set<string>();
+    for (const rating of ratings) {
+      const prev = prevPricesRef.current[rating.ticker];
+      if (prev !== undefined && prev !== rating.current_price) {
+        updated.add(rating.ticker);
+      }
+      prevPricesRef.current[rating.ticker] = rating.current_price;
+    }
+    triggerFlash(updated);
+  }, [ratings, wsPrices]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Cleanup flash timers on unmount
+  useEffect(() => {
+    return () => {
+      for (const timer of Object.values(flashTimersRef.current)) clearTimeout(timer);
+    };
+  }, []);
+
+  // Sort order is determined by BASE rating values only.
+  // WS price updates (via wsPrices prop) never cause a re-sort.
+  const sorted = useMemo(() => {
+    return [...(ratings ?? [])].sort((a, b) => {
+      if (sortKey === 'score') return b.score - a.score;
+      if (sortKey === 'confidence') return b.confidence - a.confidence;
+      return (b.price_change_pct ?? 0) - (a.price_change_pct ?? 0);
+    });
+  }, [ratings, sortKey]);
+
+  // Apply WS price overlay for display — preserves sort order from base ratings
+  const displayRows = useMemo(() => {
+    if (!wsPrices) return sorted;
+    return sorted.map((r) => {
+      const ws = wsPrices[r.ticker];
+      if (!ws) return r;
+      return {
+        ...r,
+        current_price: ws.price,
+        price_change: ws.change,
+        price_change_pct: ws.change_pct,
+      };
+    });
+  }, [sorted, wsPrices]);
 
   return (
     <div className="rounded-xl border border-slate-700/50 bg-slate-800/50">
@@ -177,6 +268,9 @@ export default function AIRatingsPanel({ ratings: ratingsProp }: AIRatingsPanelP
           <span className="w-9 shrink-0 text-right text-[9px] uppercase tracking-wider text-slate-500">
             Conf.
           </span>
+          <span className="w-16 shrink-0 text-right text-[9px] uppercase tracking-wider text-slate-500">
+            Price
+          </span>
           <span className="w-14 shrink-0 text-right text-[9px] uppercase tracking-wider text-slate-500">
             Chg %
           </span>
@@ -193,20 +287,21 @@ export default function AIRatingsPanel({ ratings: ratingsProp }: AIRatingsPanelP
           </div>
         )}
 
-        {displayError && !ratings && (
-          <div className="p-4 text-center text-sm text-red-400">{displayError}</div>
-        )}
-
-        {ratings && ratings.length === 0 && (
+        {ratings !== null && ratings.length === 0 && (
           <div className="p-6 text-center text-sm text-slate-500">
             No stocks in watchlist.
           </div>
         )}
 
-        {sorted.length > 0 && (
+        {displayRows.length > 0 && (
           <div className="divide-y divide-slate-700/30">
-            {sorted.map((r, i) => (
-              <RatingRow key={r.ticker} rating={r} rank={i + 1} />
+            {displayRows.map((r, i) => (
+              <RatingRow
+                key={r.ticker}
+                rating={r}
+                rank={i + 1}
+                flashing={flashSet.has(r.ticker)}
+              />
             ))}
           </div>
         )}
@@ -214,3 +309,4 @@ export default function AIRatingsPanel({ ratings: ratingsProp }: AIRatingsPanelP
     </div>
   );
 }
+```

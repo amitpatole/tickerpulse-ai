@@ -1,4 +1,5 @@
 ```python
+
 """
 TickerPulse AI v3.0 - WebSocket Connection Manager
 Thread-safe registry for WebSocket connections with per-client ticker subscriptions.

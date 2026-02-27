@@ -1,3 +1,4 @@
+```typescript
 // ---- AI Ratings ---------------------------------------------------------------
 
 export interface AIRating {
@@ -76,12 +77,28 @@ export interface StockDetailNewsItem {
   sentiment_score?: number | null;
 }
 
+/** AI rating block inlined into the stock detail response. */
+export interface AIRatingBlock {
+  rating: string;
+  /** Overall AI score 0–100. */
+  score: number;
+  /** Confidence in the rating, 0–1 scale. */
+  confidence: number;
+  technical_score?: number | null;
+  fundamental_score?: number | null;
+  summary?: string | null;
+  sentiment_label?: string | null;
+  sector?: string | null;
+  updated_at?: string | null;
+}
+
 export interface StockDetail {
   ticker?: string;
   quote?: StockDetailQuote;
   candles?: StockDetailCandle[];
   indicators?: StockDetailIndicators;
   news?: StockDetailNewsItem[];
+  ai_rating?: AIRatingBlock | null;
   // Legacy fields for backward compatibility
   name?: string;
   current_price?: number | null;
@@ -504,3 +521,4 @@ export const AGENT_STATUS_COLORS: Record<string, string> = {
   success: 'text-emerald-400 bg-emerald-500/20',
   error: 'text-red-400 bg-red-500/20',
 };
+```

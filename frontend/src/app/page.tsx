@@ -1,8 +1,12 @@
+```typescript
 'use client';
 
+import { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import Header from '@/components/layout/Header';
 import KPICards from '@/components/dashboard/KPICards';
 import StockGrid from '@/components/dashboard/StockGrid';
+import WatchlistTabs from '@/components/dashboard/WatchlistTabs';
 import NewsFeed from '@/components/dashboard/NewsFeed';
 import EarningsCalendar from '@/components/dashboard/EarningsCalendar';
 import ProviderRateLimitPanel from '@/components/dashboard/ProviderRateLimitPanel';
@@ -18,7 +22,9 @@ import WSStatusIndicator from '@/components/ui/WSStatusIndicator';
 import { useDashboardData } from '@/hooks/useDashboardData';
 
 export default function DashboardPage() {
-  const { ratings, alerts, summary, wsStatus, refetch, lastPriceAt } = useDashboardData();
+  const [activeWatchlistId, setActiveWatchlistId] = useState<number>(1);
+  const router = useRouter();
+  const { ratings, alerts, summary, wsStatus, refetch, lastPriceAt } = useDashboardData(activeWatchlistId);
 
   return (
     <div className="flex flex-col">
@@ -48,7 +54,17 @@ export default function DashboardPage() {
                   <RefreshIntervalControl />
                 </div>
               </div>
-              <StockGrid ratings={ratings} onRefetch={refetch} />
+              <WatchlistTabs
+                activeId={activeWatchlistId}
+                onSelect={setActiveWatchlistId}
+                onGroupsChanged={() => refetch()}
+              />
+              <StockGrid
+                watchlistId={activeWatchlistId}
+                ratings={ratings}
+                onRefetch={refetch}
+                onRowClick={(ticker) => router.push(`/stocks/${ticker}`)}
+              />
             </div>
             <PortfolioChart />
           </div>
@@ -81,3 +97,4 @@ export default function DashboardPage() {
     </div>
   );
 }
+```

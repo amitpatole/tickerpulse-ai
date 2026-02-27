@@ -31,13 +31,17 @@ export interface DashboardData {
  * into the ratings array in-place (by ticker) without a full refetch.
  * Sort order is never disturbed — only price fields are overwritten.
  *
+ * @param activeWatchlistId - Optional watchlist ID to scope ratings fetch.
+ *   When changed, only ratings are re-fetched (not alerts/news/summary),
+ *   so tab switches are fast and don't reload the entire dashboard.
+ *
  * Refresh intervals:
  *   ratings  → server-configured (default 30s) — full AI score sync
  *   alerts   → 30s
  *   news     → 60s
  *   summary  → 60s (KPI counts change infrequently)
  */
-export function useDashboardData(): DashboardData {
+export function useDashboardData(activeWatchlistId?: number): DashboardData {
   const [ratings, setRatings] = useState<AIRating[] | null>(null);
   const [alerts, setAlerts] = useState<Alert[] | null>(null);
   const [news, setNews] = useState<NewsArticle[] | null>(null);
@@ -51,6 +55,13 @@ export function useDashboardData(): DashboardData {
   // Server-driven polling interval for ratings; separate state so timers re-create on change
   const [ratingsInterval, setRatingsInterval] = useState(30_000);
   const mountedRef = useRef(true);
+  // Keep latest watchlistId accessible inside polling timer closure without recreating the timer
+  const watchlistIdRef = useRef(activeWatchlistId);
+
+  // Sync watchlistIdRef to the latest prop value
+  useEffect(() => {
+    watchlistIdRef.current = activeWatchlistId;
+  });
 
   const fetchAll = useCallback(async () => {
     if (!mountedRef.current) return;
@@ -59,7 +70,7 @@ export function useDashboardData(): DashboardData {
 
     // Fire all four in parallel; treat alerts/news/summary failures as non-fatal
     const [ratingsResult, alertsResult, newsResult, summaryResult] = await Promise.allSettled([
-      getRatings(),
+      getRatings(watchlistIdRef.current),
       getAlerts(),
       getNews(),
       getDashboardSummary(),
@@ -137,11 +148,35 @@ export function useDashboardData(): DashboardData {
     };
   }, [fetchAll]);
 
+  // When activeWatchlistId changes after the initial mount, re-fetch ratings
+  // only — not the full 4-endpoint suite.  This makes watchlist tab switches
+  // fast without disrupting alerts, news, or summary panels.
+  const skipFirstWatchlistEffect = useRef(true);
+  useEffect(() => {
+    if (skipFirstWatchlistEffect.current) {
+      skipFirstWatchlistEffect.current = false;
+      return;
+    }
+    if (!mountedRef.current) return;
+    getRatings(activeWatchlistId)
+      .then((data) => {
+        if (mountedRef.current) {
+          setRatings(data);
+          setWsTickers(data.map((r) => r.ticker));
+        }
+      })
+      .catch((err) => {
+        if (mountedRef.current) {
+          setError(err instanceof Error ? err.message : 'Failed to load ratings');
+        }
+      });
+  }, [activeWatchlistId]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Polling timers — re-created when ratingsInterval changes (server config update)
   useEffect(() => {
     const ratingsTimer = setInterval(() => {
       if (!mountedRef.current) return;
-      getRatings()
+      getRatings(watchlistIdRef.current)
         .then((data) => {
           if (mountedRef.current) {
             setRatings(data);

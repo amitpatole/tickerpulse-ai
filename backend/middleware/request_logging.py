@@ -1,4 +1,5 @@
 ```python
+
 """
 TickerPulse AI v3.0 — Request tracing middleware and JSON log formatter.
 """

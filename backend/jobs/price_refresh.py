@@ -1,4 +1,5 @@
 ```python
+
 """
 TickerPulse AI v3.0 - Price Refresh Job
 Fetches live prices for all active tickers and pushes ``price_update`` SSE events.
