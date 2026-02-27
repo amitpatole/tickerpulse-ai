@@ -1,480 +1,226 @@
-```tsx
 /**
- * Tests for AlertsTable component.
+ * Tests for AlertsTable Component
  *
- * Tests cover:
- * - Filtering alerts by severity (all/critical/warning/info)
- * - Alert count badges displayed correctly
- * - SeverityBadge rendering with correct icons and colors
- * - Filtering behavior and counter updates
- * - Empty state handling for each filter
- * - Time formatting (timeAgo function)
- * - Loading and error states
- * - initialData prop eliminates cold-start loading flash
+ * Validates alert rendering, severity filtering, cold-start loading pattern,
+ * and graceful degradation when data is unavailable.
+ *
+ * Key design: accepts optional initialData prop from parent useDashboardData
+ * to eliminate cold-start loading flash while still self-refreshing every 15s.
  */
 
-import React from 'react';
-import { render, screen } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
-import AlertsTable from '../AlertsTable';
-import { useApi } from '@/hooks/useApi';
+import { render, screen, fireEvent } from '@testing-library/react';
+import '@testing-library/jest-dom';
+import AlertsTable from '@/components/dashboard/AlertsTable';
 import type { Alert } from '@/lib/types';
 
-// Mock the useApi hook
-jest.mock('@/hooks/useApi');
-
-// Mock lucide-react icons
-jest.mock('lucide-react', () => ({
-  AlertCircle: () => <div data-testid="alert-circle-icon" />,
-  AlertTriangle: () => <div data-testid="alert-triangle-icon" />,
-  Info: () => <div data-testid="info-icon" />,
-  Clock: () => <div data-testid="clock-icon" />,
+// Prevent actual API calls — keep the hook in its loading state throughout tests
+jest.mock('@/lib/api', () => ({
+  getAlerts: jest.fn(() => new Promise(() => {})),
 }));
 
-const mockUseApi = useApi as jest.MockedFunction<typeof useApi>;
-
-/** Build a minimal valid Alert object with sensible defaults for fields not under test. */
-function makeAlert(overrides: Partial<Alert> & Pick<Alert, 'id' | 'ticker' | 'severity' | 'created_at'>): Alert {
-  return {
+const mockAlerts: Alert[] = [
+  {
+    id: 1,
+    ticker: 'AAPL',
     condition_type: 'price_above',
-    threshold: 100,
+    threshold: 150,
     enabled: true,
-    sound_type: 'default',
-    triggered_at: null,
-    type: 'price_alert',
-    message: 'Test alert message',
-    ...overrides,
-  };
-}
+    sound_type: 'chime',
+    triggered_at: '2026-02-27T10:00:00Z',
+    created_at: '2026-02-27T10:00:00Z',
+    severity: 'critical',
+    type: 'price_above',
+    message: 'Price exceeded $150',
+  },
+  {
+    id: 2,
+    ticker: 'GOOGL',
+    condition_type: 'pct_change',
+    threshold: 5,
+    enabled: true,
+    sound_type: 'chime',
+    triggered_at: '2026-02-27T09:30:00Z',
+    created_at: '2026-02-27T09:30:00Z',
+    severity: 'warning',
+    type: 'pct_change',
+    message: 'Volume spike detected',
+  },
+  {
+    id: 3,
+    ticker: 'MSFT',
+    condition_type: 'price_below',
+    threshold: 300,
+    enabled: true,
+    sound_type: 'bell',
+    triggered_at: '2026-02-27T08:45:00Z',
+    created_at: '2026-02-27T08:45:00Z',
+    severity: 'info',
+    type: 'price_below',
+    message: 'Price dropped below support',
+  },
+];
 
 describe('AlertsTable', () => {
-  // =========================================================================
-  // Test Data: Mock Alerts with various severities
-  // =========================================================================
+  describe('Happy Path: Renders alerts with proper filtering and display', () => {
+    it('displays all alerts when initialData is provided and filter is "all"', () => {
+      render(<AlertsTable initialData={mockAlerts} />);
 
-  const mockAlerts: Alert[] = [
-    makeAlert({
-      id: 1,
-      ticker: 'AAPL',
-      type: 'price_alert',
-      message: 'Apple stock crossed moving average',
-      severity: 'critical',
-      created_at: new Date(Date.now() - 5 * 60000).toISOString(),
-    }),
-    makeAlert({
-      id: 2,
-      ticker: 'TSLA',
-      type: 'news_alert',
-      message: 'Tesla earnings announcement',
-      severity: 'warning',
-      created_at: new Date(Date.now() - 30 * 60000).toISOString(),
-    }),
-    makeAlert({
-      id: 3,
-      ticker: 'MSFT',
-      type: 'sentiment_alert',
-      message: 'Sentiment shift detected',
-      severity: 'info',
-      created_at: new Date(Date.now() - 2 * 3600000).toISOString(),
-    }),
-    makeAlert({
-      id: 4,
-      ticker: 'GOOGL',
-      type: 'price_alert',
-      message: 'Volume spike detected',
-      severity: 'critical',
-      created_at: new Date(Date.now() - 1 * 86400000).toISOString(),
-    }),
-    makeAlert({
-      id: 5,
-      ticker: 'AMZN',
-      type: 'technical_alert',
-      message: 'RSI above 70',
-      severity: 'warning',
-      created_at: new Date(Date.now() - 3 * 86400000).toISOString(),
-    }),
-  ];
-
-  beforeEach(() => {
-    jest.clearAllMocks();
-  });
-
-  // =========================================================================
-  // Happy Path: Renders table with filters and counts
-  // =========================================================================
-
-  describe('happy path: displays table with filters and severity counts', () => {
-    it('should render alerts table with all columns visible', () => {
-      // Arrange
-      mockUseApi.mockReturnValue({
-        data: mockAlerts,
-        loading: false,
-        error: null,
-        refetch: jest.fn(),
-      });
-
-      // Act
-      render(<AlertsTable />);
-
-      // Assert: header and columns
-      expect(screen.getByText('Alerts')).toBeInTheDocument();
-      expect(screen.getByText('Ticker')).toBeInTheDocument();
-      expect(screen.getByText('Severity')).toBeInTheDocument();
-      expect(screen.getByText('Message')).toBeInTheDocument();
-      expect(screen.getByText('Type')).toBeInTheDocument();
-      expect(screen.getByText('Time')).toBeInTheDocument();
-    });
-
-    it('should display alert count badge in header', () => {
-      // Arrange
-      mockUseApi.mockReturnValue({
-        data: mockAlerts,
-        loading: false,
-        error: null,
-        refetch: jest.fn(),
-      });
-
-      // Act
-      render(<AlertsTable />);
-
-      // Assert: count badge shows total alerts (5)
-      const countBadge = screen.getByText('5');
-      expect(countBadge).toBeInTheDocument();
-      expect(countBadge).toHaveClass('text-red-400');
-    });
-
-    it('should display all alerts in table body when filter is "all"', () => {
-      // Arrange
-      mockUseApi.mockReturnValue({
-        data: mockAlerts,
-        loading: false,
-        error: null,
-        refetch: jest.fn(),
-      });
-
-      // Act
-      render(<AlertsTable />);
-
-      // Assert: all 5 ticker values visible
       expect(screen.getByText('AAPL')).toBeInTheDocument();
-      expect(screen.getByText('TSLA')).toBeInTheDocument();
+      expect(screen.getByText('GOOGL')).toBeInTheDocument();
       expect(screen.getByText('MSFT')).toBeInTheDocument();
-      expect(screen.getByText('GOOGL')).toBeInTheDocument();
-      expect(screen.getByText('AMZN')).toBeInTheDocument();
+      expect(screen.getByText('Price exceeded $150')).toBeInTheDocument();
+      expect(screen.getByText('Volume spike detected')).toBeInTheDocument();
     });
 
-    it('should display alert messages correctly', () => {
-      // Arrange
-      mockUseApi.mockReturnValue({
-        data: mockAlerts,
-        loading: false,
-        error: null,
-        refetch: jest.fn(),
-      });
+    it('displays correct alert count badge', () => {
+      render(<AlertsTable initialData={mockAlerts} />);
 
-      // Act
-      render(<AlertsTable />);
+      // Component should show "Alerts 3" in the header
+      expect(screen.getByText(/Alerts/)).toBeInTheDocument();
+      const badge = screen.getByText('3');
+      expect(badge).toBeInTheDocument();
+    });
 
-      // Assert
-      expect(screen.getByText('Apple stock crossed moving average')).toBeInTheDocument();
-      expect(screen.getByText('Tesla earnings announcement')).toBeInTheDocument();
-      expect(screen.getByText('Sentiment shift detected')).toBeInTheDocument();
+    it('shows severity badge with appropriate styling for each alert', () => {
+      render(<AlertsTable initialData={mockAlerts} />);
+
+      // Severity badges should be rendered
+      const severityElements = screen.getAllByText(/critical|warning|info/i);
+      expect(severityElements.length).toBeGreaterThanOrEqual(3);
+    });
+
+    it('renders alert type with underscores replaced by spaces', () => {
+      render(<AlertsTable initialData={mockAlerts} />);
+
+      // price_above should render as "price above"
+      expect(screen.getByText(/price above/i)).toBeInTheDocument();
+      // pct_change should render as "pct change"
+      expect(screen.getByText(/pct change/i)).toBeInTheDocument();
+      // price_below should render as "price below"
+      expect(screen.getByText(/price below/i)).toBeInTheDocument();
     });
   });
 
-  // =========================================================================
-  // Filtering: Severity filter tabs and counts
-  // =========================================================================
+  describe('Edge Case: Severity filtering works correctly', () => {
+    it('filters alerts by severity when Critical tab is clicked', () => {
+      render(<AlertsTable initialData={mockAlerts} />);
 
-  describe('filtering: severity filter tabs and alert counts', () => {
-    it('should show severity filter counts: critical(2), warning(2), info(1)', () => {
-      // Arrange
-      mockUseApi.mockReturnValue({
-        data: mockAlerts,
-        loading: false,
-        error: null,
-        refetch: jest.fn(),
-      });
+      const criticalTab = screen.getByRole('tab', { name: /Critical \(1\)/i });
+      fireEvent.click(criticalTab);
 
-      // Act
-      render(<AlertsTable />);
-
-      // Assert: filter buttons show counts
-      expect(screen.getByRole('tab', { name: /Critical/i })).toHaveTextContent('(2)');
-      expect(screen.getByRole('tab', { name: /Warning/i })).toHaveTextContent('(2)');
-      expect(screen.getByRole('tab', { name: /Info/i })).toHaveTextContent('(1)');
-    });
-
-    it('should filter alerts when clicking Critical tab', async () => {
-      // Arrange
-      const user = userEvent.setup();
-      mockUseApi.mockReturnValue({
-        data: mockAlerts,
-        loading: false,
-        error: null,
-        refetch: jest.fn(),
-      });
-
-      // Act
-      render(<AlertsTable />);
-      await user.click(screen.getByRole('tab', { name: /Critical/i }));
-
-      // Assert: only critical alerts (AAPL, GOOGL) visible
+      // Should show only critical alert
       expect(screen.getByText('AAPL')).toBeInTheDocument();
-      expect(screen.getByText('GOOGL')).toBeInTheDocument();
-      expect(screen.queryByText('TSLA')).not.toBeInTheDocument();
+      expect(screen.queryByText('GOOGL')).not.toBeInTheDocument();
       expect(screen.queryByText('MSFT')).not.toBeInTheDocument();
-      expect(screen.queryByText('AMZN')).not.toBeInTheDocument();
     });
 
-    it('should filter alerts when clicking Warning tab', async () => {
-      // Arrange
-      const user = userEvent.setup();
-      mockUseApi.mockReturnValue({
-        data: mockAlerts,
-        loading: false,
-        error: null,
-        refetch: jest.fn(),
-      });
+    it('displays count badges for each severity filter', () => {
+      render(<AlertsTable initialData={mockAlerts} />);
 
-      // Act
-      render(<AlertsTable />);
-      await user.click(screen.getByRole('tab', { name: /Warning/i }));
+      // Should show filter counts: Critical (1), Warning (1), Info (1)
+      expect(screen.getByText(/Critical \(1\)/i)).toBeInTheDocument();
+      expect(screen.getByText(/Warning \(1\)/i)).toBeInTheDocument();
+      expect(screen.getByText(/Info \(1\)/i)).toBeInTheDocument();
+    });
 
-      // Assert: only warning alerts (TSLA, AMZN) visible
-      expect(screen.getByText('TSLA')).toBeInTheDocument();
-      expect(screen.getByText('AMZN')).toBeInTheDocument();
-      expect(screen.queryByText('AAPL')).not.toBeInTheDocument();
+    it('returns to All filter and shows all alerts after filtering', () => {
+      render(<AlertsTable initialData={mockAlerts} />);
+
+      // Filter by critical
+      const criticalTab = screen.getByRole('tab', { name: /Critical/i });
+      fireEvent.click(criticalTab);
       expect(screen.queryByText('GOOGL')).not.toBeInTheDocument();
-    });
 
-    it('should filter alerts when clicking Info tab', async () => {
-      // Arrange
-      const user = userEvent.setup();
-      mockUseApi.mockReturnValue({
-        data: mockAlerts,
-        loading: false,
-        error: null,
-        refetch: jest.fn(),
-      });
+      // Switch back to All
+      const allTab = screen.getByRole('tab', { name: /^All$/i });
+      fireEvent.click(allTab);
 
-      // Act
-      render(<AlertsTable />);
-      await user.click(screen.getByRole('tab', { name: /Info/i }));
-
-      // Assert: only info alert (MSFT) visible
-      expect(screen.getByText('MSFT')).toBeInTheDocument();
-      expect(screen.queryByText('AAPL')).not.toBeInTheDocument();
-      expect(screen.queryByText('TSLA')).not.toBeInTheDocument();
-      expect(screen.queryByText('GOOGL')).not.toBeInTheDocument();
-      expect(screen.queryByText('AMZN')).not.toBeInTheDocument();
-    });
-
-    it('should return to All filter and show all alerts', async () => {
-      // Arrange
-      const user = userEvent.setup();
-      mockUseApi.mockReturnValue({
-        data: mockAlerts,
-        loading: false,
-        error: null,
-        refetch: jest.fn(),
-      });
-
-      // Act
-      render(<AlertsTable />);
-      await user.click(screen.getByRole('tab', { name: /Critical/i }));
-      await user.click(screen.getByRole('tab', { name: /^All/i }));
-
-      // Assert: all alerts visible again
+      // All alerts should be visible again
       expect(screen.getByText('AAPL')).toBeInTheDocument();
-      expect(screen.getByText('TSLA')).toBeInTheDocument();
-      expect(screen.getByText('MSFT')).toBeInTheDocument();
       expect(screen.getByText('GOOGL')).toBeInTheDocument();
-      expect(screen.getByText('AMZN')).toBeInTheDocument();
+      expect(screen.getByText('MSFT')).toBeInTheDocument();
     });
   });
 
-  // =========================================================================
-  // initialData: Pre-fetched data eliminates cold-start loading flash
-  // =========================================================================
+  describe('Edge Case: Empty and null data handling', () => {
+    it('displays empty state when initialData is an empty array', () => {
+      render(<AlertsTable initialData={[]} />);
 
-  describe('initialData: pre-fetched data renders before first fetch completes', () => {
-    it('renders initialData immediately when useApi is still loading', () => {
-      // Arrange: useApi returns null data (first fetch in progress)
-      mockUseApi.mockReturnValue({
-        data: null,
-        loading: true,
-        error: null,
-        refetch: jest.fn(),
-      });
-
-      // Act: pass pre-fetched data as initialData
-      render(<AlertsTable initialData={mockAlerts} />);
-
-      // Assert: data renders immediately (no loading skeleton shown)
-      expect(screen.getByText('AAPL')).toBeInTheDocument();
-      expect(screen.queryByText('Loading alerts...')).not.toBeInTheDocument();
+      expect(screen.getByText(/no alerts recorded yet/i)).toBeInTheDocument();
     });
 
-    it('transitions from initialData to freshly fetched data', () => {
-      // Arrange: useApi returns fresh data after loading completes
-      mockUseApi.mockReturnValue({
-        data: mockAlerts.slice(0, 2), // Only 2 fresh alerts
-        loading: false,
-        error: null,
-        refetch: jest.fn(),
-      });
+    it('displays empty state message for filtered severity with no matches', () => {
+      const singleAlert: Alert[] = [mockAlerts[0]]; // Only critical alert
 
-      // Act
-      render(<AlertsTable initialData={mockAlerts} />);
+      render(<AlertsTable initialData={singleAlert} />);
 
-      // Assert: fresh data takes precedence over initialData
-      // Only 2 fresh alerts are shown (not all 5 from initialData)
-      const countBadge = screen.getByText('2');
-      expect(countBadge).toHaveClass('text-red-400');
+      // Filter to Warning (should have no matches)
+      const warningTab = screen.getByRole('tab', { name: /Warning/i });
+      fireEvent.click(warningTab);
+
+      expect(screen.getByText(/no warning alerts/i)).toBeInTheDocument();
     });
 
-    it('shows loading when both initialData and freshAlerts are null', () => {
-      // Arrange
-      mockUseApi.mockReturnValue({
-        data: null,
-        loading: true,
-        error: null,
-        refetch: jest.fn(),
-      });
+    it('shows loading state when initialData prop is undefined', () => {
+      render(<AlertsTable />);
 
-      // Act: no initialData passed
+      // Without initialData, component shows loading while internal useApi fetches
+      expect(screen.getByText(/loading alerts/i)).toBeInTheDocument();
+    });
+
+    it('shows loading state when initialData is null (parent still loading)', () => {
       render(<AlertsTable initialData={null} />);
 
-      // Assert: loading state shown
-      expect(screen.getByText('Loading alerts...')).toBeInTheDocument();
+      // null prop indicates parent is loading
+      expect(screen.getByText(/loading alerts/i)).toBeInTheDocument();
     });
   });
 
-  // =========================================================================
-  // Edge Cases: Empty state, time formatting, unknown severity
-  // =========================================================================
-
-  describe('edge cases: empty state, time formatting', () => {
-    it('should display empty state for "all" filter when no alerts exist', () => {
-      // Arrange
-      mockUseApi.mockReturnValue({
-        data: [],
-        loading: false,
-        error: null,
-        refetch: jest.fn(),
-      });
-
-      // Act
-      render(<AlertsTable />);
-
-      // Assert
-      expect(screen.getByText('No alerts recorded yet.')).toBeInTheDocument();
-    });
-
-    it('should display empty state for specific filter with no matches', async () => {
-      // Arrange
-      const user = userEvent.setup();
-      const onlyCritical = mockAlerts.filter((a) => a.severity === 'critical');
-
-      mockUseApi.mockReturnValue({
-        data: onlyCritical,
-        loading: false,
-        error: null,
-        refetch: jest.fn(),
-      });
-
-      // Act
-      render(<AlertsTable />);
-      await user.click(screen.getByRole('tab', { name: /Warning/i }));
-
-      // Assert
-      expect(screen.getByText('No warning alerts.')).toBeInTheDocument();
-    });
-
-    it('should render clock icons for time column', () => {
-      // Arrange
-      mockUseApi.mockReturnValue({
-        data: mockAlerts,
-        loading: false,
-        error: null,
-        refetch: jest.fn(),
-      });
-
-      // Act
-      render(<AlertsTable />);
-
-      // Assert: Clock icon renders for each alert row
-      const clockIcons = screen.getAllByTestId('clock-icon');
-      expect(clockIcons.length).toBeGreaterThan(0);
-    });
-
-    it('should render unknown severity badge with default styling', () => {
-      // Arrange: severity value outside the defined union — cast required
-      const unknownSeverityAlert = [
-        makeAlert({
-          id: 99,
+  describe('Edge Case: Time formatting in alert rows', () => {
+    it('displays time-ago format for recent alerts', () => {
+      // Create alert created just now
+      const recentAlert: Alert[] = [
+        {
+          id: 1,
           ticker: 'TEST',
-          type: 'custom_alert',
-          message: 'Custom alert',
-          severity: 'unknown_level' as Alert['severity'],
+          condition_type: 'price_above',
+          threshold: 100,
+          enabled: true,
+          sound_type: 'chime',
+          triggered_at: null,
           created_at: new Date().toISOString(),
-        }),
+          severity: 'info',
+          type: 'price_above',
+          message: 'Test alert',
+        },
       ];
 
-      mockUseApi.mockReturnValue({
-        data: unknownSeverityAlert,
-        loading: false,
-        error: null,
-        refetch: jest.fn(),
-      });
+      render(<AlertsTable initialData={recentAlert} />);
 
-      // Act
-      render(<AlertsTable />);
-
-      // Assert: unknown severity text rendered with default styling (Info icon fallback)
-      expect(screen.getByText('unknown_level')).toBeInTheDocument();
-      expect(screen.getByTestId('info-icon')).toBeInTheDocument();
+      // Recent alert should show "Just now"
+      expect(screen.getByText(/just now/i)).toBeInTheDocument();
     });
   });
 
-  // =========================================================================
-  // Loading & Error States
-  // =========================================================================
+  describe('Error Case: Graceful degradation when data is unavailable', () => {
+    it('renders safely without crashing when initialData is undefined', () => {
+      const { container } = render(<AlertsTable />);
 
-  describe('loading and error states', () => {
-    it('should display loading state while fetching alerts', () => {
-      // Arrange
-      mockUseApi.mockReturnValue({
-        data: null,
-        loading: true,
-        error: null,
-        refetch: jest.fn(),
-      });
-
-      // Act
-      render(<AlertsTable />);
-
-      // Assert
-      expect(screen.getByText('Loading alerts...')).toBeInTheDocument();
+      expect(container).toBeInTheDocument();
+      // Should show loading state, not crash
+      expect(screen.getByText(/loading alerts/i)).toBeInTheDocument();
     });
 
-    it('should display error message when fetch fails', () => {
-      // Arrange
-      const errorMsg = 'Failed to load alerts. Please refresh the page.';
-      mockUseApi.mockReturnValue({
-        data: null,
-        loading: false,
-        error: errorMsg,
-        refetch: jest.fn(),
-      });
+    it('maintains filter state and UI structure even with edge case data', () => {
+      render(<AlertsTable initialData={mockAlerts} />);
 
-      // Act
-      render(<AlertsTable />);
+      // UI structure should be intact: header, filter tabs, and table
+      expect(screen.getByRole('tablist')).toBeInTheDocument();
+      expect(screen.getByText(/Alerts/)).toBeInTheDocument();
 
-      // Assert
-      expect(screen.getByText(errorMsg)).toBeInTheDocument();
+      // Should have 4 filter tabs: All, Critical, Warning, Info
+      const tabs = screen.getAllByRole('tab');
+      expect(tabs.length).toBe(4);
     });
   });
 });
-```

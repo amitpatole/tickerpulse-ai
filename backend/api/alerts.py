@@ -31,15 +31,64 @@ _VALID_CONDITION_TYPES = {'price_above', 'price_below', 'pct_change'}
 _TICKER_RE = re.compile(r'^[A-Z]{1,5}$')
 _THRESHOLD_MAX = 1_000_000
 
+_CONDITION_LABELS = {
+    'price_above': 'Price above',
+    'price_below': 'Price below',
+    'pct_change': 'Change \u00b1',
+}
+
+
+def _condition_to_severity(condition_type: str, threshold: float) -> str:
+    """Map alert condition and threshold to a display severity level.
+
+    Rules
+    -----
+    * ``pct_change`` with threshold >= 10 → ``critical``
+    * ``pct_change`` with threshold >= 5  → ``warning``
+    * Everything else                     → ``info``
+    """
+    if condition_type == 'pct_change' and threshold >= 10:
+        return 'critical'
+    if condition_type == 'pct_change' and threshold >= 5:
+        return 'warning'
+    return 'info'
+
+
+def _enrich_alert(alert: dict) -> dict:
+    """Add computed ``severity``, ``type``, and ``message`` fields to an alert dict.
+
+    Mutates and returns the dict so call-sites can use it inline.
+    """
+    condition = alert.get('condition_type', '')
+    threshold = float(alert.get('threshold', 0) or 0)
+    ticker = alert.get('ticker', '')
+
+    alert['severity'] = _condition_to_severity(condition, threshold)
+
+    # ``type`` is the raw condition_type; the frontend prettifies it via
+    # ``.replace(/_/g, ' ')`` for display.
+    alert['type'] = condition
+
+    # Compute a human-readable message for active (not-yet-triggered) alerts.
+    # Triggered alerts already have their message set when the SSE fired.
+    if not alert.get('message'):
+        label = _CONDITION_LABELS.get(condition, condition)
+        if condition == 'pct_change':
+            alert['message'] = f"{ticker}: {label}{threshold:.1f}%"
+        else:
+            alert['message'] = f"{ticker}: {label} ${threshold:.2f}"
+
+    return alert
+
 
 @alerts_bp.route('/alerts', methods=['GET'])
 def list_alerts():
-    """Return all price alerts.
+    """Return all price alerts with computed severity.
 
     Returns:
         JSON array of price alert objects.
     """
-    return jsonify(get_alerts())
+    return jsonify([_enrich_alert(a) for a in get_alerts()])
 
 
 @alerts_bp.route('/alerts', methods=['POST'])
@@ -66,7 +115,7 @@ def create_alert_endpoint():
     if not ticker:
         return jsonify({'error': 'Missing required field: ticker'}), 400
     if not _TICKER_RE.match(ticker):
-        return jsonify({'error': 'ticker must be 1–5 uppercase letters'}), 400
+        return jsonify({'error': 'ticker must be 1\u20135 uppercase letters'}), 400
     if condition_type not in _VALID_CONDITION_TYPES:
         return jsonify({
             'error': f"Invalid condition_type. Must be one of: {', '.join(sorted(_VALID_CONDITION_TYPES))}"
@@ -78,10 +127,10 @@ def create_alert_endpoint():
         return jsonify({'error': 'threshold must be a valid number'}), 400
 
     if not (0 < threshold <= _THRESHOLD_MAX):
-        return jsonify({'error': f'threshold must be > 0 and ≤ {_THRESHOLD_MAX}'}), 400
+        return jsonify({'error': f'threshold must be > 0 and \u2264 {_THRESHOLD_MAX}'}), 400
 
     if condition_type == 'pct_change' and threshold > 100:
-        return jsonify({'error': 'threshold for pct_change must be ≤ 100'}), 400
+        return jsonify({'error': 'threshold for pct_change must be \u2264 100'}), 400
 
     if sound_type not in _VALID_SOUND_TYPES:
         return jsonify({
@@ -99,7 +148,7 @@ def create_alert_endpoint():
         }), 400
 
     alert = create_alert(ticker, condition_type, threshold, sound_type)
-    return jsonify(alert), 201
+    return jsonify(_enrich_alert(alert)), 201
 
 
 @alerts_bp.route('/alerts/<int:alert_id>', methods=['DELETE'])
@@ -125,7 +174,7 @@ def toggle_alert_endpoint(alert_id: int):
     updated = toggle_alert(alert_id)
     if updated is None:
         return jsonify({'error': f'Alert {alert_id} not found'}), 404
-    return jsonify(updated)
+    return jsonify(_enrich_alert(updated))
 
 
 @alerts_bp.route('/alerts/<int:alert_id>/sound', methods=['PUT'])

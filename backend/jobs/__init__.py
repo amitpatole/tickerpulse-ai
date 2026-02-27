@@ -1,4 +1,4 @@
-```python
+
 """
 Job definitions for TickerPulse AI scheduler.
 
@@ -153,4 +153,3 @@ __all__ = [
     'run_download_tracker',
     'run_price_refresh',
 ]
-```

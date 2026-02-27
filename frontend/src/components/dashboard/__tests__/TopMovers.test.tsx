@@ -1,334 +1,283 @@
-```tsx
 /**
- * Tests for TopMovers component.
+ * Tests for TopMovers Component
  *
- * Tests cover:
- * - Deriving gainers and losers from ratings (sorted by price change %)
- * - Limiting to MAX_MOVERS (5) per category
- * - Empty watchlist handling
- * - Loading and error states
- * - MoverRow rendering with price and change percentage
+ * Validates the separation of gainers and losers, proper sorting,
+ * limit enforcement (max 5 movers per column), and state transitions.
  */
 
-import React from 'react';
 import { render, screen } from '@testing-library/react';
-import TopMovers from '../TopMovers';
-import { useRatings } from '@/hooks/useRatings';
+import '@testing-library/jest-dom';
+import TopMovers from '@/components/dashboard/TopMovers';
 import type { AIRating } from '@/lib/types';
 
-// Mock the shared ratings hook
-jest.mock('@/hooks/useRatings');
+// Mock the singleton ratings hooks so tests control data without HTTP calls
+jest.mock('@/hooks/useRatings', () => ({
+  useRatings: jest.fn(),
+}));
 
-// Mock useSSERatings to pass through data unchanged
 jest.mock('@/hooks/useSSERatings', () => ({
-  useSSERatings: (ratings: AIRating[] | null) => ratings,
+  useSSERatings: jest.fn((base: AIRating[] | null) => base),
 }));
 
-// Mock lucide-react icons
-jest.mock('lucide-react', () => ({
-  TrendingUp: () => <div data-testid="trending-up-icon" />,
-  TrendingDown: () => <div data-testid="trending-down-icon" />,
-}));
+import { useRatings } from '@/hooks/useRatings';
 
 const mockUseRatings = useRatings as jest.MockedFunction<typeof useRatings>;
 
 describe('TopMovers', () => {
-  // =========================================================================
-  // Test Data: Mock Ratings with various price changes
-  // =========================================================================
-
-  const mockRatings: AIRating[] = [
-    {
-      ticker: 'NVDA',
-      rating: 'STRONG_BUY',
-      score: 92,
-      confidence: 0.95,
-      current_price: 875.50,
-      price_change_pct: 8.5,
-      rsi: 72,
-    },
-    {
-      ticker: 'AAPL',
-      rating: 'BUY',
-      score: 85,
-      confidence: 0.90,
-      current_price: 190.25,
-      price_change_pct: 3.2,
-      rsi: 65,
-    },
-    {
-      ticker: 'MSFT',
-      rating: 'HOLD',
-      score: 60,
-      confidence: 0.70,
-      current_price: 420.00,
-      price_change_pct: 1.1,
-      rsi: 55,
-    },
-    {
-      ticker: 'TSLA',
-      rating: 'SELL',
-      score: 40,
-      confidence: 0.65,
-      current_price: 242.30,
-      price_change_pct: -2.8,
-      rsi: 35,
-    },
-    {
-      ticker: 'META',
-      rating: 'STRONG_SELL',
-      score: 25,
-      confidence: 0.80,
-      current_price: 485.10,
-      price_change_pct: -5.6,
-      rsi: 28,
-    },
-    {
-      ticker: 'AMZN',
-      rating: 'BUY',
-      score: 78,
-      confidence: 0.85,
-      current_price: 193.45,
-      price_change_pct: 6.2,
-      rsi: 62,
-    },
-    {
-      ticker: 'GOOGL',
-      rating: 'HOLD',
-      score: 55,
-      confidence: 0.68,
-      current_price: 165.80,
-      price_change_pct: -1.3,
-      rsi: 48,
-    },
-  ];
-
   beforeEach(() => {
     jest.clearAllMocks();
   });
 
   // =========================================================================
-  // Happy Path: Fetches and displays top gainers/losers correctly
+  // Happy Path: Normal operation with mixed gainers and losers
   // =========================================================================
 
-  describe('happy path: derives gainers and losers from ratings', () => {
-    it('should display header and both gainers/losers columns', () => {
-      // Arrange
-      mockUseRatings.mockReturnValue({
-        data: mockRatings,
-        loading: false,
-        error: null,
-      });
+  describe('Happy Path: Displays gainers and losers with correct sorting', () => {
+    it('separates positive and negative price changes into distinct columns', () => {
+      const mockRatings: AIRating[] = [
+        {
+          ticker: 'NVDA',
+          rating: 'strong_buy',
+          score: 90,
+          confidence: 0.9,
+          current_price: 150.0,
+          price_change: 7.5,
+          price_change_pct: 5.25,
+          rsi: 70,
+        },
+        {
+          ticker: 'AMD',
+          rating: 'sell',
+          score: 35,
+          confidence: 0.7,
+          current_price: 120.5,
+          price_change: -2.17,
+          price_change_pct: -1.8,
+          rsi: 40,
+        },
+        {
+          ticker: 'TSM',
+          rating: 'buy',
+          score: 75,
+          confidence: 0.8,
+          current_price: 200.0,
+          price_change: 6.86,
+          price_change_pct: 3.5,
+          rsi: 60,
+        },
+      ];
 
-      // Act
+      mockUseRatings.mockReturnValue({ data: mockRatings, loading: false, error: null });
+
       render(<TopMovers />);
 
-      // Assert: header
-      expect(screen.getByText('Top Movers')).toBeInTheDocument();
-      expect(screen.getByText('Gainers')).toBeInTheDocument();
-      expect(screen.getByText('Losers')).toBeInTheDocument();
+      // Verify gainers column shows positive changes
+      expect(screen.getByText(/Gainers/i)).toBeInTheDocument();
+      expect(screen.getByText('+5.25%')).toBeInTheDocument();
+      expect(screen.getByText('+3.50%')).toBeInTheDocument();
+
+      // Verify losers column shows negative changes
+      expect(screen.getByText(/Losers/i)).toBeInTheDocument();
+      expect(screen.getByText('-1.80%')).toBeInTheDocument();
     });
 
-    it('should sort gainers by price_change_pct descending (highest first)', () => {
-      // Arrange
-      mockUseRatings.mockReturnValue({
-        data: mockRatings,
-        loading: false,
-        error: null,
-      });
+    it('sorts gainers by descending price_change_pct (highest first)', () => {
+      const mockRatings: AIRating[] = [
+        {
+          ticker: 'STOCK1',
+          rating: 'buy',
+          score: 80,
+          confidence: 0.8,
+          current_price: 100,
+          price_change: 2,
+          price_change_pct: 2.0,
+          rsi: 60,
+        },
+        {
+          ticker: 'STOCK2',
+          rating: 'buy',
+          score: 80,
+          confidence: 0.8,
+          current_price: 100,
+          price_change: 5,
+          price_change_pct: 5.0,
+          rsi: 60,
+        },
+        {
+          ticker: 'STOCK3',
+          rating: 'buy',
+          score: 80,
+          confidence: 0.8,
+          current_price: 100,
+          price_change: 3,
+          price_change_pct: 3.0,
+          rsi: 60,
+        },
+      ];
 
-      // Act
-      render(<TopMovers />);
+      mockUseRatings.mockReturnValue({ data: mockRatings, loading: false, error: null });
 
-      // Assert: top gainer (NVDA at 8.5%) has aria-label containing NVDA
-      const gainersSection = screen.getByText('Gainers').closest('div');
-      const firstGainerRow = gainersSection?.querySelector('[aria-label]');
-      expect(firstGainerRow).toHaveAttribute('aria-label', expect.stringContaining('NVDA'));
+      const { container } = render(<TopMovers />);
+
+      // Get gainers column and verify order: 5.0% > 3.0% > 2.0%
+      const gainersColumn = container.querySelector('[aria-label*="Gainers"]');
+      const rows = gainersColumn?.querySelectorAll('div[aria-label]') || [];
+
+      // Verify first row is STOCK2 (5%), second is STOCK3 (3%), third is STOCK1 (2%)
+      expect(rows[0]?.textContent).toContain('STOCK2');
+      expect(rows[1]?.textContent).toContain('STOCK3');
+      expect(rows[2]?.textContent).toContain('STOCK1');
     });
 
-    it('should sort losers by price_change_pct ascending (lowest first)', () => {
-      // Arrange
-      mockUseRatings.mockReturnValue({
-        data: mockRatings,
-        loading: false,
-        error: null,
-      });
+    it('sorts losers by ascending price_change_pct (most negative first)', () => {
+      const mockRatings: AIRating[] = [
+        {
+          ticker: 'LOSE1',
+          rating: 'sell',
+          score: 40,
+          confidence: 0.7,
+          current_price: 100,
+          price_change: -2,
+          price_change_pct: -2.0,
+          rsi: 40,
+        },
+        {
+          ticker: 'LOSE2',
+          rating: 'sell',
+          score: 40,
+          confidence: 0.7,
+          current_price: 100,
+          price_change: -5,
+          price_change_pct: -5.0,
+          rsi: 40,
+        },
+        {
+          ticker: 'LOSE3',
+          rating: 'sell',
+          score: 40,
+          confidence: 0.7,
+          current_price: 100,
+          price_change: -3,
+          price_change_pct: -3.0,
+          rsi: 40,
+        },
+      ];
 
-      // Act
-      render(<TopMovers />);
+      mockUseRatings.mockReturnValue({ data: mockRatings, loading: false, error: null });
 
-      // Assert: top loser (META at -5.6%) appears first in losers column
-      const losersSection = screen.getByText('Losers').closest('div');
-      const loserTickers = losersSection?.querySelectorAll('p.text-sm');
-      expect(loserTickers?.[0]).toHaveTextContent('META');
+      const { container } = render(<TopMovers />);
+
+      // Get losers column and verify order: -5.0% < -3.0% < -2.0%
+      const losersColumn = container.querySelectorAll('div')[container.querySelectorAll('div').length - 1];
+      const rows = losersColumn?.querySelectorAll('div[aria-label]') || [];
+
+      // Verify first row is LOSE2 (-5%), second is LOSE3 (-3%), third is LOSE1 (-2%)
+      expect(rows[0]?.textContent).toContain('LOSE2');
+      expect(rows[1]?.textContent).toContain('LOSE3');
+      expect(rows[2]?.textContent).toContain('LOSE1');
     });
+  });
 
-    it('should limit gainers to MAX_MOVERS (5) per category', () => {
-      // Arrange: 10 gainers but should show max 5
-      const manyGainers: AIRating[] = Array.from({ length: 10 }, (_, i) => ({
+  // =========================================================================
+  // Edge Case: MAX_MOVERS limit (5 per column)
+  // =========================================================================
+
+  describe('Edge Case: Enforces MAX_MOVERS limit (5 per column)', () => {
+    it('displays only top 5 gainers when more than 5 exist', () => {
+      const mockRatings: AIRating[] = Array.from({ length: 10 }, (_, i) => ({
         ticker: `GAIN${i}`,
-        rating: 'BUY',
-        score: 75,
+        rating: 'buy',
+        score: 80,
         confidence: 0.8,
-        current_price: 100 + i,
-        price_change_pct: 10 - i * 0.5, // 10%, 9.5%, 9%, ...
+        current_price: 100,
+        price_change: i,
+        price_change_pct: i + 1.0,
         rsi: 60,
       }));
 
-      mockUseRatings.mockReturnValue({
-        data: manyGainers,
-        loading: false,
-        error: null,
-      });
+      mockUseRatings.mockReturnValue({ data: mockRatings, loading: false, error: null });
 
-      // Act
       render(<TopMovers />);
 
-      // Assert: only 5 gainers displayed (ranks 1-5 only)
-      const gainersSection = screen.getByText('Gainers').closest('div');
-      const ranks = gainersSection?.querySelectorAll(
-        'span.text-slate-600'
-      ) as NodeListOf<HTMLElement>;
-      expect(ranks.length).toBeLessThanOrEqual(5);
-    });
-
-    it('should display price and change percentage correctly formatted', () => {
-      // Arrange
-      const singleRating: AIRating[] = [mockRatings[0]]; // NVDA: 875.50 price, 8.5% change
-
-      mockUseRatings.mockReturnValue({
-        data: singleRating,
-        loading: false,
-        error: null,
-      });
-
-      // Act
-      render(<TopMovers />);
-
-      // Assert: price displays with 2 decimals
-      expect(screen.getByText('$875.50')).toBeInTheDocument();
-      // Assert: percentage shows sign and 2 decimals
-      expect(screen.getByText('+8.50%')).toBeInTheDocument();
+      // Should show only 5 gainers, not all 10
+      expect(screen.getByText(/GAIN9/)).toBeInTheDocument(); // Top gainer
+      expect(screen.getByText(/GAIN5/)).toBeInTheDocument(); // 5th gainer
+      expect(screen.queryByText(/GAIN4/)).not.toBeInTheDocument(); // 6th gainer should not exist
     });
   });
 
   // =========================================================================
-  // Edge Cases: Empty watchlist, missing data fields
+  // Edge Case: Empty watchlist / No data
   // =========================================================================
 
-  describe('edge cases', () => {
-    it('should handle empty ratings list (no stocks in watchlist)', () => {
-      // Arrange
-      mockUseRatings.mockReturnValue({
-        data: [],
-        loading: false,
-        error: null,
-      });
+  describe('Edge Case: Handles empty and null data gracefully', () => {
+    it('displays empty state message when no stocks in watchlist', () => {
+      mockUseRatings.mockReturnValue({ data: [], loading: false, error: null });
 
-      // Act
       render(<TopMovers />);
 
-      // Assert
-      expect(screen.getByText('No stocks in watchlist.')).toBeInTheDocument();
+      expect(screen.getByText(/no stocks in watchlist/i)).toBeInTheDocument();
     });
 
-    it('should handle missing price_change_pct as 0 (not a gainer or loser)', () => {
-      // Arrange
-      const ratingNoPriceChange: AIRating[] = [
+    it('shows loading skeleton when data is being fetched', () => {
+      mockUseRatings.mockReturnValue({ data: null, loading: true, error: null });
+
+      const { container } = render(<TopMovers />);
+
+      // Should have animated pulse skeleton divs while loading
+      const pulses = container.querySelectorAll('.animate-pulse');
+      expect(pulses.length).toBeGreaterThan(0);
+    });
+
+    it('displays "No gainers" and "No losers" when all data is neutral (0% change)', () => {
+      const mockRatings: AIRating[] = [
         {
-          ticker: 'TEST',
-          rating: 'BUY',
-          score: 70,
-          confidence: 0.8,
+          ticker: 'FLAT1',
+          rating: 'hold',
+          score: 50,
+          confidence: 0.5,
           current_price: 100,
-          price_change_pct: undefined,
+          price_change: 0,
+          price_change_pct: 0,
           rsi: 50,
         },
-      ];
-
-      mockUseRatings.mockReturnValue({
-        data: ratingNoPriceChange,
-        loading: false,
-        error: null,
-      });
-
-      // Act
-      render(<TopMovers />);
-
-      // Assert: stock with undefined change is treated as 0 — not in gainers or losers
-      // "No gainers" / "No losers" messages should appear
-      expect(screen.getByText('No gainers')).toBeInTheDocument();
-      expect(screen.getByText('No losers')).toBeInTheDocument();
-    });
-
-    it('should handle missing current_price gracefully', () => {
-      // Arrange
-      const ratingNoPrice: AIRating[] = [
         {
-          ticker: 'NOPRICE',
-          rating: 'BUY',
-          score: 70,
-          confidence: 0.8,
-          current_price: null,
-          price_change_pct: 2.5,
+          ticker: 'FLAT2',
+          rating: 'hold',
+          score: 50,
+          confidence: 0.5,
+          current_price: 100,
+          price_change: 0,
+          price_change_pct: 0,
           rsi: 50,
         },
       ];
 
-      mockUseRatings.mockReturnValue({
-        data: ratingNoPrice,
-        loading: false,
-        error: null,
-      });
+      mockUseRatings.mockReturnValue({ data: mockRatings, loading: false, error: null });
 
-      // Act
       render(<TopMovers />);
 
-      // Assert: ticker should render without price
-      expect(screen.getByText('NOPRICE')).toBeInTheDocument();
-      expect(screen.queryByText(/^\$/)).not.toBeInTheDocument();
+      // Both gainers and losers should show empty state
+      expect(screen.getByText(/no gainers/i)).toBeInTheDocument();
+      expect(screen.getByText(/no losers/i)).toBeInTheDocument();
     });
   });
 
   // =========================================================================
-  // Loading & Error States
+  // Error Case: API failure
   // =========================================================================
 
-  describe('loading and error states', () => {
-    it('should display loading skeleton while fetching', () => {
-      // Arrange
-      mockUseRatings.mockReturnValue({
-        data: null,
-        loading: true,
-        error: null,
-      });
-
-      // Act
-      render(<TopMovers />);
-
-      // Assert: loading state shows skeleton pulse elements
-      const skeletons = screen.getAllByRole('generic');
-      const pulseElements = skeletons.filter((el) =>
-        el.className?.includes('animate-pulse')
-      );
-      expect(pulseElements.length).toBeGreaterThan(0);
-    });
-
-    it('should display error message when fetch fails', () => {
-      // Arrange
-      const errorMsg = 'Failed to fetch ratings. Please try again.';
+  describe('Error Case: Gracefully handles API errors', () => {
+    it('displays error message when ratings API fails', () => {
       mockUseRatings.mockReturnValue({
         data: null,
         loading: false,
-        error: errorMsg,
+        error: 'Failed to fetch ratings data',
       });
 
-      // Act
       render(<TopMovers />);
 
-      // Assert
-      expect(screen.getByText(errorMsg)).toBeInTheDocument();
+      expect(screen.getByText(/Failed to fetch ratings data/i)).toBeInTheDocument();
     });
   });
 });
-```

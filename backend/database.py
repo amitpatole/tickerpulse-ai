@@ -1,4 +1,3 @@
-```python
 """
 TickerPulse AI v3.0 - Database Connection Manager
 Thread-safe SQLite helper with context-manager support and table initialisation.
@@ -280,14 +279,15 @@ _NEW_TABLES_SQL = [
     # --- price_alerts: user-defined price condition alerts ---
     """
     CREATE TABLE IF NOT EXISTS price_alerts (
-        id             INTEGER PRIMARY KEY AUTOINCREMENT,
-        ticker         TEXT NOT NULL,
-        condition_type TEXT NOT NULL,
-        threshold      REAL NOT NULL,
-        enabled        INTEGER NOT NULL DEFAULT 1,
-        sound_type     TEXT NOT NULL DEFAULT 'default',
-        triggered_at   TIMESTAMP,
-        created_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        id                INTEGER PRIMARY KEY AUTOINCREMENT,
+        ticker            TEXT NOT NULL,
+        condition_type    TEXT NOT NULL,
+        threshold         REAL NOT NULL,
+        enabled           INTEGER NOT NULL DEFAULT 1,
+        sound_type        TEXT NOT NULL DEFAULT 'default',
+        triggered_at      TIMESTAMP,
+        notification_sent INTEGER NOT NULL DEFAULT 0,
+        created_at        TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
     """,
     # --- sentiment_cache: aggregated social/news sentiment per ticker ---
@@ -440,6 +440,23 @@ def _migrate_watchlists(cursor) -> None:
         logger.info("Migration applied: added sort_order to watchlists table")
 
 
+def _migrate_price_alerts(cursor) -> None:
+    """Add notification_sent column to price_alerts if missing.
+
+    ``notification_sent`` prevents duplicate desktop notifications when an SSE
+    reconnect replays events or when an alert is re-evaluated before being
+    disabled.  Reset to 0 whenever the alert is re-enabled via toggle.
+    """
+    cols = {row[1] for row in cursor.execute("PRAGMA table_info(price_alerts)").fetchall()}
+    if not cols:
+        return  # table doesn't exist yet; CREATE TABLE will handle it
+    if 'notification_sent' not in cols:
+        cursor.execute(
+            "ALTER TABLE price_alerts ADD COLUMN notification_sent INTEGER NOT NULL DEFAULT 0"
+        )
+        logger.info("Migration applied: added notification_sent to price_alerts table")
+
+
 def init_all_tables(db_path: str | None = None) -> None:
     """Create every table (existing + new v3.0) and apply indexes.
 
@@ -458,6 +475,7 @@ def init_all_tables(db_path: str | None = None) -> None:
         _migrate_watchlist_stocks(cursor)
         _migrate_data_providers_config(cursor)
         _migrate_watchlists(cursor)
+        _migrate_price_alerts(cursor)
 
         for sql in _NEW_TABLES_SQL:
             cursor.execute(sql)
@@ -480,4 +498,3 @@ def init_all_tables(db_path: str | None = None) -> None:
         raise
     finally:
         conn.close()
-```

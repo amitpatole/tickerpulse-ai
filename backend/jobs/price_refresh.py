@@ -127,6 +127,9 @@ def run_price_refresh() -> None:
     In addition to broadcasting SSE events, each fetched price is persisted
     back to the ``ai_ratings`` table so that a fresh page load shows the
     most-recent live price rather than the stale value from the last AI run.
+
+    After persisting prices, enabled price alerts are evaluated against the
+    freshly written values so alerts fire on every live price cycle.
     """
     interval = _get_refresh_interval()
     if interval == 0:
@@ -141,6 +144,7 @@ def run_price_refresh() -> None:
     timestamp = datetime.now(timezone.utc).isoformat()
     fetched = 0
     failed = 0
+    fetched_tickers: list[str] = []
 
     # Open one DB connection for all ai_ratings persistence writes this cycle.
     # A failure to open the connection is non-fatal: SSE events still fire.
@@ -159,14 +163,28 @@ def run_price_refresh() -> None:
                 logger.debug("No price data for %s", ticker)
                 continue
 
-            _send_sse('price_update', {
+            event_payload = {
                 'ticker': ticker,
                 'price': price_data['price'],
                 'change': price_data['change'],
                 'change_pct': price_data['change_pct'],
                 'volume': price_data.get('volume', 0),
                 'timestamp': timestamp,
-            })
+            }
+
+            _send_sse('price_update', event_payload)
+
+            # Broadcast to WebSocket clients subscribed to this ticker.
+            # Import is deferred to avoid circular imports at module load time
+            # (ws_manager has no upstream dependencies on this module).
+            try:
+                from backend.core.ws_manager import ws_manager
+                ws_manager.broadcast_to_subscribers(
+                    ticker,
+                    {'type': 'price_update', **event_payload},
+                )
+            except Exception as exc:
+                logger.debug("WS broadcast skipped for %s: %s", ticker, exc)
 
             # Persist live price to ai_ratings so page reload hydration is current.
             if db_conn is not None:
@@ -190,6 +208,7 @@ def run_price_refresh() -> None:
                     logger.debug("Failed to persist price for %s to ai_ratings: %s", ticker, exc)
 
             fetched += 1
+            fetched_tickers.append(ticker)
 
         if db_conn is not None:
             try:
@@ -203,6 +222,15 @@ def run_price_refresh() -> None:
                 db_conn.close()
             except Exception:
                 pass
+
+    # Evaluate price alerts against freshly persisted prices.
+    # Import is deferred to avoid circular imports at module load time.
+    if fetched_tickers:
+        try:
+            from backend.core.alert_manager import evaluate_price_alerts
+            evaluate_price_alerts(fetched_tickers)
+        except Exception as exc:
+            logger.warning("Price refresh: alert evaluation error: %s", exc)
 
     if fetched > 0 or failed > 0:
         logger.debug(

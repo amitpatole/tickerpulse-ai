@@ -1,4 +1,4 @@
-```python
+
 """
 TickerPulse AI v3.0 - Flask Application Factory
 Creates and configures the Flask app, registers blueprints, sets up SSE,
@@ -6,12 +6,14 @@ initialises the database and scheduler.
 """
 
 import json
+import os
 import queue
 import logging
 import threading
-from datetime import datetime
+from datetime import datetime, timezone
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
+from typing import Any
 
 from flask import Flask, Response, jsonify, send_from_directory
 
@@ -155,6 +157,43 @@ def send_sse_event(event_type: str, data: dict) -> None:
                 logger.debug("Sentiment cache invalidation skipped: %s", exc)
 
 
+def _ws_handle_manual_refresh(tickers: set[str], manager: Any) -> None:
+    """Fetch live prices for *tickers* and broadcast to WS subscribers and SSE.
+
+    Called when a WebSocket client sends ``{"type": "refresh"}``.  Keeps both
+    channels in sync: WS subscribers receive a ``price_update`` message;
+    SSE clients receive the same data via the existing ``send_sse_event`` path.
+    Import of ``_fetch_price`` is deferred to avoid a circular import at module
+    load time (price_refresh imports ``send_sse_event`` from this module).
+    """
+    if not tickers:
+        return
+    try:
+        from backend.jobs.price_refresh import _fetch_price
+    except ImportError as exc:
+        logger.warning("_ws_handle_manual_refresh: cannot import _fetch_price: %s", exc)
+        return
+
+    timestamp = datetime.now(timezone.utc).isoformat()
+    for ticker in tickers:
+        price_data = _fetch_price(ticker)
+        if price_data is None:
+            logger.debug("_ws_handle_manual_refresh: no data for %s", ticker)
+            continue
+        ws_payload: dict = {
+            'type': 'price_update',
+            'ticker': ticker,
+            'price': price_data['price'],
+            'change': price_data['change'],
+            'change_pct': price_data['change_pct'],
+            'volume': price_data.get('volume', 0),
+            'timestamp': timestamp,
+        }
+        manager.broadcast_to_subscribers(ticker, ws_payload)
+        # Mirror to SSE so clients on both channels stay consistent.
+        send_sse_event('price_update', {k: v for k, v in ws_payload.items() if k != 'type'})
+
+
 # ---------------------------------------------------------------------------
 # Application factory
 # ---------------------------------------------------------------------------
@@ -173,6 +212,11 @@ def create_app() -> Flask:
 
     # -- Logging -------------------------------------------------------------
     _setup_logging(app)
+
+    # -- Request tracing & global error handlers -----------------------------
+    from backend.middleware.request_logging import init_request_logging
+    init_request_logging(app)
+    logger.info("Request tracing middleware registered")
 
     # -- CORS ----------------------------------------------------------------
     try:
@@ -291,6 +335,95 @@ def create_app() -> Flask:
             },
         )
 
+    # -- WebSocket endpoint (flask-sock) -------------------------------------
+    try:
+        from flask_sock import Sock
+        from backend.core.ws_manager import ws_manager as _ws_manager
+
+        sock = Sock(app)
+
+        @sock.route('/api/ws/prices')
+        def ws_prices(ws: Any) -> None:
+            """WebSocket endpoint for subscription-scoped real-time price updates.
+
+            Protocol (client → server):
+              {"type": "subscribe",   "tickers": ["AAPL", "MSFT"]}
+              {"type": "unsubscribe", "tickers": ["AAPL"]}
+              {"type": "refresh"}   -- immediate price fetch for subscribed tickers
+              {"type": "ping"}
+
+            Protocol (server → client):
+              {"type": "connected",    "client_id": "<uuid>"}
+              {"type": "subscribed",   "tickers": [...]}
+              {"type": "unsubscribed", "tickers": [...]}
+              {"type": "price_update", "ticker": "AAPL", "price": ..., ...}
+              {"type": "pong"}
+              {"type": "error",        "message": "..."}
+            """
+            client_id = _ws_manager.register(ws)
+            logger.info("WS client connected: %s", client_id)
+            try:
+                ws.send(json.dumps({"type": "connected", "client_id": client_id}))
+                while True:
+                    raw = ws.receive()
+                    if raw is None:
+                        break
+                    try:
+                        msg = json.loads(raw)
+                    except (json.JSONDecodeError, ValueError):
+                        ws.send(json.dumps({"type": "error", "message": "Invalid JSON"}))
+                        continue
+                    if not isinstance(msg, dict):
+                        ws.send(json.dumps({"type": "error", "message": "Expected a JSON object"}))
+                        continue
+
+                    msg_type = msg.get("type", "")
+
+                    if msg_type == "subscribe":
+                        tickers = msg.get("tickers", [])
+                        if isinstance(tickers, list):
+                            _ws_manager.subscribe(client_id, tickers)
+                        ws.send(json.dumps({
+                            "type": "subscribed",
+                            "tickers": sorted(_ws_manager.get_subscriptions(client_id)),
+                        }))
+
+                    elif msg_type == "unsubscribe":
+                        tickers = msg.get("tickers", [])
+                        if isinstance(tickers, list):
+                            _ws_manager.unsubscribe(client_id, tickers)
+                        ws.send(json.dumps({
+                            "type": "unsubscribed",
+                            "tickers": [t.upper() for t in tickers if isinstance(t, str)],
+                        }))
+
+                    elif msg_type == "refresh":
+                        subscribed = _ws_manager.get_subscriptions(client_id)
+                        _ws_handle_manual_refresh(subscribed, _ws_manager)
+
+                    elif msg_type == "ping":
+                        ws.send(json.dumps({"type": "pong"}))
+
+                    else:
+                        ws.send(json.dumps({
+                            "type": "error",
+                            "message": f"Unknown message type: {msg_type!r}",
+                        }))
+
+            except Exception as exc:
+                logger.debug("WS connection %s closed: %s", client_id, exc)
+            finally:
+                _ws_manager.unregister(client_id)
+                logger.info("WS client disconnected: %s", client_id)
+
+        logger.info("WebSocket endpoint available at /api/ws/prices")
+
+    except ImportError:
+        logger.warning(
+            "flask-sock is not installed -- WebSocket endpoint disabled. "
+            "Install with: pip install flask-sock"
+        )
+
     # -- Health check --------------------------------------------------------
     @app.route('/api/health')
     def health():
@@ -338,6 +471,17 @@ def _setup_logging(app: Flask) -> None:
 
     log_level = getattr(logging, Config.LOG_LEVEL.upper(), logging.INFO)
 
+    # Optional structured JSON output (set LOG_JSON=true in environment)
+    use_json = os.getenv('LOG_JSON', 'false').lower() == 'true'
+    if use_json:
+        try:
+            from backend.middleware.request_logging import JsonFormatter
+            formatter: logging.Formatter = JsonFormatter()
+        except ImportError:
+            formatter = logging.Formatter(Config.LOG_FORMAT)
+    else:
+        formatter = logging.Formatter(Config.LOG_FORMAT)
+
     # Rotating file handler
     file_handler = RotatingFileHandler(
         str(log_dir / 'tickerpulse.log'),
@@ -345,12 +489,12 @@ def _setup_logging(app: Flask) -> None:
         backupCount=Config.LOG_BACKUP_COUNT,
     )
     file_handler.setLevel(log_level)
-    file_handler.setFormatter(logging.Formatter(Config.LOG_FORMAT))
+    file_handler.setFormatter(formatter)
 
     # Console handler
     console_handler = logging.StreamHandler()
     console_handler.setLevel(log_level)
-    console_handler.setFormatter(logging.Formatter(Config.LOG_FORMAT))
+    console_handler.setFormatter(formatter)
 
     # Apply to root logger so all modules pick it up
     root_logger = logging.getLogger()
@@ -451,4 +595,3 @@ if __name__ == '__main__':
         port=Config.FLASK_PORT,
         debug=Config.FLASK_DEBUG,
     )
-```

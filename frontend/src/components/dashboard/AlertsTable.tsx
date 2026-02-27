@@ -1,4 +1,3 @@
-```tsx
 'use client';
 
 import { useState } from 'react';
@@ -212,4 +211,3 @@ export default function AlertsTable({ initialData }: AlertsTableProps = {}) {
     </div>
   );
 }
-```

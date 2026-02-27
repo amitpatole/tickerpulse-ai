@@ -100,6 +100,9 @@ def delete_alert(alert_id: int) -> bool:
 def toggle_alert(alert_id: int) -> Optional[dict]:
     """Flip the enabled flag on a price alert.
 
+    When re-enabling an alert, ``notification_sent`` is reset to 0 so the
+    alert can fire a desktop notification again if its condition is met.
+
     Returns
     -------
     dict or None
@@ -112,10 +115,17 @@ def toggle_alert(alert_id: int) -> Optional[dict]:
         if row is None:
             return None
         new_enabled = 0 if row['enabled'] else 1
-        conn.execute(
-            'UPDATE price_alerts SET enabled = ? WHERE id = ?',
-            (new_enabled, alert_id),
-        )
+        if new_enabled == 1:
+            # Re-enabling: clear notification_sent so the alert can fire again.
+            conn.execute(
+                'UPDATE price_alerts SET enabled = 1, notification_sent = 0 WHERE id = ?',
+                (alert_id,),
+            )
+        else:
+            conn.execute(
+                'UPDATE price_alerts SET enabled = 0 WHERE id = ?',
+                (alert_id,),
+            )
         updated = conn.execute(
             'SELECT * FROM price_alerts WHERE id = ?', (alert_id,)
         ).fetchone()
@@ -180,7 +190,7 @@ def evaluate_price_alerts(tickers: list[str]) -> None:
             if ticker not in prices:
                 continue
 
-            current_price, pct_change = prices[ticker]
+            current_price, pct_change, _cached_at = prices[ticker]
             condition = alert['condition_type']
             ticker = alert['ticker'].strip().upper()
             threshold = float(alert['threshold'])
