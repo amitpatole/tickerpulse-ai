@@ -1,3 +1,4 @@
+```python
 """
 TickerPulse AI v3.0 - Central Configuration
 All settings are driven by environment variables with sensible defaults.
@@ -154,3 +155,10 @@ class Config:
     PRICE_REFRESH_INTERVAL_SECONDS: int = int(
         os.getenv('PRICE_REFRESH_INTERVAL_SECONDS', 30)
     )
+
+    # Maximum number of tickers a single WebSocket client may subscribe to.
+    # Protects against accidental (or malicious) subscription flooding.
+    WS_MAX_SUBSCRIPTIONS_PER_CLIENT: int = int(
+        os.getenv('WS_MAX_SUBSCRIPTIONS_PER_CLIENT', 50)
+    )
+```

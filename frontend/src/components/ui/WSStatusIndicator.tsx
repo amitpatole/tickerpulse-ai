@@ -1,3 +1,4 @@
+```typescript
 'use client';
 
 import { clsx } from 'clsx';
@@ -61,3 +62,4 @@ export default function WSStatusIndicator({ status, lastUpdated }: WSStatusIndic
     </span>
   );
 }
+```

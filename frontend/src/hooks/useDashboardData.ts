@@ -1,3 +1,4 @@
+```typescript
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
@@ -28,6 +29,7 @@ export interface DashboardData {
  *
  * Live price updates are delivered via WebSocket (/api/ws/prices) and merged
  * into the ratings array in-place (by ticker) without a full refetch.
+ * Sort order is never disturbed — only price fields are overwritten.
  *
  * Refresh intervals:
  *   ratings  → server-configured (default 30s) — full AI score sync
@@ -44,6 +46,7 @@ export function useDashboardData(): DashboardData {
   const [error, setError] = useState<string | null>(null);
   const [lastPriceAt, setLastPriceAt] = useState<string | null>(null);
   // Separate ticker list for WebSocket subscription; only updated on full ratings sync
+  // so live price merges never trigger re-subscriptions.
   const [wsTickers, setWsTickers] = useState<string[]>([]);
   // Server-driven polling interval for ratings; separate state so timers re-create on change
   const [ratingsInterval, setRatingsInterval] = useState(30_000);
@@ -89,7 +92,9 @@ export function useDashboardData(): DashboardData {
     setLoading(false);
   }, []);
 
-  // Merge a live price_update from WebSocket into the matching ratings entry
+  // Merge a live price_update from WebSocket into the matching ratings entry.
+  // Only price fields are replaced — score, confidence, rating, and all other
+  // AI fields are untouched so sort order computed from base values is preserved.
   const handlePriceUpdate = useCallback((update: PriceUpdate) => {
     if (!mountedRef.current) return;
     setLastPriceAt(update.timestamp);
@@ -188,3 +193,4 @@ export function useDashboardData(): DashboardData {
     lastPriceAt,
   };
 }
+```

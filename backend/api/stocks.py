@@ -1,7 +1,7 @@
 ```python
 """
 TickerPulse AI v3.0 - Stocks API Routes
-Blueprint for stock management endpoints: list, add, remove, and search stocks.
+Blueprint for stock management endpoints: list, add, remove, search, and bulk prices.
 """
 
 import math
@@ -21,18 +21,10 @@ stocks_bp = Blueprint('stocks', __name__, url_prefix='/api')
 
 @stocks_bp.route('/stocks', methods=['GET'])
 def get_stocks():
-    """Get all monitored stocks.
-
-    Query Parameters:
-        market (str, optional): Filter by market (e.g. 'US', 'India'). 'All' returns everything.
-
-    Returns:
-        JSON array of stock objects with ticker, name, market, added_at, active fields.
-    """
+    """Get all monitored stocks."""
     market = request.args.get('market', None)
     stocks = get_all_stocks()
 
-    # Filter by market if specified
     if market and market != 'All':
         stocks = [s for s in stocks if s.get('market') == market]
 
@@ -41,17 +33,7 @@ def get_stocks():
 
 @stocks_bp.route('/stocks', methods=['POST'])
 def add_stock_endpoint():
-    """Add a new stock to the monitored list.
-
-    Request Body (JSON):
-        ticker (str): Stock ticker symbol (e.g. 'AAPL', 'RELIANCE.NS')
-        name (str, optional): Company name. Validated via Yahoo Finance if omitted.
-        market (str, optional): Market identifier, defaults to 'US'
-
-    Returns:
-        JSON object with 'success' boolean and stock details.
-        Returns 404 if ticker is not found on any exchange.
-    """
+    """Add a new stock to the monitored list."""
     data = request.json
     if not data or 'ticker' not in data:
         return jsonify({'success': False, 'error': 'Missing required field: ticker'}), 400
@@ -59,15 +41,12 @@ def add_stock_endpoint():
     ticker = data['ticker'].strip().upper()
     name = data.get('name')
 
-    # Validate ticker exists and look up name if not provided
     if not name:
         results = search_stock_ticker(ticker)
-        # Check for an exact ticker match
         match = next((r for r in results if r['ticker'].upper() == ticker), None)
         if match:
             name = match.get('name', ticker)
         elif results:
-            # No exact match — reject with suggestions
             suggestions = [f"{r['ticker']} ({r['name']})" for r in results[:3]]
             return jsonify({
                 'success': False,
@@ -86,14 +65,7 @@ def add_stock_endpoint():
 
 @stocks_bp.route('/stocks/<ticker>', methods=['DELETE'])
 def remove_stock_endpoint(ticker):
-    """Remove a stock from monitoring (soft delete).
-
-    Path Parameters:
-        ticker (str): Stock ticker symbol to remove.
-
-    Returns:
-        JSON object with 'success' boolean.
-    """
+    """Remove a stock from monitoring (soft delete)."""
     success = remove_stock(ticker)
     return jsonify({'success': success})
 
@@ -151,18 +123,7 @@ _TIMEFRAME_MAP = {
 
 @stocks_bp.route('/stocks/<ticker>/detail', methods=['GET'])
 def get_stock_detail(ticker):
-    """Aggregate quote, candlestick data, technical indicators, and news for a single ticker.
-
-    Path Parameters:
-        ticker (str): Stock ticker symbol (e.g. 'AAPL', 'RELIANCE.NS').
-
-    Query Parameters:
-        timeframe (str, optional): One of 1D, 1W, 1M, 3M, 1Y. Default 1M.
-
-    Returns:
-        JSON with quote, candles, indicators, and news. Returns 404 for invalid tickers.
-        indicators and news are best-effort: null/[] if unavailable, quote is always present.
-    """
+    """Aggregate quote, candlestick data, technical indicators, and news for a single ticker."""
     ticker = ticker.upper().strip()
     timeframe = request.args.get('timeframe', '1M')
     period, interval = _TIMEFRAME_MAP.get(timeframe, ('1mo', '1d'))
@@ -195,7 +156,6 @@ def get_stock_detail(ticker):
         if not candles:
             return jsonify({'error': 'ticker not found'}), 404
 
-        # Fast quote fields
         fast_info = tk.fast_info
         last_price = getattr(fast_info, 'last_price', None)
         price = float(last_price) if last_price is not None else candles[-1]['close']
@@ -209,7 +169,6 @@ def get_stock_detail(ticker):
         currency = getattr(fast_info, 'currency', 'USD') or 'USD'
         volume = int(getattr(fast_info, 'last_volume', 0) or 0)
 
-        # Extended info for P/E, EPS, name, and additional fields (best-effort)
         pe_ratio = None
         eps = None
         name = ticker
@@ -222,7 +181,6 @@ def get_stock_detail(ticker):
             pe_ratio = info.get('trailingPE')
             eps = info.get('trailingEps')
             name = info.get('shortName') or info.get('longName') or ticker
-            # dividend_yield from yfinance is a decimal (e.g. 0.0055 = 0.55%); convert to pct
             raw_yield = info.get('dividendYield')
             if raw_yield is not None:
                 dividend_yield = round(float(raw_yield) * 100, 4)
@@ -262,7 +220,6 @@ def get_stock_detail(ticker):
         logger.error(f"Error fetching stock detail for {ticker}: {e}")
         return jsonify({'error': 'ticker not found'}), 404
 
-    # Technical indicators via ai_analytics (best-effort — don't fail the endpoint)
     indicators = None
     try:
         analytics = StockAnalytics()
@@ -270,7 +227,6 @@ def get_stock_detail(ticker):
     except Exception as e:
         logger.warning("Could not compute technical indicators for %s: %s", ticker, e)
 
-    # Recent news from database (best-effort — don't fail the endpoint)
     news = []
     try:
         conn = get_db_connection()
@@ -303,15 +259,7 @@ def get_stock_detail(ticker):
 
 @stocks_bp.route('/stocks/search', methods=['GET'])
 def search_stocks():
-    """Search for stock tickers via Yahoo Finance.
-
-    Query Parameters:
-        q (str): Search query string (company name or ticker fragment).
-
-    Returns:
-        JSON array of matching stocks with ticker, name, exchange, type fields.
-        Returns empty array if query is empty.
-    """
+    """Search for stock tickers via Yahoo Finance."""
     query = request.args.get('q', '')
     if not query:
         return jsonify([])

@@ -1,3 +1,4 @@
+```python
 """
 TickerPulse AI v3.0 - WebSocket Connection Manager
 Thread-safe registry for WebSocket connections with per-client ticker subscriptions.
@@ -69,7 +70,12 @@ class WsManager:
     # ------------------------------------------------------------------
 
     def subscribe(self, client_id: str, tickers: list[str]) -> None:
-        """Add *tickers* to a client's subscription set (normalised to uppercase)."""
+        """Add *tickers* to a client's subscription set (normalised to uppercase).
+
+        Silently caps additions so the total per-client count never exceeds
+        ``Config.WS_MAX_SUBSCRIPTIONS_PER_CLIENT``.
+        """
+        from backend.config import Config  # local import avoids circular dependency
         normalised = {
             t.strip().upper()
             for t in tickers
@@ -78,10 +84,28 @@ class WsManager:
         with self._lock:
             if client_id not in self._subscriptions:
                 return  # Client already disconnected before this arrived.
-            self._subscriptions[client_id].update(normalised)
-            for ticker in normalised:
+            current = self._subscriptions[client_id]
+            new_tickers = normalised - current
+            if not new_tickers:
+                return
+            limit = Config.WS_MAX_SUBSCRIPTIONS_PER_CLIENT
+            remaining = limit - len(current)
+            if remaining <= 0:
+                logger.warning(
+                    "WS %s: subscription limit %d reached; ignoring %d new tickers",
+                    client_id, limit, len(new_tickers),
+                )
+                return
+            to_add = set(list(new_tickers)[:remaining])
+            if len(new_tickers) > remaining:
+                logger.warning(
+                    "WS %s: capped subscriptions at %d; dropped %d tickers",
+                    client_id, limit, len(new_tickers) - remaining,
+                )
+            self._subscriptions[client_id].update(to_add)
+            for ticker in to_add:
                 self._ticker_subscribers.setdefault(ticker, set()).add(client_id)
-        logger.debug("WS %s subscribed: %s", client_id, normalised)
+        logger.debug("WS %s subscribed: %s", client_id, to_add)
 
     def unsubscribe(self, client_id: str, tickers: list[str]) -> None:
         """Remove *tickers* from a client's subscription set."""
@@ -175,3 +199,4 @@ class WsManager:
 # Module-level singleton — imported by app.py (route handler) and
 # price_refresh.py (scheduled broadcast) so they share the same registry.
 ws_manager = WsManager()
+```

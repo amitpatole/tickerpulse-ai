@@ -1,3 +1,4 @@
+```typescript
 'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
@@ -28,6 +29,8 @@ export interface UseWSPricesOptions {
 
 export interface UseWSPricesResult {
   status: WSStatus;
+  /** Send a manual refresh request to the server via the open WebSocket. */
+  sendRefresh: () => void;
 }
 
 /**
@@ -134,5 +137,13 @@ export function useWSPrices({
     }
   }, [tickers]);
 
-  return { status };
+  const sendRefresh = useCallback(() => {
+    const ws = wsRef.current;
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'refresh' }));
+    }
+  }, []);
+
+  return { status, sendRefresh };
 }
+```

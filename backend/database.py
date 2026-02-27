@@ -1,3 +1,4 @@
+```python
 """
 TickerPulse AI v3.0 - Database Connection Manager
 Thread-safe SQLite helper with context-manager support and table initialisation.
@@ -17,38 +18,18 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 def get_db_connection(db_path: str | None = None) -> sqlite3.Connection:
-    """Return a new SQLite connection with Row factory enabled.
-
-    Parameters
-    ----------
-    db_path : str, optional
-        Override the default database path from Config.
-
-    Notes
-    -----
-    * ``check_same_thread=False`` is required so Flask (and APScheduler)
-      threads can share the connection safely.  SQLite itself serialises
-      writes, so this is safe for the read-heavy workload of TickerPulse.
-    """
+    """Return a new SQLite connection with Row factory enabled."""
     path = db_path or Config.DB_PATH
     conn = sqlite3.connect(path, check_same_thread=False)
     conn.row_factory = sqlite3.Row
-    conn.execute('PRAGMA journal_mode=WAL')  # better concurrent-read perf
+    conn.execute('PRAGMA journal_mode=WAL')
     conn.execute('PRAGMA foreign_keys=ON')
     return conn
 
 
 @contextmanager
 def db_session(db_path: str | None = None):
-    """Context manager that yields a connection and auto-closes it.
-
-    Usage::
-
-        with db_session() as conn:
-            cursor = conn.cursor()
-            cursor.execute('SELECT ...')
-            conn.commit()
-    """
+    """Context manager that yields a connection and auto-closes it."""
     conn = get_db_connection(db_path)
     try:
         yield conn
@@ -64,9 +45,7 @@ def db_session(db_path: str | None = None):
 # Table definitions
 # ---------------------------------------------------------------------------
 
-# Existing tables (carried over from stock_monitor.py / settings_manager.py)
 _EXISTING_TABLES_SQL = [
-    # --- news ---
     """
     CREATE TABLE IF NOT EXISTS news (
         id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -82,7 +61,6 @@ _EXISTING_TABLES_SQL = [
         created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
     """,
-    # --- alerts ---
     """
     CREATE TABLE IF NOT EXISTS alerts (
         id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -94,7 +72,6 @@ _EXISTING_TABLES_SQL = [
         FOREIGN KEY (news_id) REFERENCES news (id)
     )
     """,
-    # --- monitor_status ---
     """
     CREATE TABLE IF NOT EXISTS monitor_status (
         id          INTEGER PRIMARY KEY,
@@ -103,7 +80,6 @@ _EXISTING_TABLES_SQL = [
         message     TEXT
     )
     """,
-    # --- stocks ---
     """
     CREATE TABLE IF NOT EXISTS stocks (
         ticker   TEXT PRIMARY KEY,
@@ -113,7 +89,6 @@ _EXISTING_TABLES_SQL = [
         active   INTEGER DEFAULT 1
     )
     """,
-    # --- settings ---
     """
     CREATE TABLE IF NOT EXISTS settings (
         key        TEXT PRIMARY KEY,
@@ -121,7 +96,6 @@ _EXISTING_TABLES_SQL = [
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
     """,
-    # --- ai_providers ---
     """
     CREATE TABLE IF NOT EXISTS ai_providers (
         id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -135,43 +109,39 @@ _EXISTING_TABLES_SQL = [
     """,
 ]
 
-# New v3.0 tables
 _NEW_TABLES_SQL = [
-    # --- agent_runs: tracks every AI agent execution ---
     """
     CREATE TABLE IF NOT EXISTS agent_runs (
         id              INTEGER PRIMARY KEY AUTOINCREMENT,
         agent_name      TEXT NOT NULL,
-        framework       TEXT NOT NULL DEFAULT 'crewai',  -- 'crewai' | 'openclaw'
-        status          TEXT NOT NULL DEFAULT 'pending',  -- pending | running | completed | failed
-        input_data      TEXT,       -- JSON
-        output_data     TEXT,       -- JSON
+        framework       TEXT NOT NULL DEFAULT 'crewai',
+        status          TEXT NOT NULL DEFAULT 'pending',
+        input_data      TEXT,
+        output_data     TEXT,
         tokens_input    INTEGER DEFAULT 0,
         tokens_output   INTEGER DEFAULT 0,
         estimated_cost  REAL    DEFAULT 0.0,
         duration_ms     INTEGER DEFAULT 0,
         error           TEXT,
-        metadata        TEXT,       -- JSON
+        metadata        TEXT,
         started_at      TIMESTAMP,
         completed_at    TIMESTAMP,
         created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
     """,
-    # --- job_history: scheduler / cron job audit log ---
     """
     CREATE TABLE IF NOT EXISTS job_history (
         id              INTEGER PRIMARY KEY AUTOINCREMENT,
         job_id          TEXT NOT NULL,
         job_name        TEXT NOT NULL,
-        status          TEXT NOT NULL DEFAULT 'pending',  -- pending | running | completed | failed
-        result_summary  TEXT,       -- short human-readable outcome
-        agent_name      TEXT,       -- NULL when job does not involve an agent
+        status          TEXT NOT NULL DEFAULT 'pending',
+        result_summary  TEXT,
+        agent_name      TEXT,
         duration_ms     INTEGER DEFAULT 0,
         cost            REAL    DEFAULT 0.0,
         executed_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
     """,
-    # --- data_providers_config: market-data provider registry ---
     """
     CREATE TABLE IF NOT EXISTS data_providers_config (
         id                    INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -179,13 +149,12 @@ _NEW_TABLES_SQL = [
         api_key               TEXT DEFAULT '',
         is_active             INTEGER DEFAULT 1,
         is_primary            INTEGER DEFAULT 0,
-        priority              INTEGER DEFAULT 100,  -- lower = higher priority (fallback order)
-        rate_limit_remaining  INTEGER DEFAULT -1,    -- -1 = unknown / unlimited
+        priority              INTEGER DEFAULT 100,
+        rate_limit_remaining  INTEGER DEFAULT -1,
         last_used             TIMESTAMP,
         created_at            TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
     """,
-    # --- research_briefs: AI-generated research reports ---
     """
     CREATE TABLE IF NOT EXISTS research_briefs (
         id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -199,7 +168,7 @@ _NEW_TABLES_SQL = [
         created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
     """,
-    # --- ai_ratings: cached AI ratings for stocks ---
+    # ai_ratings includes price columns; migration below handles existing DBs
     """
     CREATE TABLE IF NOT EXISTS ai_ratings (
         id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -219,11 +188,10 @@ _NEW_TABLES_SQL = [
         updated_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
     """,
-    # --- cost_tracking: per-call cost ledger ---
     """
     CREATE TABLE IF NOT EXISTS cost_tracking (
         id              INTEGER PRIMARY KEY AUTOINCREMENT,
-        date            TEXT NOT NULL,       -- YYYY-MM-DD
+        date            TEXT NOT NULL,
         agent_name      TEXT,
         provider_name   TEXT,
         model           TEXT,
@@ -234,7 +202,6 @@ _NEW_TABLES_SQL = [
         created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
     """,
-    # --- download_stats: aggregate repository download statistics ---
     """
     CREATE TABLE IF NOT EXISTS download_stats (
         id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -247,18 +214,16 @@ _NEW_TABLES_SQL = [
         recorded_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
     """,
-    # --- download_daily: daily breakdown of repository downloads ---
     """
     CREATE TABLE IF NOT EXISTS download_daily (
         repo_owner      TEXT NOT NULL,
         repo_name       TEXT NOT NULL,
-        date            TEXT NOT NULL,       -- YYYY-MM-DD
+        date            TEXT NOT NULL,
         clones          INTEGER DEFAULT 0,
         unique_clones   INTEGER DEFAULT 0,
         PRIMARY KEY (repo_owner, repo_name, date)
     )
     """,
-    # --- watchlists: named portfolio groups ---
     """
     CREATE TABLE IF NOT EXISTS watchlists (
         id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -267,7 +232,6 @@ _NEW_TABLES_SQL = [
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
     """,
-    # --- watchlist_stocks: junction table linking watchlists to tickers ---
     """
     CREATE TABLE IF NOT EXISTS watchlist_stocks (
         watchlist_id INTEGER NOT NULL REFERENCES watchlists(id) ON DELETE CASCADE,
@@ -276,7 +240,6 @@ _NEW_TABLES_SQL = [
         PRIMARY KEY (watchlist_id, ticker)
     )
     """,
-    # --- price_alerts: user-defined price condition alerts ---
     """
     CREATE TABLE IF NOT EXISTS price_alerts (
         id                INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -290,7 +253,6 @@ _NEW_TABLES_SQL = [
         created_at        TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
     """,
-    # --- sentiment_cache: aggregated social/news sentiment per ticker ---
     """
     CREATE TABLE IF NOT EXISTS sentiment_cache (
         ticker          TEXT PRIMARY KEY,
@@ -301,7 +263,6 @@ _NEW_TABLES_SQL = [
         updated_at      TIMESTAMP NOT NULL
     )
     """,
-    # --- earnings_events: upcoming earnings calendar cache ---
     """
     CREATE TABLE IF NOT EXISTS earnings_events (
         id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -315,9 +276,21 @@ _NEW_TABLES_SQL = [
         UNIQUE(ticker, earnings_date)
     )
     """,
+    """
+    CREATE TABLE IF NOT EXISTS error_log (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        source     TEXT NOT NULL,
+        error_code TEXT,
+        message    TEXT NOT NULL,
+        stack      TEXT,
+        request_id TEXT,
+        context    TEXT,
+        severity   TEXT NOT NULL DEFAULT 'error',
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+    """,
 ]
 
-# Useful indices for the new tables
 _INDEXES_SQL = [
     "CREATE INDEX IF NOT EXISTS idx_agent_runs_status      ON agent_runs (status)",
     "CREATE INDEX IF NOT EXISTS idx_agent_runs_agent       ON agent_runs (agent_name)",
@@ -340,6 +313,10 @@ _INDEXES_SQL = [
     "CREATE INDEX IF NOT EXISTS idx_sentiment_ticker       ON sentiment_cache (ticker)",
     "CREATE INDEX IF NOT EXISTS idx_earnings_date          ON earnings_events (earnings_date)",
     "CREATE INDEX IF NOT EXISTS idx_earnings_ticker        ON earnings_events (ticker)",
+    "CREATE INDEX IF NOT EXISTS idx_error_log_created      ON error_log (created_at)",
+    "CREATE INDEX IF NOT EXISTS idx_error_log_code         ON error_log (error_code)",
+    "CREATE INDEX IF NOT EXISTS idx_error_log_source       ON error_log (source)",
+    "CREATE INDEX IF NOT EXISTS idx_ai_ratings_ticker_updated ON ai_ratings (ticker, updated_at DESC)",
 ]
 
 
@@ -348,14 +325,10 @@ _INDEXES_SQL = [
 # ---------------------------------------------------------------------------
 
 def _migrate_agent_runs(cursor) -> None:
-    """Migrate agent_runs from v3.0.0 schema (tokens_used) to v3.0.1 (tokens_input/tokens_output).
-
-    Safe to call multiple times — silently skips if columns already exist.
-    """
-    # Check existing columns
+    """Migrate agent_runs from v3.0.0 schema (tokens_used) to v3.0.1 (tokens_input/tokens_output)."""
     cols = {row[1] for row in cursor.execute("PRAGMA table_info(agent_runs)").fetchall()}
     if not cols:
-        return  # table doesn't exist yet, CREATE TABLE will handle it
+        return
 
     migrations = []
     if 'tokens_input' not in cols:
@@ -367,7 +340,6 @@ def _migrate_agent_runs(cursor) -> None:
     if 'metadata' not in cols:
         migrations.append("ALTER TABLE agent_runs ADD COLUMN metadata TEXT")
 
-    # Copy data from old tokens_used into tokens_input if migrating
     if 'tokens_used' in cols and 'tokens_input' not in cols:
         migrations.append("UPDATE agent_runs SET tokens_input = tokens_used WHERE tokens_used > 0")
 
@@ -390,11 +362,9 @@ def _migrate_watchlist_stocks(cursor) -> None:
     """Add position column to watchlist_stocks if missing and initialise positions."""
     cols = {row[1] for row in cursor.execute("PRAGMA table_info(watchlist_stocks)").fetchall()}
     if not cols:
-        return  # table doesn't exist yet; CREATE TABLE will handle it
+        return
     if 'position' not in cols:
         cursor.execute("ALTER TABLE watchlist_stocks ADD COLUMN position INTEGER NOT NULL DEFAULT 0")
-        # Initialise positions alphabetically within each watchlist so the
-        # existing order is deterministic for users upgrading from older DBs.
         watchlist_ids = [row[0] for row in cursor.execute("SELECT id FROM watchlists").fetchall()]
         for wl_id in watchlist_ids:
             tickers = [
@@ -415,7 +385,7 @@ def _migrate_data_providers_config(cursor) -> None:
     """Add rate limit tracking columns to data_providers_config if missing."""
     cols = {row[1] for row in cursor.execute("PRAGMA table_info(data_providers_config)").fetchall()}
     if not cols:
-        return  # table doesn't exist yet; CREATE TABLE will handle it
+        return
     migrations = []
     if 'rate_limit_used' not in cols:
         migrations.append("ALTER TABLE data_providers_config ADD COLUMN rate_limit_used INTEGER DEFAULT 0")
@@ -432,7 +402,7 @@ def _migrate_watchlists(cursor) -> None:
     """Add sort_order column to watchlists table if missing."""
     cols = {row[1] for row in cursor.execute("PRAGMA table_info(watchlists)").fetchall()}
     if not cols:
-        return  # table doesn't exist yet; CREATE TABLE will handle it
+        return
     if 'sort_order' not in cols:
         cursor.execute(
             "ALTER TABLE watchlists ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0"
@@ -441,20 +411,37 @@ def _migrate_watchlists(cursor) -> None:
 
 
 def _migrate_price_alerts(cursor) -> None:
-    """Add notification_sent column to price_alerts if missing.
-
-    ``notification_sent`` prevents duplicate desktop notifications when an SSE
-    reconnect replays events or when an alert is re-evaluated before being
-    disabled.  Reset to 0 whenever the alert is re-enabled via toggle.
-    """
+    """Add notification_sent column to price_alerts if missing."""
     cols = {row[1] for row in cursor.execute("PRAGMA table_info(price_alerts)").fetchall()}
     if not cols:
-        return  # table doesn't exist yet; CREATE TABLE will handle it
+        return
     if 'notification_sent' not in cols:
         cursor.execute(
             "ALTER TABLE price_alerts ADD COLUMN notification_sent INTEGER NOT NULL DEFAULT 0"
         )
         logger.info("Migration applied: added notification_sent to price_alerts table")
+
+
+def _migrate_ai_ratings_price_columns(cursor) -> None:
+    """Add live price columns to ai_ratings if missing.
+
+    These three columns are written by the price_refresh job on every cycle.
+    Existing rows keep NULL until the first price refresh runs.
+    Score and confidence columns are never touched by this migration.
+    """
+    cols = {row[1] for row in cursor.execute("PRAGMA table_info(ai_ratings)").fetchall()}
+    if not cols:
+        return  # table doesn't exist yet; CREATE TABLE will handle it
+    migrations = []
+    if 'current_price' not in cols:
+        migrations.append("ALTER TABLE ai_ratings ADD COLUMN current_price REAL")
+    if 'price_change' not in cols:
+        migrations.append("ALTER TABLE ai_ratings ADD COLUMN price_change REAL")
+    if 'price_change_pct' not in cols:
+        migrations.append("ALTER TABLE ai_ratings ADD COLUMN price_change_pct REAL")
+    for sql in migrations:
+        cursor.execute(sql)
+        logger.info(f"Migration applied: {sql}")
 
 
 def init_all_tables(db_path: str | None = None) -> None:
@@ -476,6 +463,7 @@ def init_all_tables(db_path: str | None = None) -> None:
         _migrate_data_providers_config(cursor)
         _migrate_watchlists(cursor)
         _migrate_price_alerts(cursor)
+        _migrate_ai_ratings_price_columns(cursor)
 
         for sql in _NEW_TABLES_SQL:
             cursor.execute(sql)
@@ -498,3 +486,4 @@ def init_all_tables(db_path: str | None = None) -> None:
         raise
     finally:
         conn.close()
+```

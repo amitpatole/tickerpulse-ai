@@ -1,3 +1,4 @@
+```python
 """
 TickerPulse AI v3.0 - Price Refresh Job
 Fetches live prices for all active tickers and pushes ``price_update`` SSE events.
@@ -187,6 +188,8 @@ def run_price_refresh() -> None:
                 logger.debug("WS broadcast skipped for %s: %s", ticker, exc)
 
             # Persist live price to ai_ratings so page reload hydration is current.
+            # Critical constraint: ONLY price fields are updated — score, confidence,
+            # rating, and all other AI fields are never touched by this job.
             if db_conn is not None:
                 try:
                     db_conn.execute(
@@ -236,3 +239,4 @@ def run_price_refresh() -> None:
         logger.debug(
             "Price refresh complete: %d fetched, %d failed", fetched, failed
         )
+```
