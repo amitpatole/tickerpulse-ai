@@ -1,98 +1,13 @@
-name: Deploy
-
-on:
-  push:
-    branches: [main]
-    tags:
-      - 'v*'
-
-permissions:
-  contents: read
-  packages: write
-
-jobs:
-  build-and-push:
-    name: Build & Push Docker Images
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    outputs:
-      image-tag: ${{ steps.tag.outputs.value }}
-
+```yaml
+# ... existing jobs ...
+  create-release:
+    name: Create GitHub Release
+    needs: deploy-production
+    permissions:
+      contents: write
+    if: startsWith(github.ref, 'refs/tags/v')
     steps:
       - uses: actions/checkout@v4
-
-      - name: Compute image tag
-        id: tag
-        run: |
-          SHA="${{ github.sha }}"
-          echo "value=sha-${SHA:0:7}" >> "$GITHUB_OUTPUT"
-
-      - name: Log in to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build and push backend image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: backend/Dockerfile
-          push: true
-          tags: |
-            ghcr.io/${{ github.repository_owner }}/tickerpulse-backend:${{ steps.tag.outputs.value }}
-            ghcr.io/${{ github.repository_owner }}/tickerpulse-backend:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      - name: Build and push frontend image
-        uses: docker/build-push-action@v6
-        with:
-          context: frontend
-          file: frontend/Dockerfile
-          push: true
-          tags: |
-            ghcr.io/${{ github.repository_owner }}/tickerpulse-frontend:${{ steps.tag.outputs.value }}
-            ghcr.io/${{ github.repository_owner }}/tickerpulse-frontend:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-          build-args: |
-            NEXT_PUBLIC_API_URL=${{ vars.NEXT_PUBLIC_API_URL }}
-
-  deploy-production:
-    name: Deploy to Production
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    needs: build-and-push
-    environment: production
-    if: startsWith(github.ref, 'refs/tags/v')
-
-    steps:
-      - name: Deploy via SSH
-        uses: appleboy/ssh-action@v1.2.0
-        env:
-          IMAGE_TAG: ${{ needs.build-and-push.outputs.image-tag }}
-          GHCR_OWNER: ${{ github.repository_owner }}
-          ACTOR: ${{ github.actor }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          host: ${{ secrets.DEPLOY_HOST }}
-          username: ${{ secrets.DEPLOY_USER }}
-          key: ${{ secrets.DEPLOY_KEY }}
-          envs: IMAGE_TAG,GHCR_OWNER,ACTOR,GITHUB_TOKEN
-          script: |
-            set -e
-            cd "${{ secrets.DEPLOY_PATH }}"
-            echo "${GITHUB_TOKEN}" | docker login ghcr.io -u "${ACTOR}" --password-stdin
-            export BACKEND_IMAGE="ghcr.io/${GHCR_OWNER}/tickerpulse-backend:${IMAGE_TAG}"
-            export FRONTEND_IMAGE="ghcr.io/${GHCR_OWNER}/tickerpulse-frontend:${IMAGE_TAG}"
-            docker pull "${BACKEND_IMAGE}"
-            docker pull "${FRONTEND_IMAGE}"
-            BACKEND_IMAGE="${BACKEND_IMAGE}" FRONTEND_IMAGE="${FRONTEND_IMAGE}" \
-              docker compose up -d --remove-orphans
-            docker compose ps
-            echo "Production deployed: ${IMAGE_TAG}"
+      - name: Create GitHub Release
+        run: gh release create "${{ github.ref_name }}" --title "TickerPulse AI ${{ github.ref_name }}" --generate-notes --verify-tag
+```

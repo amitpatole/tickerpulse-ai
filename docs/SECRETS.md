@@ -1,1 +1,1 @@
-*(full file — outer ` ```markdown ` / ` ``` ` code fence wrappers removed)*
+(added `REPO_ADMIN_TOKEN` to Always Required secrets table)
