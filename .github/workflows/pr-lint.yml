@@ -1,0 +1,50 @@
+name: PR Lint
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+    branches: [main]
+
+permissions:
+  pull-requests: read
+
+jobs:
+  pr-title:
+    name: Conventional Commit PR Title
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: amannn/action-semantic-pull-request@v5
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          # Allowed conventional commit types.
+          # Must match the types used across this project's commit history.
+          types: |
+            feat
+            fix
+            docs
+            style
+            refactor
+            test
+            chore
+            ci
+            perf
+            build
+          # Scopes are optional — teams may add them, but they are not required.
+          requireScope: false
+          # Subject (everything after ": ") must not be empty.
+          subjectPattern: ^.+$
+          subjectPatternError: |
+            The PR title subject must not be empty.
+
+            Valid examples:
+              feat: add portfolio tracker
+              fix: correct pagination offset in chart endpoint
+              ci: add pr-lint workflow
+              docs: update CONTRIBUTING with branch naming guide
+          # Do not allow "WIP: ..." prefixed drafts to skip the check.
+          wip: false
+          # Single-commit PRs are validated against the PR title, not the commit.
+          validateSingleCommit: false
