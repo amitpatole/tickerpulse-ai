@@ -1,1 +1,18 @@
-*(removed stray instructional comment line)*
+```
+# Global fallback — any unmatched path requires core team review
+*                        @tickerpulse/core
+
+# Backend owns Python source and its Dockerfile
+backend/                 @tickerpulse/backend
+backend/Dockerfile       @tickerpulse/backend @tickerpulse/infra
+
+# Frontend owns the Next.js application
+frontend/                @tickerpulse/frontend
+
+# Electron owns the desktop layer
+electron/                @tickerpulse/electron
+
+# Infra owns all CI/CD workflows and container orchestration
+.github/                 @tickerpulse/infra
+docker-compose.yml       @tickerpulse/infra
+```
