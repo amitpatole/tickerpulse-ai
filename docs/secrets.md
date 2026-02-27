@@ -1,1 +1,1 @@
-(Created — see write above.)
+*(redirect stub pointing to SECRETS.md)*

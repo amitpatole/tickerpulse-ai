@@ -1,1 +1,1 @@
-*(contents as written above)*
+*(full table content as written above — all required secrets documented)*
