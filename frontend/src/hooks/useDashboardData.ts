@@ -1,8 +1,10 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { getDashboardSummary, getRatings, getAlerts, getNews } from '@/lib/api';
-import type { AIRating, Alert, NewsArticle, DashboardSummary } from '@/lib/types';
+import { getDashboardSummary, getRatings, getAlerts, getNews, getRefreshInterval } from '@/lib/api';
+import type { AIRating, Alert, NewsArticle, DashboardSummary, PriceUpdate } from '@/lib/types';
+import { useWSPrices } from './useWSPrices';
+import type { WSStatus } from './useWSPrices';
 
 export interface DashboardData {
   ratings: AIRating[] | null;
@@ -12,6 +14,9 @@ export interface DashboardData {
   loading: boolean;
   error: string | null;
   refetch: () => void;
+  wsStatus?: WSStatus;
+  wsConnected?: boolean;
+  lastPriceAt?: string | null;
 }
 
 /**
@@ -21,8 +26,11 @@ export interface DashboardData {
  * this hook receive pre-fetched data as props instead of making their own
  * redundant API calls.
  *
+ * Live price updates are delivered via WebSocket (/api/ws/prices) and merged
+ * into the ratings array in-place (by ticker) without a full refetch.
+ *
  * Refresh intervals:
- *   ratings  → 30s (driven by background price+rating job cadence)
+ *   ratings  → server-configured (default 30s) — full AI score sync
  *   alerts   → 30s
  *   news     → 60s
  *   summary  → 60s (KPI counts change infrequently)
@@ -34,6 +42,11 @@ export function useDashboardData(): DashboardData {
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [lastPriceAt, setLastPriceAt] = useState<string | null>(null);
+  // Separate ticker list for WebSocket subscription; only updated on full ratings sync
+  const [wsTickers, setWsTickers] = useState<string[]>([]);
+  // Server-driven polling interval for ratings; separate state so timers re-create on change
+  const [ratingsInterval, setRatingsInterval] = useState(30_000);
   const mountedRef = useRef(true);
 
   const fetchAll = useCallback(async () => {
@@ -53,6 +66,7 @@ export function useDashboardData(): DashboardData {
 
     if (ratingsResult.status === 'fulfilled') {
       setRatings(ratingsResult.value);
+      setWsTickers(ratingsResult.value.map((r) => r.ticker));
     } else {
       const msg = ratingsResult.reason instanceof Error
         ? ratingsResult.reason.message
@@ -75,16 +89,62 @@ export function useDashboardData(): DashboardData {
     setLoading(false);
   }, []);
 
+  // Merge a live price_update from WebSocket into the matching ratings entry
+  const handlePriceUpdate = useCallback((update: PriceUpdate) => {
+    if (!mountedRef.current) return;
+    setLastPriceAt(update.timestamp);
+    setRatings((prev) => {
+      if (!prev) return prev;
+      const idx = prev.findIndex((r) => r.ticker === update.ticker);
+      if (idx === -1) return prev; // Unknown ticker — do not mutate
+      const next = [...prev];
+      next[idx] = {
+        ...next[idx],
+        current_price: update.price,
+        price_change: update.change,
+        price_change_pct: update.change_pct,
+        updated_at: update.timestamp,
+      };
+      return next;
+    });
+  }, []);
+
+  // WebSocket subscription — uses stable wsTickers list so price merges don't
+  // trigger re-subscriptions on every update
+  const { status: wsStatus } = useWSPrices({ tickers: wsTickers, onPriceUpdate: handlePriceUpdate });
+  const wsConnected = wsStatus === 'open';
+
+  // Mount: initial fetch + read server-configured refresh interval
   useEffect(() => {
     mountedRef.current = true;
     fetchAll();
 
+    getRefreshInterval()
+      .then((config) => {
+        if (mountedRef.current && config.interval > 0) {
+          setRatingsInterval(config.interval * 1_000);
+        }
+      })
+      .catch(() => {});
+
+    return () => {
+      mountedRef.current = false;
+    };
+  }, [fetchAll]);
+
+  // Polling timers — re-created when ratingsInterval changes (server config update)
+  useEffect(() => {
     const ratingsTimer = setInterval(() => {
       if (!mountedRef.current) return;
       getRatings()
-        .then((data) => { if (mountedRef.current) setRatings(data); })
+        .then((data) => {
+          if (mountedRef.current) {
+            setRatings(data);
+            setWsTickers(data.map((r) => r.ticker));
+          }
+        })
         .catch(() => {});
-    }, 30_000);
+    }, ratingsInterval);
 
     const alertsTimer = setInterval(() => {
       if (!mountedRef.current) return;
@@ -108,13 +168,23 @@ export function useDashboardData(): DashboardData {
     }, 60_000);
 
     return () => {
-      mountedRef.current = false;
       clearInterval(ratingsTimer);
       clearInterval(alertsTimer);
       clearInterval(newsTimer);
       clearInterval(summaryTimer);
     };
-  }, [fetchAll]);
+  }, [ratingsInterval]);
 
-  return { ratings, alerts, news, summary, loading, error, refetch: fetchAll };
+  return {
+    ratings,
+    alerts,
+    news,
+    summary,
+    loading,
+    error,
+    refetch: fetchAll,
+    wsStatus,
+    wsConnected,
+    lastPriceAt,
+  };
 }

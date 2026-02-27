@@ -2,16 +2,7 @@
  * Tests for Dashboard Page-Level Integration
  *
  * Validates that the dashboard page properly threads data from useDashboardData
- * to child components, eliminating redundant API calls. Tests the architectural
- * pattern where page.tsx coordinates a single data-fetch and distributes data
- * via props to components like TopMovers, SentimentSummaryChart, AlertsTable.
- *
- * Tests:
- * 1. Page calls useDashboardData once on mount
- * 2. Data flows from useDashboardData to child components via props
- * 3. Child components render correctly when receiving data as props
- * 4. Components handle null/loading states when data not yet available
- * 5. No redundant API calls made when data already available
+ * to child components, eliminating redundant API calls.
  */
 
 import React from 'react';
@@ -19,16 +10,10 @@ import { render, screen, waitFor } from '@testing-library/react';
 import type { AIRating, Alert, NewsArticle } from '@/lib/types';
 import { DashboardData } from '@/hooks/useDashboardData';
 
-// =============================================================================
-// MOCK SETUP: Hooks and APIs
-// =============================================================================
-
-// Mock useDashboardData to control what data flows to the page
 jest.mock('@/hooks/useDashboardData', () => ({
   useDashboardData: jest.fn(),
 }));
 
-// Mock child components to verify they receive correct props
 jest.mock('@/components/dashboard/TopMovers', () => {
   return function MockTopMovers(props: any) {
     return <div data-testid="top-movers">{JSON.stringify(props)}</div>;
@@ -36,8 +21,13 @@ jest.mock('@/components/dashboard/TopMovers', () => {
 });
 
 jest.mock('@/components/dashboard/SentimentSummaryChart', () => {
-  return function MockSentimentSummaryChart(props: any) {
-    return <div data-testid="sentiment-chart">{JSON.stringify(props)}</div>;
+  return function MockSentimentSummaryChart({ ratings }: { ratings: AIRating[] | null }) {
+    return (
+      <div
+        data-testid="sentiment-chart"
+        data-has-ratings={ratings !== null ? 'true' : 'false'}
+      />
+    );
   };
 });
 
@@ -47,7 +37,6 @@ jest.mock('@/components/dashboard/AlertsTable', () => {
   };
 });
 
-// Mock other dashboard components that we don't need to test here
 jest.mock('@/components/dashboard/KPICards', () => {
   return function MockKPICards() {
     return <div data-testid="kpi-cards" />;
@@ -55,8 +44,13 @@ jest.mock('@/components/dashboard/KPICards', () => {
 });
 
 jest.mock('@/components/dashboard/StockGrid', () => {
-  return function MockStockGrid() {
-    return <div data-testid="stock-grid" />;
+  return function MockStockGrid({ ratings }: { ratings: AIRating[] | null }) {
+    return (
+      <div
+        data-testid="stock-grid"
+        data-has-ratings={ratings !== null ? 'true' : 'false'}
+      />
+    );
   };
 });
 
@@ -108,6 +102,12 @@ jest.mock('@/components/dashboard/RefreshIntervalControl', () => {
   };
 });
 
+jest.mock('@/components/ui/WSStatusIndicator', () => {
+  return function MockWSStatusIndicator() {
+    return <div data-testid="ws-status-indicator" />;
+  };
+});
+
 jest.mock('@/components/layout/Header', () => {
   return function MockHeader() {
     return <div data-testid="header" />;
@@ -115,10 +115,6 @@ jest.mock('@/components/layout/Header', () => {
 });
 
 import { useDashboardData } from '@/hooks/useDashboardData';
-
-// =============================================================================
-// TEST FIXTURES: Mock Data
-// =============================================================================
 
 const mockRatings: AIRating[] = [
   {
@@ -143,10 +139,15 @@ const mockRatings: AIRating[] = [
 
 const mockAlerts: Alert[] = [
   {
-    id: '1',
+    id: 1,
     ticker: 'NVDA',
+    condition_type: 'price_above',
+    threshold: 900,
+    enabled: true,
+    sound_type: 'chime',
+    triggered_at: null,
     severity: 'critical',
-    type: 'price_breach',
+    type: 'price_above',
     message: 'Price exceeded upper limit',
     created_at: new Date().toISOString(),
   },
@@ -154,12 +155,14 @@ const mockAlerts: Alert[] = [
 
 const mockNews: NewsArticle[] = [
   {
-    id: 'news-1',
+    id: 1,
+    ticker: 'NVDA',
     title: 'Market Update',
-    content: 'Markets rally on strong earnings',
+    description: 'Markets rally on strong earnings',
     source: 'Reuters',
-    published_at: new Date().toISOString(),
+    published_date: new Date().toISOString(),
     url: 'https://reuters.com',
+    created_at: new Date().toISOString(),
   },
 ];
 
@@ -167,83 +170,81 @@ const mockDashboardData: DashboardData = {
   ratings: mockRatings,
   alerts: mockAlerts,
   news: mockNews,
+  summary: null,
   loading: false,
   error: null,
   refetch: jest.fn(),
+  wsStatus: 'open',
 };
-
-// =============================================================================
-// TESTS: Page Integration
-// =============================================================================
 
 describe('Dashboard Page — Integration', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    jest.resetModules();
   });
 
   test('calls useDashboardData on mount to fetch all data', async () => {
-    // GIVEN: useDashboardData returns mock data
     const mockUseDashboardData = useDashboardData as jest.MockedFunction<typeof useDashboardData>;
     mockUseDashboardData.mockReturnValue(mockDashboardData);
 
-    // WHEN: Dashboard page is rendered (imported here to use mocks)
     const { default: DashboardPage } = await import('@/app/page');
     render(<DashboardPage />);
 
-    // THEN: useDashboardData should be called exactly once
     expect(mockUseDashboardData).toHaveBeenCalledTimes(1);
   });
 
-  test('passes ratings from useDashboardData to components that need it', async () => {
-    // GIVEN: useDashboardData returns ratings
+  test('passes ratings from useDashboardData to SentimentSummaryChart', async () => {
     const mockUseDashboardData = useDashboardData as jest.MockedFunction<typeof useDashboardData>;
     mockUseDashboardData.mockReturnValue(mockDashboardData);
 
-    // WHEN: Dashboard page is rendered
     const { default: DashboardPage } = await import('@/app/page');
     render(<DashboardPage />);
 
-    // THEN: Components should be rendered
     await waitFor(() => {
-      expect(screen.getByTestId('top-movers')).toBeInTheDocument();
-      expect(screen.getByTestId('sentiment-chart')).toBeInTheDocument();
+      const sentimentChart = screen.getByTestId('sentiment-chart');
+      expect(sentimentChart).toHaveAttribute('data-has-ratings', 'true');
     });
+  });
 
-    // THEN: (In ideal implementation) Components should receive ratings as props
-    // Currently TopMovers and SentimentSummaryChart fetch independently
+  test('passes ratings from useDashboardData to StockGrid', async () => {
+    const mockUseDashboardData = useDashboardData as jest.MockedFunction<typeof useDashboardData>;
+    mockUseDashboardData.mockReturnValue(mockDashboardData);
+
+    const { default: DashboardPage } = await import('@/app/page');
+    render(<DashboardPage />);
+
+    await waitFor(() => {
+      const stockGrid = screen.getByTestId('stock-grid');
+      expect(stockGrid).toHaveAttribute('data-has-ratings', 'true');
+    });
   });
 
   test('handles loading state when useDashboardData is loading', async () => {
-    // GIVEN: useDashboardData is in loading state
     const mockUseDashboardData = useDashboardData as jest.MockedFunction<typeof useDashboardData>;
     mockUseDashboardData.mockReturnValue({
       ratings: null,
       alerts: null,
       news: null,
+      summary: null,
       loading: true,
       error: null,
       refetch: jest.fn(),
     });
 
-    // WHEN: Dashboard page is rendered
     const { default: DashboardPage } = await import('@/app/page');
     render(<DashboardPage />);
 
-    // THEN: Page should render (components handle their own loading states)
-    expect(screen.getByTestId('top-movers')).toBeInTheDocument();
-    expect(screen.getByTestId('sentiment-chart')).toBeInTheDocument();
+    expect(screen.getByTestId('sentiment-chart')).toHaveAttribute('data-has-ratings', 'false');
+    expect(screen.getByTestId('stock-grid')).toHaveAttribute('data-has-ratings', 'false');
   });
 
   test('renders all main sections when data is available', async () => {
-    // GIVEN: useDashboardData returns complete data
     const mockUseDashboardData = useDashboardData as jest.MockedFunction<typeof useDashboardData>;
     mockUseDashboardData.mockReturnValue(mockDashboardData);
 
-    // WHEN: Dashboard page is rendered
     const { default: DashboardPage } = await import('@/app/page');
     render(<DashboardPage />);
 
-    // THEN: All major sections should be present
     await waitFor(() => {
       expect(screen.getByTestId('header')).toBeInTheDocument();
       expect(screen.getByTestId('kpi-cards')).toBeInTheDocument();
@@ -258,99 +259,70 @@ describe('Dashboard Page — Integration', () => {
   });
 
   test('handles error from useDashboardData gracefully', async () => {
-    // GIVEN: useDashboardData returns error
     const mockUseDashboardData = useDashboardData as jest.MockedFunction<typeof useDashboardData>;
     mockUseDashboardData.mockReturnValue({
       ratings: null,
       alerts: null,
       news: null,
+      summary: null,
       loading: false,
       error: 'Failed to fetch dashboard data',
       refetch: jest.fn(),
     });
 
-    // WHEN: Dashboard page is rendered
     const { default: DashboardPage } = await import('@/app/page');
     render(<DashboardPage />);
 
-    // THEN: Page should still render (components handle error states)
     expect(screen.getByTestId('top-movers')).toBeInTheDocument();
+    expect(screen.getByTestId('sentiment-chart')).toBeInTheDocument();
   });
 
   test('architectural pattern: eliminates redundant API calls by sharing data', async () => {
-    // GIVEN: Multiple components are on the page
     const mockUseDashboardData = useDashboardData as jest.MockedFunction<typeof useDashboardData>;
     mockUseDashboardData.mockReturnValue(mockDashboardData);
 
-    // WHEN: Dashboard page is rendered (contains TopMovers, SentimentSummaryChart, AlertsTable)
     const { default: DashboardPage } = await import('@/app/page');
     render(<DashboardPage />);
 
-    // THEN: useDashboardData should be called only once (not once per component)
     expect(mockUseDashboardData).toHaveBeenCalledTimes(1);
-
-    // NOTE: In current implementation:
-    // - useDashboardData is called once ✓
-    // - TopMovers calls useRatings independently ✗
-    // - SentimentSummaryChart calls useRatings independently ✗
-    // - AlertsTable calls useApi(getAlerts) independently ✗
-    //
-    // Ideal implementation would thread data as props:
-    // - useDashboardData called once ✓
-    // - TopMovers receives ratings prop, disabled useRatings ✓
-    // - SentimentSummaryChart receives ratings prop, disabled useRatings ✓
-    // - AlertsTable receives alerts prop, disabled useApi ✓
   });
 });
 
-// =============================================================================
-// TEST: Acceptance Criteria from Design Spec
-// =============================================================================
-
 describe('Dashboard — Design Spec Acceptance Criteria', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    jest.resetModules();
+  });
+
   test('AC1: Page coordinates single data fetch via useDashboardData', async () => {
-    // AC: Page calls useDashboardData once to batch-fetch ratings, alerts, news
     const mockUseDashboardData = useDashboardData as jest.MockedFunction<typeof useDashboardData>;
     mockUseDashboardData.mockReturnValue(mockDashboardData);
 
     const { default: DashboardPage } = await import('@/app/page');
     render(<DashboardPage />);
 
-    // THEN: Single call to useDashboardData
     expect(mockUseDashboardData).toHaveBeenCalledTimes(1);
   });
 
-  test('AC2: Child components accept data as props to eliminate redundancy', async () => {
-    // AC: TopMovers, SentimentSummaryChart, AlertsTable accept data props
-    // instead of making independent API calls
-
-    // NOTE: This test documents expected behavior after refactoring.
-    // Currently components fetch independently; this validates the desired pattern.
-
+  test('AC2: SentimentSummaryChart receives ratings prop (no independent fetch)', async () => {
     const mockUseDashboardData = useDashboardData as jest.MockedFunction<typeof useDashboardData>;
     mockUseDashboardData.mockReturnValue(mockDashboardData);
 
     const { default: DashboardPage } = await import('@/app/page');
-    const { container } = render(<DashboardPage />);
+    render(<DashboardPage />);
 
-    // After refactoring, page should pass ratings/alerts to components
-    const topMovers = container.querySelector('[data-testid="top-movers"]');
-    const sentimentChart = container.querySelector('[data-testid="sentiment-chart"]');
-
-    // Both should render (currently they do, but after refactor should receive props)
-    expect(topMovers).toBeInTheDocument();
-    expect(sentimentChart).toBeInTheDocument();
+    const sentimentChart = screen.getByTestId('sentiment-chart');
+    expect(sentimentChart).toHaveAttribute('data-has-ratings', 'true');
   });
 
-  test('AC3: Consistent refresh intervals (30s for ratings/alerts, 60s for news)', async () => {
-    // AC: useDashboardData provides refresh intervals:
-    // - ratings: 30s (driven by background price+rating job cadence)
-    // - alerts: 30s
-    // - news: 60s
-    //
-    // Components should not override with independent intervals (e.g., AlertsTable 15s)
+  test('AC3: StockGrid receives ratings prop from useDashboardData', async () => {
+    const mockUseDashboardData = useDashboardData as jest.MockedFunction<typeof useDashboardData>;
+    mockUseDashboardData.mockReturnValue(mockDashboardData);
 
-    // This is validated by useDashboardDataHook.test.tsx
-    expect(true).toBe(true);
+    const { default: DashboardPage } = await import('@/app/page');
+    render(<DashboardPage />);
+
+    const stockGrid = screen.getByTestId('stock-grid');
+    expect(stockGrid).toHaveAttribute('data-has-ratings', 'true');
   });
 });

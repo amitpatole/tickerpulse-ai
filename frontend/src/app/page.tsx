@@ -14,10 +14,11 @@ import MarketMoodWidget from '@/components/dashboard/MarketMoodWidget';
 import PortfolioChart from '@/components/dashboard/PortfolioChart';
 import SectorBreakdown from '@/components/dashboard/SectorBreakdown';
 import RefreshIntervalControl from '@/components/dashboard/RefreshIntervalControl';
+import WSStatusIndicator from '@/components/ui/WSStatusIndicator';
 import { useDashboardData } from '@/hooks/useDashboardData';
 
 export default function DashboardPage() {
-  const { ratings, alerts, summary } = useDashboardData();
+  const { ratings, alerts, summary, wsStatus, refetch, lastPriceAt } = useDashboardData();
 
   return (
     <div className="flex flex-col">
@@ -39,9 +40,15 @@ export default function DashboardPage() {
             <div>
               <div className="mb-4 flex items-center justify-between">
                 <h2 className="text-sm font-semibold text-white">Stock Watchlist</h2>
-                <RefreshIntervalControl />
+                <div className="flex items-center gap-3">
+                  <WSStatusIndicator
+                    status={wsStatus ?? 'connecting'}
+                    lastUpdated={lastPriceAt ?? undefined}
+                  />
+                  <RefreshIntervalControl />
+                </div>
               </div>
-              <StockGrid />
+              <StockGrid ratings={ratings} onRefetch={refetch} />
             </div>
             <PortfolioChart />
           </div>
@@ -58,7 +65,7 @@ export default function DashboardPage() {
         {/* Analysis Row: Top Movers + Sentiment Summary */}
         <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
           <TopMovers />
-          <SentimentSummaryChart />
+          <SentimentSummaryChart ratings={ratings} />
         </div>
 
         {/* AI Ratings Panel */}
