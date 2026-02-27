@@ -1,10 +1,11 @@
+```python
 """
 TickerPulse AI v3.0 - Analysis API Routes
 Blueprint for AI ratings and chart data endpoints.
 """
 
 from flask import Blueprint, jsonify, request
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import math
 import sqlite3
 import logging
@@ -31,6 +32,9 @@ def _parse_pagination(args):
         page_size = int(args.get('page_size', 25))
     except (ValueError, TypeError):
         return None, None, (jsonify({'error': 'page and page_size must be integers'}), 400)
+
+    if page < 1:
+        return None, None, (jsonify({'error': 'page must be a positive integer'}), 400)
 
     if not (1 <= page_size <= 100):
         return None, None, (jsonify({'error': 'page_size must be between 1 and 100'}), 400)
@@ -168,16 +172,26 @@ def get_chart_data(ticker):
     Query Parameters:
         period (str, optional): Time period for data. Defaults to '1mo'.
             Accepted values: '1d', '5d', '1mo', '3mo', '6mo', '1y', '5y', 'max'.
+        page (int, optional): Page number, 1-based. Defaults to 1.
+        page_size (int, optional): Items per page, 1–100. Defaults to 25.
 
     Returns:
         JSON object with:
         - ticker: Stock symbol
         - period: Requested period
-        - data: Array of OHLCV data points with timestamps
+        - data: Array of OHLCV data points for the requested page
+        - page: Current page number
+        - page_size: Items per page
+        - total: Total number of data points across all pages
+        - total_pages: Total number of pages
+        - has_next: True if a subsequent page exists
         - currency_symbol: '$' or currency symbol based on market
-        - stats: Summary statistics (current_price, high, low, change, volume)
+        - stats: Summary statistics computed from the full dataset
+          (current_price, open_price, high_price, low_price, price_change,
+          price_change_percent, total_volume)
 
     Errors:
+        400: Invalid page or page_size parameter.
         404: No data available or no valid data points.
     """
     period = request.args.get('period', '1mo')
@@ -253,3 +267,4 @@ def get_chart_data(ticker):
             'total_volume': sum([p['volume'] for p in data_points if p['volume']])
         }
     })
+```
