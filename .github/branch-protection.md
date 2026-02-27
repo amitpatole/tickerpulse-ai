@@ -2,7 +2,8 @@
 
 This document describes the required GitHub branch protection settings for
 `main`. These settings must be applied by a repository administrator via
-**Settings → Branches → Branch protection rules**.
+**Settings → Branches → Branch protection rules**, or by running the
+`Apply Branch Protection` workflow dispatch.
 
 ## Required Settings for `main`
 
@@ -33,10 +34,12 @@ merges from bypassing the checks.
 
 ## Required Secrets
 
-Configure these in **Settings → Secrets and variables → Actions**:
+Configure these in **Settings → Secrets and variables → Actions → Secrets**:
 
 | Secret | Used by | Description |
 |--------|---------|-------------|
+| `REPO_ADMIN_TOKEN` | apply-branch-protection.yml | PAT with `repo` admin scope to apply branch protection rules |
+| `CODECOV_TOKEN` | ci.yml | Codecov upload token for coverage reporting |
 | `STAGING_HOST` | deploy-staging.yml | Hostname or IP of the staging server |
 | `STAGING_SSH_USER` | deploy-staging.yml | SSH username on the staging server |
 | `STAGING_SSH_KEY` | deploy-staging.yml | Private SSH key for staging access |
@@ -53,3 +56,4 @@ Configure these in **Settings → Secrets and variables → Actions → Variable
 | Variable | Used by | Description |
 |----------|---------|-------------|
 | `NEXT_PUBLIC_API_URL` | deploy.yml | Backend API URL baked into the frontend image at build time |
+| `STAGING_BASE_URL` | deploy-staging.yml | Base URL of the staging server for smoke tests (e.g. `https://staging.example.com`) |

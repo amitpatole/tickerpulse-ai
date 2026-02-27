@@ -1,4 +1,3 @@
-```yaml
 name: Apply Branch Protection
 
 # One-shot workflow: run manually after initial repo setup or any time the
@@ -29,4 +28,3 @@ jobs:
           echo "Branch protection applied to main"
         env:
           GH_TOKEN: ${{ secrets.REPO_ADMIN_TOKEN }}
-```
