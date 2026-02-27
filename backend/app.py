@@ -47,6 +47,7 @@ _SWAGGER_TEMPLATE: dict = {
         {'name': 'Analysis', 'description': 'AI ratings and chart data'},
         {'name': 'Agents',   'description': 'Agent management, execution, and cost tracking'},
         {'name': 'System',   'description': 'Health check and real-time SSE stream'},
+        {'name': 'Earnings', 'description': 'Earnings calendar — upcoming and past events with EPS/revenue estimates'},
     ],
     'definitions': {
         'Error': {
@@ -112,7 +113,7 @@ def _build_snapshot(db_path: str | None = None) -> dict:
         'active_alerts': active_alerts,
         'last_regime': last_regime,
         'last_technical_signal': last_technical_signal,
-        'timestamp': datetime.utcnow().isoformat() + 'Z',
+        'timestamp': datetime.now(timezone.utc).isoformat(),
     }
 
 
@@ -121,6 +122,16 @@ def send_sse_event(event_type: str, data: dict) -> None:
 
     Validates event_type against an allowlist, rejects non-serializable or
     oversized payloads, and silently drops invalid events with an error log.
+
+    The payload is serialized to a JSON string *once* before being placed on
+    every client queue.  This prevents two classes of race condition:
+
+    1. Shared-mutable-dict race: if the caller mutates ``data`` after this
+       function returns, clients that have not yet dequeued and rendered the
+       item would otherwise observe the mutated value.
+    2. Redundant serialization: N clients would each call ``json.dumps``
+       independently; serializing once and sharing the immutable string is
+       both correct and more efficient.
     """
     if event_type not in _ALLOWED_EVENT_TYPES:
         logger.error("SSE blocked: unknown event_type %r", event_type)
@@ -137,7 +148,10 @@ def send_sse_event(event_type: str, data: dict) -> None:
         dead_clients: list[queue.Queue] = []
         for client_queue in sse_clients:
             try:
-                client_queue.put_nowait((event_type, data))
+                # Queue the pre-serialized string, not the raw dict, so that
+                # (a) all clients receive identical bytes and (b) post-call
+                # mutations to ``data`` cannot affect what clients read.
+                client_queue.put_nowait((event_type, serialized))
             except queue.Full:
                 dead_clients.append(client_queue)
         # Remove any clients whose queues overflowed
@@ -283,7 +297,7 @@ def create_app() -> Flask:
                 'to_provider': to_display,
                 'tier': tier,
                 'reason': reason,
-                'timestamp': datetime.utcnow().isoformat() + 'Z',
+                'timestamp': datetime.now(timezone.utc).isoformat(),
             })
 
         data_registry.on_fallback = _on_provider_fallback
@@ -318,10 +332,13 @@ def create_app() -> Flask:
                     logger.warning("event_stream: snapshot build failed: %s", exc)
                 while True:
                     try:
-                        event_type, data = q.get(timeout=15)
+                        # Dequeue the pre-serialized string placed by send_sse_event.
+                        # No re-serialization needed — the string is already valid JSON
+                        # and was validated for size before being enqueued.
+                        event_type, serialized = q.get(timeout=15)
                         yield (
                             f"event: {event_type}\n"
-                            f"data: {json.dumps(data)}\n\n"
+                            f"data: {serialized}\n\n"
                         )
                     except queue.Empty:
                         # Send a heartbeat so proxies / browsers don't drop
@@ -585,6 +602,8 @@ def _register_blueprints(app: Flask) -> None:
         'backend.api.watchlist':        'watchlist_bp',
         'backend.api.errors':           'errors_bp',
         'backend.api.error_stats':      'error_stats_bp',
+        'backend.api.portfolio':        'portfolio_bp',
+        'backend.api.comparison':       'comparison_bp',
     }
 
     for module_path, bp_name in blueprint_map.items():
