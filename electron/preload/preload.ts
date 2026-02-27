@@ -27,4 +27,36 @@ contextBridge.exposeInMainWorld('tickerpulse', {
    */
   minimizeWindow: () => ipcRenderer.send('window:minimize'),
   closeWindow: () => ipcRenderer.send('window:close'),
+
+  /**
+   * Show a native OS desktop notification for a triggered price alert.
+   * Invoked by useSSEAlerts when an `alert` SSE event arrives.
+   */
+  showNotification: (ticker: string, message: string) =>
+    ipcRenderer.invoke('alerts:notify', {
+      title: `Alert: ${ticker}`,
+      body: message,
+    }),
+});
+
+/**
+ * Separate bridge for error reporting so the renderer can forward errors
+ * with source='electron' for operator-level filtering in the error log.
+ *
+ * Usage:
+ *   window.__electronErrorReporter?.reportError({ message: '...', stack: '...' })
+ */
+contextBridge.exposeInMainWorld('__electronErrorReporter', {
+  /**
+   * Forward an error from the renderer process to Flask /api/errors.
+   * The main process tags it with source='electron' before persisting.
+   */
+  reportError: (payload: {
+    type?: string;
+    message: string;
+    stack?: string;
+    timestamp?: string;
+    session_id?: string;
+    severity?: string;
+  }) => ipcRenderer.invoke('errors:report', payload),
 });

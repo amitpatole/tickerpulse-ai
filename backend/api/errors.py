@@ -9,10 +9,11 @@ Endpoints
 POST /api/errors
     Ingest a single error report from the frontend.  Validates required
     fields, rejects oversized payloads (>64 KB), and writes to DB.
+    Rate-limited to 10 requests/minute per IP (requires flask-limiter).
 
 GET /api/errors
-    Query persisted errors with optional filters (source, severity, since).
-    Admin-facing; intended for internal dashboards / debugging tooling.
+    Query persisted errors with optional filters (source, severity, since,
+    session_id).  Admin-facing; intended for internal dashboards / debugging.
 """
 
 import json
@@ -31,8 +32,19 @@ _VALID_ERROR_TYPES = frozenset({
     'unhandled_rejection',
     'react_error',
 })
+_VALID_SOURCES = frozenset({'frontend', 'electron'})
 _MAX_PAYLOAD_BYTES = 65_536  # 64 KB
 _MAX_QUERY_LIMIT = 500
+_MAX_SESSION_ID_LEN = 64
+
+# ---------------------------------------------------------------------------
+# Rate limiter — optional; gracefully disabled when flask-limiter is absent
+# ---------------------------------------------------------------------------
+try:
+    from backend.extensions import limiter as _limiter
+    _rate_limit = _limiter.limit("10/minute") if _limiter is not None else lambda f: f
+except ImportError:
+    _rate_limit = lambda f: f  # type: ignore[assignment]
 
 
 # ---------------------------------------------------------------------------
@@ -40,6 +52,7 @@ _MAX_QUERY_LIMIT = 500
 # ---------------------------------------------------------------------------
 
 @errors_bp.route('/errors', methods=['POST'])
+@_rate_limit
 def ingest_error():
     """Accept an error report from the frontend and persist it.
 
@@ -60,6 +73,11 @@ def ingest_error():
             type:
               type: string
               enum: [unhandled_exception, unhandled_rejection, react_error]
+            source:
+              type: string
+              enum: [frontend, electron]
+              default: frontend
+              description: Origin of the error report
             message:
               type: string
             stack:
@@ -73,6 +91,10 @@ def ingest_error():
             timestamp:
               type: string
               format: date-time
+            session_id:
+              type: string
+              maxLength: 64
+              description: Tab-scoped UUID for correlating errors within one session
     responses:
       201:
         description: Error accepted and persisted
@@ -80,6 +102,8 @@ def ingest_error():
         description: Missing required fields or invalid type
       413:
         description: Payload too large (>64 KB)
+      429:
+        description: Rate limit exceeded (10 requests/minute per IP)
       500:
         description: Persistence failure
     """
@@ -123,6 +147,19 @@ def ingest_error():
             'request_id': request_id,
         }), 413
 
+    # --- Source field (frontend or electron; default frontend) ---------------
+    source: str = data.get('source', 'frontend')
+    if source not in _VALID_SOURCES:
+        source = 'frontend'
+
+    # --- Optional session_id -------------------------------------------------
+    session_id: str | None = data.get('session_id')
+    if session_id is not None:
+        if not isinstance(session_id, str):
+            session_id = None
+        elif len(session_id) > _MAX_SESSION_ID_LEN:
+            session_id = session_id[:_MAX_SESSION_ID_LEN]
+
     # --- Persist to error_log ------------------------------------------------
     error_id = f'err_{request_id}'
     context_blob = json.dumps({
@@ -136,17 +173,18 @@ def ingest_error():
             conn.execute(
                 """
                 INSERT INTO error_log
-                    (source, error_code, message, stack, request_id, context, severity)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                    (source, error_code, message, stack, request_id, context, severity, session_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
-                    'frontend',
+                    source,
                     data['type'],
                     data['message'],
                     data.get('stack'),
                     request_id,
                     context_blob,
                     'error',
+                    session_id,
                 ),
             )
     except Exception as exc:
@@ -156,8 +194,8 @@ def ingest_error():
         )
 
     logger.info(
-        "Frontend error ingested [%s]: type=%s message=%.120s",
-        request_id, data['type'], data['message'],
+        "Error ingested [%s]: source=%s type=%s message=%.120s",
+        request_id, source, data['type'], data['message'],
     )
 
     return jsonify({
@@ -192,6 +230,10 @@ def list_errors():
         type: string
         description: ISO-8601 datetime lower bound (e.g. 2026-01-01T00:00:00)
       - in: query
+        name: session_id
+        type: string
+        description: Filter by tab session UUID
+      - in: query
         name: limit
         type: integer
         default: 100
@@ -207,6 +249,7 @@ def list_errors():
     source = request.args.get('source')
     severity = request.args.get('severity')
     since = request.args.get('since')
+    session_id = request.args.get('session_id')
     try:
         limit = min(int(request.args.get('limit', 100)), _MAX_QUERY_LIMIT)
     except (TypeError, ValueError):
@@ -224,6 +267,9 @@ def list_errors():
     if since:
         conditions.append('created_at >= ?')
         params.append(since)
+    if session_id:
+        conditions.append('session_id = ?')
+        params.append(session_id)
 
     where_clause = ('WHERE ' + ' AND '.join(conditions)) if conditions else ''
 
@@ -232,7 +278,7 @@ def list_errors():
             rows = conn.execute(
                 f"""
                 SELECT id, source, error_code, message, stack,
-                       request_id, context, severity, created_at
+                       request_id, context, severity, session_id, created_at
                 FROM   error_log
                 {where_clause}
                 ORDER  BY created_at DESC

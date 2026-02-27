@@ -227,6 +227,15 @@ def create_app() -> Flask:
             "Install with: pip install flask-cors"
         )
 
+    # -- Rate limiter --------------------------------------------------------
+    try:
+        from backend.extensions import limiter as _limiter
+        if _limiter is not None:
+            _limiter.init_app(app)
+            logger.info("Rate limiter initialized (in-memory storage)")
+    except (ImportError, Exception) as exc:
+        logger.warning("Rate limiter not initialized: %s", exc)
+
     # -- Swagger / OpenAPI (Flasgger) ----------------------------------------
     if Config.SWAGGER_ENABLED:
         try:
@@ -450,6 +459,17 @@ def create_app() -> Flask:
         except Exception:
             pass
 
+        error_log_count_1h = 0
+        try:
+            with db_session() as conn:
+                row = conn.execute(
+                    "SELECT COUNT(*) FROM error_log"
+                    " WHERE created_at >= datetime('now', '-1 hours')"
+                ).fetchone()
+                error_log_count_1h = row[0] if row else 0
+        except Exception:
+            pass
+
         overall = 'ok' if db_status == 'ok' else 'degraded'
 
         return jsonify({
@@ -458,6 +478,7 @@ def create_app() -> Flask:
             'timestamp': datetime.utcnow().isoformat() + 'Z',
             'db': db_status,
             'scheduler': scheduler_status,
+            'error_log_count_1h': error_log_count_1h,
         })
 
     # -- Legacy dashboard fallback -------------------------------------------
@@ -563,6 +584,7 @@ def _register_blueprints(app: Flask) -> None:
         'backend.api.compare':          'compare_bp',
         'backend.api.watchlist':        'watchlist_bp',
         'backend.api.errors':           'errors_bp',
+        'backend.api.error_stats':      'error_stats_bp',
     }
 
     for module_path, bp_name in blueprint_map.items():
