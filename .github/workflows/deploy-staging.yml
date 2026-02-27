@@ -26,8 +26,6 @@ jobs:
     steps:
       - name: Compute image tag
         id: tag
-        # deploy.yml publishes images tagged sha-<short-sha>; reconstruct that
-        # tag from the workflow_run head SHA so we pull the exact same image.
         run: |
           SHA="${{ github.event.workflow_run.head_sha }}"
           echo "value=sha-${SHA:0:7}" >> "$GITHUB_OUTPUT"
@@ -63,13 +61,13 @@ jobs:
             echo "Staging deployed: ${IMAGE_TAG}"
 
       - name: Smoke test staging endpoints
-        # STAGING_BASE_URL is a repository variable (e.g. https://staging.tickerpulse.example.com)
-        # set via Settings → Variables → Actions. Using a variable decouples the
-        # smoke test from port assumptions and makes protocol changes a one-line update.
         run: |
           sleep 15
           BASE="${{ vars.STAGING_BASE_URL }}"
           curl --fail --retry 5 --retry-delay 5 "${BASE}/api/health"
           curl --fail --retry 3 --retry-delay 3 "${BASE}/api/watchlist"
           curl --fail --retry 3 --retry-delay 3 "${BASE}/api/stocks"
+          curl --fail --retry 3 --retry-delay 3 "${BASE}/api/earnings"
+          curl --fail --retry 3 --retry-delay 3 "${BASE}/api/portfolio"
+          curl --fail --retry 3 --retry-delay 3 "${BASE}/api/chat/health"
 ```

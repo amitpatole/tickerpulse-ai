@@ -1,3 +1,4 @@
+```
 # Global fallback — any unmatched path requires core team review
 *                        @tickerpulse/core
 
@@ -5,8 +6,16 @@
 backend/                 @tickerpulse/backend
 backend/Dockerfile       @tickerpulse/backend @tickerpulse/infra
 
+# New API modules — explicit ownership for routing and review clarity
+backend/api/earnings.py  @tickerpulse/backend
+backend/api/chat.py      @tickerpulse/backend
+
 # Frontend owns the Next.js application
 frontend/                @tickerpulse/frontend
+
+# New frontend feature pages — explicit ownership
+frontend/src/app/chat/   @tickerpulse/frontend
+frontend/src/app/portfolio/ @tickerpulse/frontend
 
 # Electron owns the desktop layer
 electron/                @tickerpulse/electron
@@ -14,3 +23,4 @@ electron/                @tickerpulse/electron
 # Infra owns all CI/CD workflows and container orchestration
 .github/                 @tickerpulse/infra
 docker-compose.yml       @tickerpulse/infra
+```
