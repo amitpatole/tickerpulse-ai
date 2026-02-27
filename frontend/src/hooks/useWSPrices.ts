@@ -1,4 +1,3 @@
-```typescript
 'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
@@ -180,4 +179,3 @@ export function useWSPrices({
 
   return { status, sendRefresh };
 }
-```

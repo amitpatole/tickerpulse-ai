@@ -1,7 +1,6 @@
-```typescript
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { getDashboardSummary, getRatings, getAlerts, getNews, getRefreshInterval } from '@/lib/api';
 import type { AIRating, Alert, NewsArticle, DashboardSummary, PriceUpdate } from '@/lib/types';
 import { useWSPrices } from './useWSPrices';
@@ -9,6 +8,8 @@ import type { WSStatus } from './useWSPrices';
 
 export interface DashboardData {
   ratings: AIRating[] | null;
+  /** Top movers sorted by |price_change_pct| descending, derived from ratings. */
+  topMovers: AIRating[] | null;
   alerts: Alert[] | null;
   news: NewsArticle[] | null;
   summary: DashboardSummary | null;
@@ -219,8 +220,18 @@ export function useDashboardData(activeWatchlistId?: number): DashboardData {
     };
   }, [ratingsInterval]);
 
+  // Derived: top movers sorted by |price_change_pct| descending.
+  // Re-computed only when ratings change, not on every render.
+  const topMovers = useMemo<AIRating[] | null>(() => {
+    if (!ratings) return null;
+    return [...ratings].sort(
+      (a, b) => Math.abs(b.price_change_pct ?? 0) - Math.abs(a.price_change_pct ?? 0)
+    );
+  }, [ratings]);
+
   return {
     ratings,
+    topMovers,
     alerts,
     news,
     summary,
@@ -233,4 +244,3 @@ export function useDashboardData(activeWatchlistId?: number): DashboardData {
     wsPrices,
   };
 }
-```

@@ -1,6 +1,6 @@
 'use client';
 
-import { use, useCallback, useEffect, useState } from 'react';
+import { use, useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import {
@@ -11,7 +11,6 @@ import {
   Loader2,
   ExternalLink,
   Clock,
-  Brain,
   Activity,
   Newspaper,
 } from 'lucide-react';
@@ -20,16 +19,19 @@ import Header from '@/components/layout/Header';
 import StockPriceChart from '@/components/stocks/StockPriceChart';
 import SentimentBadge from '@/components/stocks/SentimentBadge';
 import FinancialsCard from '@/components/stocks/FinancialsCard';
+import EarningsCard from '@/components/stocks/EarningsCard';
+import ComparisonModePanel from '@/components/stocks/ComparisonModePanel';
+import ComparisonChart from '@/components/stocks/ComparisonChart';
+import AIAnalysisPanel from '@/components/stocks/AIAnalysisPanel';
 import { useApi } from '@/hooks/useApi';
-import { useSSE } from '@/hooks/useSSE';
-import { getStockDetail, getRating } from '@/lib/api';
+import { useStockDetail } from '@/hooks/useStockDetail';
+import { getCompareData } from '@/lib/api';
 import type {
-  PriceUpdateEvent,
-  AIRating,
   StockDetailNewsItem,
   StockDetailIndicators,
+  ComparisonSeries,
+  ComparisonTicker,
 } from '@/lib/types';
-import { RATING_BG_CLASSES } from '@/lib/types';
 
 interface StockDetailPageProps {
   params: Promise<{ ticker: string }>;
@@ -56,12 +58,6 @@ function rsiColor(rsi: number | null): string {
   return 'text-white';
 }
 
-function scoreBarColor(score: number): string {
-  if (score >= 65) return 'bg-emerald-500';
-  if (score >= 40) return 'bg-amber-500';
-  return 'bg-red-500';
-}
-
 const SENTIMENT_BADGE_CLASSES: Record<string, string> = {
   positive: 'bg-emerald-500/15 text-emerald-400',
   bullish: 'bg-emerald-500/15 text-emerald-400',
@@ -83,39 +79,6 @@ const BB_COLORS: Record<string, string> = {
 };
 
 // ---- Sub-components ----------------------------------------------------------
-
-interface ScoreBarProps {
-  label: string;
-  value: number;
-  colorClass?: string;
-}
-
-function ScoreBar({ label, value, colorClass }: ScoreBarProps) {
-  const pct = Math.min(100, Math.max(0, value));
-  const cls = colorClass ?? scoreBarColor(pct);
-  return (
-    <div className="flex items-center gap-2">
-      <span className="w-24 shrink-0 text-[10px] text-slate-400">{label}</span>
-      <div
-        role="meter"
-        aria-valuenow={Math.round(pct)}
-        aria-valuemin={0}
-        aria-valuemax={100}
-        aria-label={`${label}: ${Math.round(pct)} out of 100`}
-        className="h-1.5 flex-1 rounded-full bg-slate-700"
-      >
-        <div
-          className={clsx('h-full rounded-full transition-[width]', cls)}
-          style={{ width: `${pct}%` }}
-          aria-hidden="true"
-        />
-      </div>
-      <span className="w-6 shrink-0 text-right font-mono text-[10px] text-slate-300">
-        {Math.round(pct)}
-      </span>
-    </div>
-  );
-}
 
 interface NewsCardProps {
   news: StockDetailNewsItem[];
@@ -201,107 +164,6 @@ function NewsCard({ news, loading }: NewsCardProps) {
   );
 }
 
-interface AIAnalysisCardProps {
-  ticker: string;
-}
-
-function AIAnalysisCard({ ticker }: AIAnalysisCardProps) {
-  const fetcher = useCallback(() => getRating(ticker), [ticker]);
-  const { data: rating, loading, error } = useApi<AIRating>(fetcher, [ticker]);
-
-  const badgeClass =
-    rating
-      ? (RATING_BG_CLASSES[rating.rating] ?? 'bg-slate-500/20 text-slate-400 border-slate-500/30')
-      : '';
-
-  return (
-    <div className="rounded-xl border border-slate-700/50 bg-slate-900 p-5">
-      <h2 className="mb-4 flex items-center gap-2 text-sm font-semibold text-white">
-        <Brain className="h-3.5 w-3.5 text-purple-400" aria-hidden="true" />
-        AI Analysis
-      </h2>
-
-      {loading && (
-        <div className="space-y-3" aria-busy="true">
-          <div className="h-7 w-28 animate-pulse rounded-full bg-slate-800" />
-          <div className="space-y-2">
-            {Array.from({ length: 3 }).map((_, i) => (
-              <div key={i} className="h-4 animate-pulse rounded bg-slate-800" />
-            ))}
-          </div>
-        </div>
-      )}
-
-      {!loading && (error || !rating) && (
-        <p className="text-sm text-slate-500">Analysis unavailable.</p>
-      )}
-
-      {rating && (
-        <div className="space-y-4">
-          <div className="flex items-center gap-3">
-            <span
-              className={clsx(
-                'rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-wide',
-                badgeClass
-              )}
-            >
-              {rating.rating.replace(/_/g, ' ')}
-            </span>
-            {rating.updated_at && (
-              <span className="text-[10px] text-slate-500">{timeAgo(rating.updated_at)}</span>
-            )}
-          </div>
-
-          <div className="space-y-2.5">
-            <ScoreBar
-              label="AI Score"
-              value={Math.min(100, Math.max(0, rating.score))}
-            />
-            <ScoreBar
-              label="Confidence"
-              value={Math.round(rating.confidence * 100)}
-              colorClass="bg-blue-500"
-            />
-            {rating.technical_score != null && (
-              <ScoreBar
-                label="Technical"
-                value={rating.technical_score}
-                colorClass="bg-cyan-500"
-              />
-            )}
-            {rating.fundamental_score != null && (
-              <ScoreBar
-                label="Fundamental"
-                value={rating.fundamental_score}
-                colorClass="bg-violet-500"
-              />
-            )}
-          </div>
-
-          {(rating.sentiment_label || rating.sector) && (
-            <div className="grid grid-cols-2 gap-3 border-t border-slate-700/30 pt-3">
-              {rating.sentiment_label && (
-                <div>
-                  <p className="text-[10px] uppercase tracking-wider text-slate-500">Sentiment</p>
-                  <p className="mt-0.5 text-sm font-semibold capitalize text-white">
-                    {rating.sentiment_label}
-                  </p>
-                </div>
-              )}
-              {rating.sector && (
-                <div>
-                  <p className="text-[10px] uppercase tracking-wider text-slate-500">Sector</p>
-                  <p className="mt-0.5 truncate text-sm text-white">{rating.sector}</p>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
 interface TechnicalIndicatorsCardProps {
   indicators: StockDetailIndicators;
 }
@@ -364,40 +226,83 @@ export default function StockDetailPage({ params }: StockDetailPageProps) {
     }
   }, [isInvalidTicker, router]);
 
-  // Fetch quote + candles + indicators + news with default 1M timeframe.
-  // StockPriceChart owns its own timeframe state independently.
-  const fetcher = useCallback(() => getStockDetail(upperTicker, '1M'), [upperTicker]);
-  const { data, loading, error, refetch } = useApi(fetcher, [upperTicker], {
-    enabled: !isInvalidTicker,
-  });
+  // Stock detail data via dedicated hook (includes SSE overlay)
+  const { data, loading, error, livePrice: livePriceData, aiRating } = useStockDetail(
+    isInvalidTicker ? '' : upperTicker,
+  );
 
-  // Live price overlay from SSE — applied without triggering a full refetch.
-  const [livePriceData, setLivePriceData] = useState<PriceUpdateEvent | null>(null);
+  // ---- Comparison state -------------------------------------------------------
 
-  const { lastEvent } = useSSE();
+  const [comparisonEnabled, setComparisonEnabled] = useState(false);
+  const [comparisonTickers, setComparisonTickers] = useState<ComparisonTicker[]>([]);
+
+  function handleComparisonAdd(ct: ComparisonTicker) {
+    setComparisonTickers((prev) => [...prev, ct]);
+  }
+
+  function handleComparisonRemove(t: string) {
+    setComparisonTickers((prev) => prev.filter((ct) => ct.ticker !== t));
+  }
+
+  // Build the symbols key used as a stable dep string for the compare fetch
+  const compareSymbolsKey = useMemo(() => {
+    if (!comparisonEnabled || comparisonTickers.length === 0 || !upperTicker) return '';
+    return [upperTicker, ...comparisonTickers.map((ct) => ct.ticker)].join(',');
+  }, [comparisonEnabled, comparisonTickers, upperTicker]);
+
+  const compareFetcher = useCallback(
+    () => getCompareData(compareSymbolsKey.split(',').filter(Boolean), '1M'),
+    [compareSymbolsKey],
+  );
+
+  const { data: compareData, loading: compareLoading } = useApi(
+    compareFetcher,
+    [compareSymbolsKey],
+    { enabled: comparisonEnabled && comparisonTickers.length > 0 },
+  );
+
+  // Transform compare API result into chart series
+  const comparisonChartSeries = useMemo<ComparisonSeries[]>(() => {
+    if (!compareData || !comparisonEnabled) return [];
+    return compareSymbolsKey
+      .split(',')
+      .filter(Boolean)
+      .map((sym) => {
+        const entry = compareData[sym];
+        if (!entry || 'error' in entry) {
+          return {
+            ticker: sym,
+            candles: [],
+            delta_pct: 0,
+            error: 'error' in (entry ?? {}) ? (entry as { error: string }).error : 'No data',
+          };
+        }
+        return {
+          ticker: sym,
+          candles: entry.points,
+          delta_pct: entry.current_pct,
+        };
+      });
+  }, [compareData, compareSymbolsKey, comparisonEnabled]);
+
+  // Sync per-ticker errors from compare response back into ComparisonModePanel pills
   useEffect(() => {
-    if (isInvalidTicker || !lastEvent) return;
-    if (lastEvent.type === 'snapshot') {
-      refetch();
-      return;
-    }
-    if (lastEvent.type === 'news') {
-      const eventTicker = (lastEvent.data?.ticker as string | undefined)?.toUpperCase();
-      if (eventTicker === upperTicker) refetch();
-      return;
-    }
-    if (lastEvent.type === 'price_update') {
-      const eventTicker = (lastEvent.data?.ticker as string | undefined)?.toUpperCase();
-      if (eventTicker === upperTicker) {
-        setLivePriceData(lastEvent.data as unknown as PriceUpdateEvent);
-      }
-    }
-  }, [lastEvent, refetch, upperTicker, isInvalidTicker]);
+    if (!compareData) return;
+    setComparisonTickers((prev) => {
+      let changed = false;
+      const next = prev.map((ct) => {
+        const entry = compareData[ct.ticker];
+        const newError =
+          entry && 'error' in entry ? (entry as { error: string }).error : null;
+        if (newError === ct.error) return ct;
+        changed = true;
+        return { ...ct, error: newError };
+      });
+      return changed ? next : prev;
+    });
+  }, [compareData]);
 
-  // Clear live price overlay when the underlying data refreshes.
-  useEffect(() => {
-    setLivePriceData(null);
-  }, [data]);
+  // ---- Derived display values -------------------------------------------------
 
   if (isInvalidTicker) return null;
 
@@ -487,7 +392,7 @@ export default function StockDetailPage({ params }: StockDetailPageProps) {
             <StockPriceChart ticker={upperTicker} />
           </div>
 
-          <div>
+          <div className="space-y-4">
             {quote ? (
               <FinancialsCard quote={quote} />
             ) : (
@@ -496,6 +401,7 @@ export default function StockDetailPage({ params }: StockDetailPageProps) {
                 aria-hidden="true"
               />
             )}
+            <EarningsCard ticker={upperTicker} />
           </div>
         </div>
 
@@ -506,7 +412,7 @@ export default function StockDetailPage({ params }: StockDetailPageProps) {
           </div>
 
           <div className="space-y-4">
-            <AIAnalysisCard ticker={upperTicker} />
+            <AIAnalysisPanel aiRating={aiRating} loading={loading && !data} />
             {data?.indicators && (
               <TechnicalIndicatorsCard indicators={data.indicators} />
             )}
@@ -518,6 +424,31 @@ export default function StockDetailPage({ params }: StockDetailPageProps) {
             )}
           </div>
         </div>
+
+        {/* Comparison mode */}
+        <div className="rounded-xl border border-slate-700/50 bg-slate-900 p-5">
+          <ComparisonModePanel
+            primaryTicker={upperTicker}
+            comparisonTickers={comparisonTickers}
+            onAdd={handleComparisonAdd}
+            onRemove={handleComparisonRemove}
+            onToggle={setComparisonEnabled}
+            enabled={comparisonEnabled}
+          />
+        </div>
+
+        {comparisonEnabled && comparisonTickers.length > 0 && (
+          <div className="rounded-xl border border-slate-700/50 bg-slate-900 p-5">
+            {compareLoading ? (
+              <div className="flex items-center justify-center py-10">
+                <Loader2 className="h-5 w-5 animate-spin text-slate-400" aria-hidden="true" />
+                <span className="sr-only">Loading comparison…</span>
+              </div>
+            ) : comparisonChartSeries.length > 0 ? (
+              <ComparisonChart series={comparisonChartSeries} timeframe="1M" />
+            ) : null}
+          </div>
+        )}
       </div>
     </div>
   );

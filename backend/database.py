@@ -1,4 +1,3 @@
-```python
 
 """
 TickerPulse AI v3.0 - Database Connection Manager
@@ -555,4 +554,3 @@ def init_all_tables(db_path: str | None = None) -> None:
         raise
     finally:
         conn.close()
-```

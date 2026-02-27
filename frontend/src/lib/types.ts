@@ -1,4 +1,3 @@
-```typescript
 // ---- AI Ratings ---------------------------------------------------------------
 
 export interface AIRating {
@@ -147,14 +146,21 @@ export interface ComparisonTicker {
 
 // ---- Alerts ------------------------------------------------------------------
 
+/** Discriminated union of the three supported alert condition types. */
+export type AlertCondition = 'price_above' | 'price_below' | 'pct_change';
+
 export interface Alert {
   id: number;
   ticker: string;
-  condition_type: 'price_above' | 'price_below' | 'pct_change';
+  condition_type: AlertCondition;
   threshold: number;
   enabled: boolean;
   sound_type: string;
   triggered_at: string | null;
+  /** ISO-8601 timestamp of the most recent firing; null before first fire. */
+  fired_at: string | null;
+  /** Total number of times this alert has fired. */
+  fire_count: number;
   created_at: string;
   /** Computed by API: 'critical' | 'warning' | 'info' */
   severity: 'critical' | 'warning' | 'info';
@@ -162,6 +168,14 @@ export interface Alert {
   type: string;
   /** Human-readable condition description, computed by API */
   message?: string;
+}
+
+/**
+ * Canonical price alert type used in forms and direct API interactions.
+ * Mirrors the Alert interface but makes sound_type a strict union.
+ */
+export interface PriceAlert extends Omit<Alert, 'sound_type'> {
+  sound_type: 'default' | 'chime' | 'alarm' | 'silent';
 }
 
 // ---- News --------------------------------------------------------------------
@@ -239,26 +253,33 @@ export interface SectorSummary {
 // ---- Earnings ----------------------------------------------------------------
 
 export interface EarningsEvent {
+  id: number;
   ticker: string;
-  company?: string;
-  date: string;
-  estimate?: number | null;
-  actual?: number | null;
-  surprise?: number | null;
-  time?: string;
-  id?: number;
-  earnings_date?: string;
-  time_of_day?: string;
-  eps_estimate?: number | null;
-  fiscal_quarter?: string;
-  fetched_at?: string;
+  company: string | null;
+  earnings_date: string;
+  time_of_day: 'BMO' | 'AMC' | 'TNS' | null;
+  eps_estimate: number | null;
+  eps_actual: number | null;
+  revenue_estimate: number | null;
+  revenue_actual: number | null;
+  fiscal_quarter: string | null;
+  fetched_at?: string | null;
+  updated_at?: string | null;
   on_watchlist?: boolean;
+  /** Computed surprise percentage: ((actual - estimate) / |estimate|) * 100 */
+  surprise_pct?: number | null;
 }
 
 export interface EarningsResponse {
-  events: EarningsEvent[];
+  upcoming: EarningsEvent[];
+  past: EarningsEvent[];
   stale: boolean;
   as_of: string;
+}
+
+export interface TickerEarningsResponse {
+  ticker: string;
+  events: EarningsEvent[];
 }
 
 // ---- Provider Rate Limits ----------------------------------------------------
@@ -491,6 +512,27 @@ export interface AlertSoundSettings {
   mute_when_active: boolean;
 }
 
+// ---- AI Analysis (stock detail endpoint) -------------------------------------
+
+export interface AIAnalysis {
+  rating: string;
+  /** Overall AI score 0–100. */
+  score: number;
+  /** Confidence in the rating, 0–1 scale. */
+  confidence: number;
+  technical_score?: number | null;
+  fundamental_score?: number | null;
+  summary?: string | null;
+  /** Key positive factors extracted from the latest research brief. */
+  key_factors: string[];
+  /** Risk factors extracted from the latest research brief. */
+  risks: string[];
+  /** ISO-8601 timestamp of the most recent AI analysis run. */
+  last_run_at?: string | null;
+  sentiment_label?: string | null;
+  sector?: string | null;
+}
+
 // ---- Color maps (runtime constants) ------------------------------------------
 
 export const RATING_BG_CLASSES: Record<string, string> = {
@@ -521,4 +563,3 @@ export const AGENT_STATUS_COLORS: Record<string, string> = {
   success: 'text-emerald-400 bg-emerald-500/20',
   error: 'text-red-400 bg-red-500/20',
 };
-```

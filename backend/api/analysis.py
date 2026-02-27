@@ -80,17 +80,31 @@ def get_ai_ratings():
 
     Serves cached ratings from ai_ratings table, then computes live ratings
     for any active stocks that are missing from the cache.
+
+    Query Parameters:
+        watchlist_id (int, optional): When provided, restrict results to stocks
+            belonging to the specified watchlist group.
     """
     analytics = StockAnalytics()
+    watchlist_id = request.args.get('watchlist_id', type=int)
 
-    # Get all active stock tickers
+    # Get active stock tickers, optionally scoped to a watchlist
     try:
         conn = sqlite3.connect(Config.DB_PATH)
         conn.row_factory = sqlite3.Row
-        active_tickers = {
-            row['ticker']
-            for row in conn.execute("SELECT ticker FROM stocks WHERE active = 1").fetchall()
-        }
+        if watchlist_id is not None:
+            rows = conn.execute(
+                """
+                SELECT DISTINCT s.ticker
+                FROM stocks s
+                JOIN watchlist_stocks ws ON ws.ticker = s.ticker
+                WHERE s.active = 1 AND ws.watchlist_id = ?
+                """,
+                (watchlist_id,),
+            ).fetchall()
+        else:
+            rows = conn.execute("SELECT ticker FROM stocks WHERE active = 1").fetchall()
+        active_tickers = {row['ticker'] for row in rows}
         conn.close()
     except Exception:
         active_tickers = set()
@@ -119,8 +133,9 @@ def get_ai_ratings():
                 'message': str(e)
             }
 
-    # Return only active stocks, sorted by ticker
-    results = [cached_map[t] for t in sorted(active_tickers) if t in cached_map]
+    # Return only active stocks, sorted by score DESC (best-rated first)
+    results = [cached_map[t] for t in active_tickers if t in cached_map]
+    results.sort(key=lambda r: r.get('score', 0), reverse=True)
     return jsonify(results)
 
 

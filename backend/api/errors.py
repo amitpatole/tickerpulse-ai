@@ -1,4 +1,3 @@
-```python
 """
 TickerPulse AI v3.0 — Frontend error ingestion API.
 
@@ -307,4 +306,3 @@ def list_errors():
             'error_code': 'DATABASE_ERROR',
             'request_id': request_id,
         }), 500
-```

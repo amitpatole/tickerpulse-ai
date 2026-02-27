@@ -1,4 +1,3 @@
-```python
 """
 TickerPulse AI v3.0 - Settings API Routes
 Blueprint for AI provider settings, data provider settings, and agent framework configuration.
@@ -841,4 +840,3 @@ def set_refresh_interval():
         logger.warning("Could not reschedule price_refresh job: %s", e)
 
     return jsonify({'success': True, 'interval': interval})
-```

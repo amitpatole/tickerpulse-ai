@@ -1,4 +1,3 @@
-```python
 """
 TickerPulse AI v3.0 — Error log aggregate statistics endpoint.
 
@@ -152,4 +151,3 @@ def get_error_stats():
             'error_code': 'DATABASE_ERROR',
             'request_id': request_id,
         }), 500
-```

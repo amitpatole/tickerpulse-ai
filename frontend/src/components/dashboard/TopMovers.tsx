@@ -2,8 +2,6 @@
 
 import { TrendingUp, TrendingDown } from 'lucide-react';
 import { clsx } from 'clsx';
-import { useRatings } from '@/hooks/useRatings';
-import { useSSERatings } from '@/hooks/useSSERatings';
 import type { AIRating } from '@/lib/types';
 
 const MAX_MOVERS = 5;
@@ -80,16 +78,20 @@ function MoverColumn({ label, direction, items }: MoverColumnProps) {
   );
 }
 
-export default function TopMovers() {
-  const { data: baseRatings, loading, error } = useRatings();
-  const ratings = useSSERatings(baseRatings);
+export interface TopMoversProps {
+  /** Ratings from useDashboardData. null = still loading initial data. */
+  data: AIRating[] | null;
+  loading?: boolean;
+  error?: string | null;
+}
 
-  const gainers = [...(ratings ?? [])]
+export default function TopMovers({ data, loading = false, error = null }: TopMoversProps) {
+  const gainers = [...(data ?? [])]
     .filter((r) => (r.price_change_pct ?? 0) > 0)
     .sort((a, b) => (b.price_change_pct ?? 0) - (a.price_change_pct ?? 0))
     .slice(0, MAX_MOVERS);
 
-  const losers = [...(ratings ?? [])]
+  const losers = [...(data ?? [])]
     .filter((r) => (r.price_change_pct ?? 0) < 0)
     .sort((a, b) => (a.price_change_pct ?? 0) - (b.price_change_pct ?? 0))
     .slice(0, MAX_MOVERS);
@@ -110,7 +112,7 @@ export default function TopMovers() {
         </div>
       </div>
 
-      {loading && !ratings && (
+      {(loading || data === null) && !error && (
         <div className="grid grid-cols-2 gap-2 p-4">
           {Array.from({ length: 10 }).map((_, i) => (
             <div key={i} className="h-8 animate-pulse rounded bg-slate-700" />
@@ -118,17 +120,17 @@ export default function TopMovers() {
         </div>
       )}
 
-      {error && !ratings && (
+      {error && !data && (
         <div className="p-4 text-center text-sm text-red-400">{error}</div>
       )}
 
-      {ratings && ratings.length === 0 && (
+      {data && data.length === 0 && (
         <div className="p-6 text-center text-sm text-slate-500">
           No stocks in watchlist.
         </div>
       )}
 
-      {ratings && ratings.length > 0 && (
+      {data && data.length > 0 && (
         <div className="grid grid-cols-2 divide-x divide-slate-700/50">
           <MoverColumn label="Gainers" direction="gain" items={gainers} />
           <MoverColumn label="Losers" direction="loss" items={losers} />

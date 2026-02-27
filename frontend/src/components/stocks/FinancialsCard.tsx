@@ -1,4 +1,3 @@
-```tsx
 'use client';
 
 import { BarChart2 } from 'lucide-react';
@@ -74,7 +73,6 @@ export default function FinancialsCard({ quote }: FinancialsCardProps) {
           </>
         )}
 
-        {/* Extended fields */}
         {quote.dividend_yield != null && (
           <StatRow
             label="Dividend Yield"
@@ -105,4 +103,3 @@ export default function FinancialsCard({ quote }: FinancialsCardProps) {
     </div>
   );
 }
-```

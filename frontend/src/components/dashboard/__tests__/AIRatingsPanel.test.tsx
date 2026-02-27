@@ -1,30 +1,21 @@
-```tsx
 /**
  * Tests for AIRatingsPanel component.
  *
- * Tests cover:
+ * All data flows in via the `ratings` prop from useDashboardData — no hook
+ * self-fetch.  Tests cover:
  * - Rendering ratings list with all columns visible
  * - Sorting by different columns (score, confidence, price change)
- * - Empty state when no ratings
- * - Score bar accessibility with role="meter"
- * - Error handling and loading states
+ * - Loading state when ratings prop is null
+ * - Empty state when ratings is an empty array
  * - Ticker links navigate to /stocks/[ticker]
+ * - Score bar accessibility with role="meter"
  */
 
 import React from 'react';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import AIRatingsPanel from '../AIRatingsPanel';
-import { useRatings } from '@/hooks/useRatings';
 import type { AIRating } from '@/lib/types';
-
-// Mock the shared ratings hook
-jest.mock('@/hooks/useRatings');
-
-// Mock useSSERatings to pass through data unchanged
-jest.mock('@/hooks/useSSERatings', () => ({
-  useSSERatings: (ratings: AIRating[] | null) => ratings,
-}));
 
 // Mock next/link
 jest.mock('next/link', () => ({
@@ -47,8 +38,6 @@ jest.mock('next/link', () => ({
 jest.mock('lucide-react', () => ({
   Brain: () => <div data-testid="brain-icon" />,
 }));
-
-const mockUseRatings = useRatings as jest.MockedFunction<typeof useRatings>;
 
 describe('AIRatingsPanel', () => {
   // =========================================================================
@@ -104,15 +93,8 @@ describe('AIRatingsPanel', () => {
 
   describe('happy path: renders ratings list with correct columns', () => {
     it('displays header and all rating data in columns', () => {
-      // Arrange
-      mockUseRatings.mockReturnValue({
-        data: mockRatings,
-        loading: false,
-        error: null,
-      });
-
-      // Act
-      render(<AIRatingsPanel />);
+      // Arrange & Act
+      render(<AIRatingsPanel ratings={mockRatings} />);
 
       // Assert: header
       expect(screen.getByText('AI Ratings')).toBeInTheDocument();
@@ -146,15 +128,8 @@ describe('AIRatingsPanel', () => {
     });
 
     it('sorts by score descending by default (highest score first)', () => {
-      // Arrange
-      mockUseRatings.mockReturnValue({
-        data: mockRatings,
-        loading: false,
-        error: null,
-      });
-
-      // Act
-      render(<AIRatingsPanel />);
+      // Arrange & Act
+      render(<AIRatingsPanel ratings={mockRatings} />);
 
       // Assert: tickers should appear in score order (85, 72, 55, 35)
       const tickers = screen.getAllByText(/^(AAPL|TSLA|MSFT|GOOGL)$/);
@@ -173,14 +148,9 @@ describe('AIRatingsPanel', () => {
     it('reorders by confidence when Confidence button clicked', async () => {
       // Arrange
       const user = userEvent.setup();
-      mockUseRatings.mockReturnValue({
-        data: mockRatings,
-        loading: false,
-        error: null,
-      });
 
       // Act: render and click confidence sort
-      render(<AIRatingsPanel />);
+      render(<AIRatingsPanel ratings={mockRatings} />);
       const confidenceBtn = screen.getByRole('button', { name: 'Confidence' });
       await user.click(confidenceBtn);
 
@@ -195,14 +165,9 @@ describe('AIRatingsPanel', () => {
     it('reorders by price change when % Change button clicked', async () => {
       // Arrange
       const user = userEvent.setup();
-      mockUseRatings.mockReturnValue({
-        data: mockRatings,
-        loading: false,
-        error: null,
-      });
 
       // Act
-      render(<AIRatingsPanel />);
+      render(<AIRatingsPanel ratings={mockRatings} />);
       const changeBtn = screen.getByRole('button', { name: '% Change' });
       await user.click(changeBtn);
 
@@ -216,40 +181,49 @@ describe('AIRatingsPanel', () => {
   });
 
   // =========================================================================
-  // Edge Cases: Empty state and loading
+  // Loading State: null ratings prop
   // =========================================================================
 
-  describe('edge cases: empty state and loading states', () => {
+  describe('loading state: null ratings prop', () => {
+    it('shows skeleton while loading (ratings is null)', () => {
+      render(<AIRatingsPanel ratings={null} />);
+
+      const skeletons = screen.getAllByRole('generic');
+      const pulseElements = skeletons.filter((el) =>
+        el.className?.includes('animate-pulse')
+      );
+      expect(pulseElements.length).toBeGreaterThan(0);
+    });
+
+    it('does not show column headers or rating rows in loading state', () => {
+      render(<AIRatingsPanel ratings={null} />);
+
+      expect(screen.queryByText('Ticker')).not.toBeInTheDocument();
+      expect(screen.queryByText('AAPL')).not.toBeInTheDocument();
+    });
+
+    it('sets aria-busy when loading', () => {
+      const { container } = render(<AIRatingsPanel ratings={null} />);
+      const liveRegion = container.querySelector('[aria-live="polite"]');
+      expect(liveRegion).toHaveAttribute('aria-busy', 'true');
+    });
+  });
+
+  // =========================================================================
+  // Edge Cases: Empty state
+  // =========================================================================
+
+  describe('edge cases: empty state', () => {
     it('shows "No stocks in watchlist" when ratings array is empty', () => {
-      // Arrange
-      mockUseRatings.mockReturnValue({
-        data: [],
-        loading: false,
-        error: null,
-      });
+      render(<AIRatingsPanel ratings={[]} />);
 
-      // Act
-      render(<AIRatingsPanel />);
-
-      // Assert
       expect(screen.getByText('No stocks in watchlist.')).toBeInTheDocument();
       expect(screen.queryByText('AAPL')).not.toBeInTheDocument();
     });
 
-    it('shows error message when API fails', () => {
-      // Arrange
-      const errorMsg = 'Failed to fetch AI ratings';
-      mockUseRatings.mockReturnValue({
-        data: null,
-        loading: false,
-        error: errorMsg,
-      });
-
-      // Act
-      render(<AIRatingsPanel />);
-
-      // Assert
-      expect(screen.getByText(errorMsg)).toBeInTheDocument();
+    it('does not show column headers when watchlist is empty', () => {
+      render(<AIRatingsPanel ratings={[]} />);
+      expect(screen.queryByText('Ticker')).not.toBeInTheDocument();
     });
   });
 
@@ -260,14 +234,7 @@ describe('AIRatingsPanel', () => {
   describe('drill-down: ticker links navigate to stock detail page', () => {
     it('renders ticker as a link to /stocks/[ticker]', () => {
       // Arrange
-      mockUseRatings.mockReturnValue({
-        data: [mockRatings[0]], // AAPL
-        loading: false,
-        error: null,
-      });
-
-      // Act
-      render(<AIRatingsPanel />);
+      render(<AIRatingsPanel ratings={[mockRatings[0]]} />);
 
       // Assert: the ticker text is an anchor linking to the detail page
       const tickerLink = screen.getByRole('link', { name: 'AAPL' });
@@ -276,14 +243,7 @@ describe('AIRatingsPanel', () => {
 
     it('renders a separate link for each ticker in the list', () => {
       // Arrange
-      mockUseRatings.mockReturnValue({
-        data: mockRatings,
-        loading: false,
-        error: null,
-      });
-
-      // Act
-      render(<AIRatingsPanel />);
+      render(<AIRatingsPanel ratings={mockRatings} />);
 
       // Assert: one link per ticker
       const links = screen.getAllByRole('link');
@@ -300,14 +260,7 @@ describe('AIRatingsPanel', () => {
   describe('accessibility: score bar with role="meter"', () => {
     it('renders meter elements with correct aria attributes', () => {
       // Arrange
-      mockUseRatings.mockReturnValue({
-        data: mockRatings,
-        loading: false,
-        error: null,
-      });
-
-      // Act
-      render(<AIRatingsPanel />);
+      render(<AIRatingsPanel ratings={mockRatings} />);
 
       // Assert: find meter elements
       const meters = screen.getAllByRole('meter');
@@ -322,4 +275,3 @@ describe('AIRatingsPanel', () => {
     });
   });
 });
-```

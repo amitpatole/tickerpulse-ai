@@ -6,6 +6,7 @@ import {
   createAlert as apiCreateAlert,
   deleteAlert as apiDeleteAlert,
   toggleAlert as apiToggleAlert,
+  updateAlert as apiUpdateAlert,
   getAlertSoundSettings,
 } from '@/lib/api';
 import type { Alert, AlertSoundSettings } from '@/lib/types';
@@ -19,11 +20,18 @@ interface CreateAlertData {
   sound_type?: string;
 }
 
+interface UpdateAlertData {
+  condition_type?: string;
+  threshold?: number;
+  sound_type?: string;
+}
+
 export interface UseAlertsReturn {
   alerts: Alert[];
   loading: boolean;
   error: string | null;
   createAlert: (data: CreateAlertData) => Promise<Alert>;
+  updateAlert: (id: number, data: UpdateAlertData) => Promise<Alert>;
   removeAlert: (id: number) => Promise<void>;
   toggleAlert: (id: number) => Promise<void>;
   refresh: () => void;
@@ -123,6 +131,7 @@ export function useAlerts(): UseAlertsReturn {
           message: string;
           sound_type?: string;
           type?: string;
+          is_test?: boolean;
         };
 
         // Determine effective sound type: per-alert override → global default.
@@ -144,7 +153,10 @@ export function useAlerts(): UseAlertsReturn {
         }
 
         // Refresh list so the triggered alert shows its updated state.
-        fetchAlerts();
+        // Skip refresh for test notifications since they don't change DB state.
+        if (!data.is_test) {
+          fetchAlerts();
+        }
       } catch {
         // Ignore malformed SSE payloads.
       }
@@ -167,6 +179,17 @@ export function useAlerts(): UseAlertsReturn {
     [fetchAlerts]
   );
 
+  const updateAlert = useCallback(
+    async (id: number, data: UpdateAlertData): Promise<Alert> => {
+      const updated = await apiUpdateAlert(id, data);
+      if (mountedRef.current) {
+        setAlerts((prev) => prev.map((a) => (a.id === id ? updated : a)));
+      }
+      return updated;
+    },
+    []
+  );
+
   const removeAlert = useCallback(async (id: number): Promise<void> => {
     await apiDeleteAlert(id);
     if (mountedRef.current) {
@@ -186,6 +209,7 @@ export function useAlerts(): UseAlertsReturn {
     loading,
     error,
     createAlert,
+    updateAlert,
     removeAlert,
     toggleAlert,
     refresh: fetchAlerts,

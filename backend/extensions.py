@@ -1,4 +1,3 @@
-```python
 """
 TickerPulse AI v3.0 — Shared Flask extension instances.
 
@@ -26,4 +25,3 @@ except ImportError:
         "Install with: pip install flask-limiter>=3.5.0"
     )
     limiter = None  # type: ignore[assignment]
-```

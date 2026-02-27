@@ -1,4 +1,3 @@
-```python
 """
 TickerPulse AI v3.0 — Request logging middleware and global error handlers.
 
@@ -172,4 +171,3 @@ def init_request_logging(app: Flask) -> None:
             'error_code': 'INTERNAL_ERROR',
             'request_id': request_id,
         }), 500
-```

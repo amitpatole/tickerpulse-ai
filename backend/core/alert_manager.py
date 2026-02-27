@@ -4,19 +4,23 @@ CRUD operations and evaluation logic for user-defined price alerts.
 """
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Optional
 
 from backend.database import db_session
+from backend.core.settings_manager import get_setting
 
 logger = logging.getLogger(__name__)
 
 # Price data older than this is considered too stale to fire an alert.
 _AI_RATINGS_TTL_SECONDS = 1800  # 30 minutes
 
+# Default cooldown period between repeated firings of the same alert.
+_DEFAULT_COOLDOWN_MINUTES = 15
+
 
 # ---------------------------------------------------------------------------
-# CRUD helpers
+# Internal helpers
 # ---------------------------------------------------------------------------
 
 def _row_to_dict(row) -> dict:
@@ -25,6 +29,23 @@ def _row_to_dict(row) -> dict:
     d['enabled'] = bool(d['enabled'])
     return d
 
+
+def _get_cooldown_minutes() -> int:
+    """Return the configured alert cooldown period in minutes.
+
+    Reads ``alert_cooldown_minutes`` from the settings table.
+    Falls back to ``_DEFAULT_COOLDOWN_MINUTES`` (15) if not set or invalid.
+    """
+    try:
+        val = get_setting('alert_cooldown_minutes', str(_DEFAULT_COOLDOWN_MINUTES))
+        return max(1, int(val))
+    except (TypeError, ValueError):
+        return _DEFAULT_COOLDOWN_MINUTES
+
+
+# ---------------------------------------------------------------------------
+# CRUD helpers
+# ---------------------------------------------------------------------------
 
 def get_alerts() -> list[dict]:
     """Return all price alerts ordered by creation date descending."""
@@ -67,6 +88,59 @@ def create_alert(ticker: str, condition_type: str, threshold: float, sound_type:
         return _row_to_dict(row)
 
 
+def update_alert(
+    alert_id: int,
+    condition_type: Optional[str] = None,
+    threshold: Optional[float] = None,
+    sound_type: Optional[str] = None,
+) -> Optional[dict]:
+    """Edit an existing price alert's condition and/or sound type.
+
+    Only the supplied fields are updated; omitted fields are unchanged.
+    Updating a triggered alert resets ``fired_at`` and ``fire_count`` so it
+    can fire again under the new condition.
+
+    Returns
+    -------
+    dict or None
+        Updated alert row, or None if the ID was not found.
+    """
+    with db_session() as conn:
+        row = conn.execute(
+            'SELECT * FROM price_alerts WHERE id = ?', (alert_id,)
+        ).fetchone()
+        if row is None:
+            return None
+
+        sets = []
+        params: list = []
+        if condition_type is not None:
+            sets.append('condition_type = ?')
+            params.append(condition_type)
+        if threshold is not None:
+            sets.append('threshold = ?')
+            params.append(threshold)
+        if sound_type is not None:
+            sets.append('sound_type = ?')
+            params.append(sound_type)
+
+        if not sets:
+            return _row_to_dict(row)
+
+        # Reset fire tracking so the edited alert starts fresh.
+        sets.extend(['fired_at = NULL', 'fire_count = 0', 'triggered_at = NULL'])
+        params.append(alert_id)
+
+        conn.execute(
+            f'UPDATE price_alerts SET {", ".join(sets)} WHERE id = ?',
+            params,
+        )
+        updated = conn.execute(
+            'SELECT * FROM price_alerts WHERE id = ?', (alert_id,)
+        ).fetchone()
+        return _row_to_dict(updated)
+
+
 def update_alert_sound_type(alert_id: int, sound_type: str) -> Optional[dict]:
     """Update the sound_type of a price alert.
 
@@ -100,8 +174,8 @@ def delete_alert(alert_id: int) -> bool:
 def toggle_alert(alert_id: int) -> Optional[dict]:
     """Flip the enabled flag on a price alert.
 
-    When re-enabling an alert, ``notification_sent`` is reset to 0 so the
-    alert can fire a desktop notification again if its condition is met.
+    When re-enabling an alert, ``notification_sent``, ``fired_at``, and
+    ``fire_count`` are reset so the alert can fire again if its condition is met.
 
     Returns
     -------
@@ -116,9 +190,11 @@ def toggle_alert(alert_id: int) -> Optional[dict]:
             return None
         new_enabled = 0 if row['enabled'] else 1
         if new_enabled == 1:
-            # Re-enabling: clear notification_sent so the alert can fire again.
+            # Re-enabling: clear all fire-tracking fields so the alert can fire again.
             conn.execute(
-                'UPDATE price_alerts SET enabled = 1, notification_sent = 0 WHERE id = ?',
+                '''UPDATE price_alerts
+                   SET enabled = 1, notification_sent = 0, fired_at = NULL, fire_count = 0
+                   WHERE id = ?''',
                 (alert_id,),
             )
         else:
@@ -132,6 +208,61 @@ def toggle_alert(alert_id: int) -> Optional[dict]:
         return _row_to_dict(updated)
 
 
+def fire_test_alert(alert_id: int) -> Optional[dict]:
+    """Fire a test SSE notification for the given alert without evaluating its condition.
+
+    The alert is not modified; only an SSE event is emitted so the user can
+    verify that their notification pipeline (sound, desktop notification) works.
+
+    Returns
+    -------
+    dict or None
+        The alert row if found, None if the alert does not exist.
+    """
+    with db_session() as conn:
+        row = conn.execute(
+            'SELECT * FROM price_alerts WHERE id = ?', (alert_id,)
+        ).fetchone()
+        if row is None:
+            return None
+        alert = _row_to_dict(row)
+
+    try:
+        from backend.app import send_sse_event
+    except ImportError:
+        logger.warning("fire_test_alert: could not import send_sse_event")
+        return alert
+
+    ticker = alert['ticker']
+    condition = alert['condition_type']
+    threshold = float(alert['threshold'])
+
+    cond_labels = {
+        'price_above': f"price rose above ${threshold:.2f}",
+        'price_below': f"price fell below ${threshold:.2f}",
+        'pct_change': f"moved ±{threshold:.1f}%",
+    }
+    message = f"[TEST] {ticker} alert: {cond_labels.get(condition, condition)}"
+
+    try:
+        send_sse_event('alert', {
+            'ticker': ticker,
+            'type': 'price_alert',
+            'message': message,
+            'severity': 'info',
+            'alert_id': alert_id,
+            'condition_type': condition,
+            'threshold': threshold,
+            'current_price': None,
+            'sound_type': alert['sound_type'],
+            'is_test': True,
+        })
+    except Exception as exc:
+        logger.warning("fire_test_alert: SSE send failed for alert %d: %s", alert_id, exc)
+
+    return alert
+
+
 # ---------------------------------------------------------------------------
 # Evaluation
 # ---------------------------------------------------------------------------
@@ -139,7 +270,7 @@ def toggle_alert(alert_id: int) -> Optional[dict]:
 def evaluate_price_alerts(tickers: list[str]) -> None:
     """Check enabled alerts against the latest prices in ai_ratings.
 
-    Called at the tail of run_technical_monitor() after the scanner run.
+    Called at the tail of run_price_refresh() after prices are persisted.
 
     Condition types
     ---------------
@@ -147,8 +278,12 @@ def evaluate_price_alerts(tickers: list[str]) -> None:
     * ``price_below``  – fires when current_price < threshold
     * ``pct_change``   – fires when abs(price_change_pct) >= threshold
 
-    When a condition is met the alert is stamped with ``triggered_at`` and
-    disabled (``enabled = 0``) atomically so it cannot fire again.
+    Cooldown
+    --------
+    An alert that has already fired is suppressed for ``alert_cooldown_minutes``
+    (default 15) after its last firing. Once the cooldown expires the alert can
+    fire again. ``fire_count`` tracks the total number of times each alert has
+    fired; ``fired_at`` records the most-recent firing timestamp.
     """
     if not tickers:
         return
@@ -158,6 +293,10 @@ def evaluate_price_alerts(tickers: list[str]) -> None:
     except ImportError:
         logger.warning("evaluate_price_alerts: could not import send_sse_event")
         send_sse_event = None  # type: ignore[assignment]
+
+    cooldown_minutes = _get_cooldown_minutes()
+    now = datetime.now(timezone.utc)
+    now_iso = now.isoformat()
 
     with db_session() as conn:
         # Fetch all enabled alerts for the current watchlist tickers
@@ -170,29 +309,43 @@ def evaluate_price_alerts(tickers: list[str]) -> None:
         if not rows:
             return
 
-        # Build a lookup: ticker -> (current_price, price_change_pct, cached_at)
+        # Build a lookup: ticker -> (current_price, price_change_pct)
         price_rows = conn.execute(
             f'SELECT ticker, current_price, price_change_pct, updated_at'
             f' FROM ai_ratings WHERE ticker IN ({placeholders})',
             tickers,
         ).fetchall()
-        prices: dict[str, tuple[float, float, str]] = {}
+        prices: dict[str, tuple[float, float]] = {}
         for pr in price_rows:
             cp = pr['current_price']
             pcp = pr['price_change_pct'] or 0.0
             if cp is not None:
-                prices[pr['ticker']] = (float(cp), float(pcp), pr['updated_at'] or '')
-
-        now = datetime.now(timezone.utc).isoformat()
+                prices[pr['ticker']] = (float(cp), float(pcp))
 
         for alert in rows:
-            ticker = alert['ticker']
+            ticker = alert['ticker'].strip().upper()
             if ticker not in prices:
                 continue
 
-            current_price, pct_change, _cached_at = prices[ticker]
+            # Cooldown check: skip if alert fired recently.
+            fired_at_str = alert['fired_at'] if 'fired_at' in alert.keys() else None
+            if fired_at_str:
+                try:
+                    fired_at = datetime.fromisoformat(fired_at_str)
+                    if fired_at.tzinfo is None:
+                        fired_at = fired_at.replace(tzinfo=timezone.utc)
+                    elapsed = (now - fired_at).total_seconds() / 60.0
+                    if elapsed < cooldown_minutes:
+                        logger.debug(
+                            "Alert %d for %s suppressed: cooldown %.1f / %d min",
+                            alert['id'], ticker, elapsed, cooldown_minutes,
+                        )
+                        continue
+                except (ValueError, TypeError):
+                    pass  # Unparseable fired_at — allow alert to fire
+
+            current_price, pct_change = prices[ticker]
             condition = alert['condition_type']
-            ticker = alert['ticker'].strip().upper()
             threshold = float(alert['threshold'])
             triggered = False
 
@@ -206,20 +359,23 @@ def evaluate_price_alerts(tickers: list[str]) -> None:
             if not triggered:
                 continue
 
-            # Atomically disable + stamp; AND enabled = 1 ensures exactly one
-            # concurrent thread wins the write (rowcount = 1) while all others
-            # get rowcount = 0 and skip the SSE notification.
+            # Update fired_at and fire_count atomically.
+            # We still use a conditional update to prevent duplicate fires from
+            # concurrent threads: only the thread whose UPDATE affects 1 row wins.
+            current_fire_count = alert['fire_count'] if 'fire_count' in alert.keys() else 0
             update_cursor = conn.execute(
-                'UPDATE price_alerts SET enabled = 0, triggered_at = ? WHERE id = ? AND enabled = 1',
-                (now, alert['id']),
+                '''UPDATE price_alerts
+                   SET fired_at = ?, fire_count = ?, triggered_at = ?
+                   WHERE id = ? AND (fired_at IS NULL OR fired_at = ?)''',
+                (now_iso, current_fire_count + 1, now_iso, alert['id'], fired_at_str),
             )
             if update_cursor.rowcount == 0:
-                # Another thread already claimed this alert; skip notification.
+                # Another thread already updated this alert; skip notification.
                 continue
 
             logger.info(
-                "Price alert %d triggered: %s %s %.4f (current=%.4f)",
-                alert['id'], ticker, condition, threshold, current_price,
+                "Price alert %d triggered: %s %s %.4f (current=%.4f, fire_count=%d)",
+                alert['id'], ticker, condition, threshold, current_price, current_fire_count + 1,
             )
 
             # Build human-readable message
@@ -242,6 +398,7 @@ def evaluate_price_alerts(tickers: list[str]) -> None:
                         'threshold': threshold,
                         'current_price': current_price,
                         'sound_type': alert['sound_type'],
+                        'fire_count': current_fire_count + 1,
                     })
                 except Exception as exc:
                     logger.warning("Failed to send SSE for alert %d: %s", alert['id'], exc)

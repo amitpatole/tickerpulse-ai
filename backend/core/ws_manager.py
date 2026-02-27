@@ -1,4 +1,3 @@
-```python
 """
 TickerPulse AI v3.0 - WebSocket Connection Manager
 Thread-safe registry for WebSocket connections with per-client ticker subscriptions.
@@ -272,4 +271,3 @@ class WsManager:
 # Module-level singleton — imported by app.py (route handler) and
 # price_refresh.py (scheduled broadcast) so they share the same registry.
 ws_manager = WsManager()
-```

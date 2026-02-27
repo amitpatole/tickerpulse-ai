@@ -1,4 +1,3 @@
-```yaml
 name: Deploy
 
 on:
@@ -97,4 +96,3 @@ jobs:
               docker compose up -d --remove-orphans
             docker compose ps
             echo "Production deployed: ${IMAGE_TAG}"
-```

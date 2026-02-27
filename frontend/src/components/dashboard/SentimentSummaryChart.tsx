@@ -126,6 +126,20 @@ function RatingDistribution({ ratings }: { ratings: AIRating[] }) {
   );
 }
 
+function NoDataState() {
+  return (
+    <div
+      data-testid="sentiment-no-data"
+      className="rounded-lg border border-slate-700/30 bg-slate-800/30 p-4 text-center"
+    >
+      <p className="text-[11px] uppercase tracking-wider text-slate-500">No Sentiment Data</p>
+      <p className="mt-1 text-xs text-slate-600">
+        Sentiment scores are not yet available for the current watchlist.
+      </p>
+    </div>
+  );
+}
+
 interface SentimentSummaryChartProps {
   /** Pre-fetched ratings from useDashboardData (already WS-merged).
    *  null = loading, AIRating[] when data is available. */
@@ -194,6 +208,9 @@ export default function SentimentSummaryChart({ ratings }: SentimentSummaryChart
                   </span>
                 </div>
               )}
+
+              {/* No sentiment data fallback */}
+              {total === 0 && <NoDataState />}
 
               {/* Sentiment distribution — only rendered when sentiment data exists */}
               {total > 0 && (

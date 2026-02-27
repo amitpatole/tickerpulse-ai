@@ -1,32 +1,21 @@
-```tsx
 /**
  * Tests for SentimentSummaryChart component.
  *
- * Tests cover:
+ * All data flows in via the `ratings` prop from useDashboardData — no hook
+ * self-fetch.  Tests cover:
  * - Sentiment bucket classification (bullish > 0.2, bearish < -0.2, neutral between)
  * - Sentiment distribution percentages calculated correctly
  * - AI rating distribution with counts and percentages
  * - Portfolio average sentiment score and label
  * - SentimentBar and RatingDistribution subcomponent rendering
  * - Edge cases: no sentiment data, all neutral, boundary conditions
- * - Loading and error states
+ * - Loading state (null prop) and empty watchlist
  */
 
 import React from 'react';
 import { render, screen } from '@testing-library/react';
 import SentimentSummaryChart from '../SentimentSummaryChart';
-import { useRatings } from '@/hooks/useRatings';
 import type { AIRating } from '@/lib/types';
-
-// Mock the shared ratings hook
-jest.mock('@/hooks/useRatings');
-
-// Mock useSSERatings to pass through data unchanged
-jest.mock('@/hooks/useSSERatings', () => ({
-  useSSERatings: (ratings: AIRating[] | null) => ratings,
-}));
-
-const mockUseRatings = useRatings as jest.MockedFunction<typeof useRatings>;
 
 describe('SentimentSummaryChart', () => {
   // =========================================================================
@@ -96,10 +85,6 @@ describe('SentimentSummaryChart', () => {
     },
   ];
 
-  beforeEach(() => {
-    jest.clearAllMocks();
-  });
-
   // =========================================================================
   // Happy Path: Renders sentiment distribution and portfolio average
   // =========================================================================
@@ -107,14 +92,7 @@ describe('SentimentSummaryChart', () => {
   describe('happy path: calculates and displays sentiment distribution', () => {
     it('should render title and all sentiment sections', () => {
       // Arrange
-      mockUseRatings.mockReturnValue({
-        data: mockRatings,
-        loading: false,
-        error: null,
-      });
-
-      // Act
-      render(<SentimentSummaryChart />);
+      render(<SentimentSummaryChart ratings={mockRatings} />);
 
       // Assert: header
       expect(screen.getByText('Market Sentiment')).toBeInTheDocument();
@@ -129,14 +107,7 @@ describe('SentimentSummaryChart', () => {
       // Arrange
       // Scores: 0.65, 0.45, 0.10, -0.15, -0.50, -0.75
       // Avg = (0.65 + 0.45 + 0.10 - 0.15 - 0.50 - 0.75) / 6 = -0.20/6 ≈ -0.033
-      mockUseRatings.mockReturnValue({
-        data: mockRatings,
-        loading: false,
-        error: null,
-      });
-
-      // Act
-      render(<SentimentSummaryChart />);
+      render(<SentimentSummaryChart ratings={mockRatings} />);
 
       // Assert: portfolio average displayed with 2 decimals
       expect(screen.getByText('-0.03')).toBeInTheDocument();
@@ -144,14 +115,7 @@ describe('SentimentSummaryChart', () => {
 
     it('should classify portfolio sentiment as Neutral when avg is between -0.2 and 0.2', () => {
       // Arrange
-      mockUseRatings.mockReturnValue({
-        data: mockRatings,
-        loading: false,
-        error: null,
-      });
-
-      // Act
-      render(<SentimentSummaryChart />);
+      render(<SentimentSummaryChart ratings={mockRatings} />);
 
       // Assert: avg score -0.033 is neutral
       const sentimentLabels = screen.getAllByText('Neutral');
@@ -161,14 +125,7 @@ describe('SentimentSummaryChart', () => {
     it('should display sentiment distribution counts and percentages', () => {
       // Arrange
       // Bullish: 2 (AAPL, MSFT), Neutral: 2 (GOOGL, AMZN), Bearish: 2 (TSLA, META)
-      mockUseRatings.mockReturnValue({
-        data: mockRatings,
-        loading: false,
-        error: null,
-      });
-
-      // Act
-      render(<SentimentSummaryChart />);
+      render(<SentimentSummaryChart ratings={mockRatings} />);
 
       // Assert: all three labels present
       expect(screen.getByText('Bullish')).toBeInTheDocument();
@@ -183,14 +140,7 @@ describe('SentimentSummaryChart', () => {
     it('should display AI rating distribution with counts', () => {
       // Arrange
       // Ratings: STRONG_BUY(1), BUY(1), HOLD(2), SELL(1), STRONG_SELL(1)
-      mockUseRatings.mockReturnValue({
-        data: mockRatings,
-        loading: false,
-        error: null,
-      });
-
-      // Act
-      render(<SentimentSummaryChart />);
+      render(<SentimentSummaryChart ratings={mockRatings} />);
 
       // Assert: rating labels shown (RATING_ORDER uses underscores replaced with spaces)
       expect(screen.getByText('STRONG BUY')).toBeInTheDocument();
@@ -231,14 +181,8 @@ describe('SentimentSummaryChart', () => {
         },
       ];
 
-      mockUseRatings.mockReturnValue({
-        data: bullishRatings,
-        loading: false,
-        error: null,
-      });
-
       // Act
-      render(<SentimentSummaryChart />);
+      render(<SentimentSummaryChart ratings={bullishRatings} />);
 
       // Assert: avg (0.21 + 0.9) / 2 = 0.555 → Bullish label shown
       expect(screen.getByText('Bullish')).toBeInTheDocument();
@@ -269,14 +213,8 @@ describe('SentimentSummaryChart', () => {
         },
       ];
 
-      mockUseRatings.mockReturnValue({
-        data: bearishRatings,
-        loading: false,
-        error: null,
-      });
-
       // Act
-      render(<SentimentSummaryChart />);
+      render(<SentimentSummaryChart ratings={bearishRatings} />);
 
       // Assert: avg (-0.21 - 0.9) / 2 = -0.555 → Bearish label shown
       expect(screen.getByText('Bearish')).toBeInTheDocument();
@@ -307,14 +245,8 @@ describe('SentimentSummaryChart', () => {
         },
       ];
 
-      mockUseRatings.mockReturnValue({
-        data: neutralRatings,
-        loading: false,
-        error: null,
-      });
-
       // Act
-      render(<SentimentSummaryChart />);
+      render(<SentimentSummaryChart ratings={neutralRatings} />);
 
       // Assert: avg (0.0 + 0.15) / 2 = 0.075 → Neutral
       expect(screen.getByText('Neutral')).toBeInTheDocument();
@@ -351,14 +283,8 @@ describe('SentimentSummaryChart', () => {
         },
       ];
 
-      mockUseRatings.mockReturnValue({
-        data: mixedRatings,
-        loading: false,
-        error: null,
-      });
-
       // Act
-      render(<SentimentSummaryChart />);
+      render(<SentimentSummaryChart ratings={mixedRatings} />);
 
       // Assert: only 1 stock counted → avg 0.5 → Bullish
       expect(screen.getByText('Bullish')).toBeInTheDocument();
@@ -366,14 +292,7 @@ describe('SentimentSummaryChart', () => {
 
     it('should handle empty watchlist gracefully', () => {
       // Arrange
-      mockUseRatings.mockReturnValue({
-        data: [],
-        loading: false,
-        error: null,
-      });
-
-      // Act
-      render(<SentimentSummaryChart />);
+      render(<SentimentSummaryChart ratings={[]} />);
 
       // Assert
       expect(screen.getByText('No stocks in watchlist.')).toBeInTheDocument();
@@ -381,14 +300,7 @@ describe('SentimentSummaryChart', () => {
 
     it('should not display rating distribution section for empty watchlist', () => {
       // Arrange
-      mockUseRatings.mockReturnValue({
-        data: [],
-        loading: false,
-        error: null,
-      });
-
-      // Act
-      render(<SentimentSummaryChart />);
+      render(<SentimentSummaryChart ratings={[]} />);
 
       // Assert: distribution section not rendered
       expect(screen.queryByText('AI Rating Distribution')).not.toBeInTheDocument();
@@ -402,14 +314,7 @@ describe('SentimentSummaryChart', () => {
   describe('SentimentBar accessibility and rendering', () => {
     it('should render sentiment bars with role="meter" for accessibility', () => {
       // Arrange
-      mockUseRatings.mockReturnValue({
-        data: mockRatings,
-        loading: false,
-        error: null,
-      });
-
-      // Act
-      render(<SentimentSummaryChart />);
+      render(<SentimentSummaryChart ratings={mockRatings} />);
 
       // Assert: meter elements for sentiment bars
       const meterElements = screen.getAllByRole('meter');
@@ -418,14 +323,7 @@ describe('SentimentSummaryChart', () => {
 
     it('should set aria-valuenow to a valid percentage for all meters', () => {
       // Arrange
-      mockUseRatings.mockReturnValue({
-        data: mockRatings,
-        loading: false,
-        error: null,
-      });
-
-      // Act
-      render(<SentimentSummaryChart />);
+      render(<SentimentSummaryChart ratings={mockRatings} />);
 
       // Assert: all meters have valid 0-100 percentages
       const meterElements = screen.getAllByRole('meter');
@@ -439,14 +337,7 @@ describe('SentimentSummaryChart', () => {
 
     it('should display percentage text for each sentiment bucket', () => {
       // Arrange
-      mockUseRatings.mockReturnValue({
-        data: mockRatings,
-        loading: false,
-        error: null,
-      });
-
-      // Act
-      render(<SentimentSummaryChart />);
+      render(<SentimentSummaryChart ratings={mockRatings} />);
 
       // Assert: percentages in parentheses are visible
       const percentages = screen.getAllByText(/\(\d+%\)/);
@@ -455,20 +346,13 @@ describe('SentimentSummaryChart', () => {
   });
 
   // =========================================================================
-  // Loading & Error States
+  // Loading State: null ratings prop
   // =========================================================================
 
-  describe('loading and error states', () => {
-    it('should display loading skeleton while fetching', () => {
-      // Arrange
-      mockUseRatings.mockReturnValue({
-        data: null,
-        loading: true,
-        error: null,
-      });
-
-      // Act
-      render(<SentimentSummaryChart />);
+  describe('loading state: null ratings prop', () => {
+    it('should display loading skeleton while ratings is null', () => {
+      // Arrange & Act
+      render(<SentimentSummaryChart ratings={null} />);
 
       // Assert: skeleton pulse elements visible
       const skeletons = screen.getAllByRole('generic');
@@ -478,21 +362,13 @@ describe('SentimentSummaryChart', () => {
       expect(pulseElements.length).toBeGreaterThan(0);
     });
 
-    it('should display error message when fetch fails', () => {
-      // Arrange
-      const errorMsg = 'Failed to fetch sentiment data.';
-      mockUseRatings.mockReturnValue({
-        data: null,
-        loading: false,
-        error: errorMsg,
-      });
+    it('should not display content sections while loading', () => {
+      // Arrange & Act
+      render(<SentimentSummaryChart ratings={null} />);
 
-      // Act
-      render(<SentimentSummaryChart />);
-
-      // Assert
-      expect(screen.getByText(errorMsg)).toBeInTheDocument();
+      // Assert: no content rendered while loading
+      expect(screen.queryByText('Portfolio Avg. Sentiment')).not.toBeInTheDocument();
+      expect(screen.queryByText('No stocks in watchlist.')).not.toBeInTheDocument();
     });
   });
 });
-```

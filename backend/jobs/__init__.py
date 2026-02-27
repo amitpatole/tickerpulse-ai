@@ -14,6 +14,7 @@ from backend.jobs.weekly_review import run_weekly_review
 from backend.jobs.regime_check import run_regime_check
 from backend.jobs.download_tracker import run_download_tracker
 from backend.jobs.price_refresh import run_price_refresh
+from backend.jobs.earnings_sync import run_earnings_sync
 from backend.config import Config
 
 
@@ -141,6 +142,21 @@ def register_all_jobs(scheduler_manager) -> None:
         seconds=Config.PRICE_REFRESH_INTERVAL_SECONDS,
     )
 
+    # ---- Earnings Sync: Nightly at 6:00 AM ET ----
+    scheduler_manager.register_job(
+        job_id='earnings_sync',
+        func=run_earnings_sync,
+        trigger='cron',
+        name='Earnings Sync',
+        description=(
+            'Syncs earnings calendar data (upcoming dates, EPS estimates, '
+            'and historical actuals) for all watchlist tickers from Yahoo Finance. '
+            'Runs nightly so the dashboard always shows fresh data.'
+        ),
+        hour=6,
+        minute=0,
+    )
+
 
 __all__ = [
     'register_all_jobs',
@@ -152,4 +168,5 @@ __all__ = [
     'run_regime_check',
     'run_download_tracker',
     'run_price_refresh',
+    'run_earnings_sync',
 ]

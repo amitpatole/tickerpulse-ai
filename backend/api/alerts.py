@@ -8,7 +8,15 @@ import re
 
 from flask import Blueprint, jsonify, request
 
-from backend.core.alert_manager import create_alert, get_alerts, delete_alert, toggle_alert, update_alert_sound_type
+from backend.core.alert_manager import (
+    create_alert,
+    get_alerts,
+    delete_alert,
+    toggle_alert,
+    update_alert,
+    update_alert_sound_type,
+    fire_test_alert,
+)
 from backend.core.settings_manager import get_setting, set_setting
 from backend.database import db_session
 
@@ -162,6 +170,69 @@ def delete_alert_endpoint(alert_id: int):
     if not deleted:
         return jsonify({'error': f'Alert {alert_id} not found'}), 404
     return jsonify({'success': True, 'id': alert_id})
+
+
+@alerts_bp.route('/alerts/<int:alert_id>', methods=['PUT'])
+def update_alert_endpoint(alert_id: int):
+    """Edit an existing price alert's condition, threshold, and/or sound type.
+
+    Request Body (JSON, all fields optional):
+        condition_type (str)   : One of 'price_above', 'price_below', 'pct_change'.
+        threshold      (float) : Numeric threshold value.
+        sound_type     (str)   : One of 'default', 'chime', 'alarm', 'silent'.
+
+    Returns:
+        200 with the updated alert object, 400 on validation failure, 404 if not found.
+    """
+    data = request.get_json(silent=True) or {}
+
+    condition_type = data.get('condition_type')
+    threshold_raw = data.get('threshold')
+    sound_type = data.get('sound_type')
+
+    if condition_type is not None:
+        if condition_type not in _VALID_CONDITION_TYPES:
+            return jsonify({
+                'error': f"Invalid condition_type. Must be one of: {', '.join(sorted(_VALID_CONDITION_TYPES))}"
+            }), 400
+
+    threshold: float | None = None
+    if threshold_raw is not None:
+        try:
+            threshold = float(threshold_raw)
+        except (TypeError, ValueError):
+            return jsonify({'error': 'threshold must be a valid number'}), 400
+        if not (0 < threshold <= _THRESHOLD_MAX):
+            return jsonify({'error': f'threshold must be > 0 and \u2264 {_THRESHOLD_MAX}'}), 400
+        effective_condition = condition_type or 'price_above'  # used only for pct_change guard
+        if effective_condition == 'pct_change' and threshold > 100:
+            return jsonify({'error': 'threshold for pct_change must be \u2264 100'}), 400
+
+    if sound_type is not None and sound_type not in _VALID_SOUND_TYPES:
+        return jsonify({
+            'error': f"Invalid sound_type. Must be one of: {', '.join(sorted(_VALID_SOUND_TYPES))}"
+        }), 400
+
+    updated = update_alert(alert_id, condition_type=condition_type, threshold=threshold, sound_type=sound_type)
+    if updated is None:
+        return jsonify({'error': f'Alert {alert_id} not found'}), 404
+    return jsonify(_enrich_alert(updated))
+
+
+@alerts_bp.route('/alerts/<int:alert_id>/test', methods=['POST'])
+def test_alert_endpoint(alert_id: int):
+    """Fire a test notification for the given alert without evaluating its price condition.
+
+    Useful for verifying that sound and desktop notification pipelines work.
+    The alert record is not modified.
+
+    Returns:
+        200 with the alert object if found, 404 if the alert does not exist.
+    """
+    alert = fire_test_alert(alert_id)
+    if alert is None:
+        return jsonify({'error': f'Alert {alert_id} not found'}), 404
+    return jsonify(_enrich_alert(alert))
 
 
 @alerts_bp.route('/alerts/<int:alert_id>/toggle', methods=['PUT'])

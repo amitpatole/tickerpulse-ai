@@ -4,13 +4,14 @@ import { useCallback, useEffect, useState } from 'react';
 import { useApi } from '@/hooks/useApi';
 import { useSSE } from '@/hooks/useSSE';
 import { getStockDetail } from '@/lib/api';
-import type { StockDetail, PriceUpdateEvent, Timeframe } from '@/lib/types';
+import type { StockDetail, PriceUpdateEvent, Timeframe, AIRatingBlock } from '@/lib/types';
 
 export interface UseStockDetailResult {
   data: StockDetail | null;
   loading: boolean;
   error: string | null;
   livePrice: PriceUpdateEvent | null;
+  aiRating: AIRatingBlock | null;
   refetch: () => void;
 }
 
@@ -73,5 +74,7 @@ export function useStockDetail(
     setLivePrice(null);
   }, [data]);
 
-  return { data: data ?? null, loading, error, livePrice, refetch };
+  const aiRating = data?.ai_rating ?? null;
+
+  return { data: data ?? null, loading, error, livePrice, aiRating, refetch };
 }

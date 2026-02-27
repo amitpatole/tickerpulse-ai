@@ -1,4 +1,3 @@
-```python
 """
 TickerPulse AI v3.0 — Structured error code registry.
 
@@ -39,4 +38,3 @@ HTTP_STATUS: dict['ErrorCode', int] = {
     ErrorCode.DATA_PROVIDER_UNAVAILABLE: 503,
     ErrorCode.DATABASE_ERROR: 500,
 }
-```
