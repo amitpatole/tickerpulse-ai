@@ -1,4 +1,3 @@
-```markdown
 # Contributing to TickerPulse AI
 
 Thanks for your interest in contributing to TickerPulse AI! This guide covers everything you need to get started locally and submit a pull request.
@@ -251,4 +250,3 @@ All contributions must include attribution to the original project and maintain 
 ## Questions?
 
 Open an issue on [GitHub](https://github.com/amitpatole/tickerpulse-ai/issues) for questions, bug reports, or feature requests.
-```

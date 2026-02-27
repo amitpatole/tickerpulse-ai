@@ -1,4 +1,3 @@
-```yaml
 name: PR Lint
 
 on:
@@ -43,4 +42,3 @@ jobs:
               docs: update CONTRIBUTING with branch naming guide
           wip: false
           validateSingleCommit: false
-```
