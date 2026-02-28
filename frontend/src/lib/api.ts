@@ -1,4 +1,4 @@
-```ts
+```typescript
 // ============================================================
 // TickerPulse AI v3.0 - API Client
 // ============================================================
@@ -12,9 +12,12 @@ import type {
   AIAnalysis,
   Agent,
   AgentRun,
+  AgentSchedule,
   ScheduledJob,
   NewsArticle,
   Alert,
+  PriceAlert,
+  AlertSoundType,
   CostSummary,
   AIProvider,
   HealthCheck,
@@ -32,10 +35,24 @@ import type {
   CompareResult,
   PriceUpdateEvent,
   PortfolioPoint,
+  PortfolioResponse,
   Watchlist,
   WatchlistDetail,
   RefreshIntervalConfig,
   DashboardSummary,
+  ChatMessageResponse,
+  ChatSession,
+  ChatSessionsResponse,
+  ModelCompareProvider,
+  ModelCompareResponse,
+  ComparisonRun,
+  ComparisonRunSummary,
+  MetricsSummary,
+  AgentMetricsResponse,
+  MetricsTimeseriesResponse,
+  JobMetricsResponse,
+  UiPrefs,
+  AppState,
 } from './types';
 import { captureException } from '@/lib/errorReporter';
 
@@ -257,6 +274,22 @@ export async function testAlert(id: number): Promise<Alert> {
   return request<Alert>(`/api/alerts/${id}/test`, { method: 'POST' });
 }
 
+export async function listPriceAlerts(): Promise<PriceAlert[]> {
+  const data = await request<{ alerts: PriceAlert[] } | PriceAlert[]>('/api/alerts');
+  if (Array.isArray(data)) return data;
+  return (data as { alerts: PriceAlert[] }).alerts || [];
+}
+
+export async function updateAlertSoundType(
+  id: number,
+  sound_type: AlertSoundType
+): Promise<{ id: number; sound_type: AlertSoundType }> {
+  return request<{ id: number; sound_type: AlertSoundType }>(`/api/alerts/${id}/sound`, {
+    method: 'PUT',
+    body: JSON.stringify({ sound_type }),
+  });
+}
+
 export async function getAlertHistory(): Promise<Alert[]> {
   const data = await request<{ alerts: Alert[] } | Alert[]>('/api/alerts/history');
   if (Array.isArray(data)) return data;
@@ -343,6 +376,89 @@ export async function resumeJob(id: string): Promise<{ message: string }> {
   });
 }
 
+export async function updateJobSchedule(
+  id: string,
+  trigger: 'cron' | 'interval',
+  args: Record<string, number | string>
+): Promise<{ success: boolean; message: string }> {
+  return request<{ success: boolean; message: string }>(
+    `/api/scheduler/jobs/${encodeURIComponent(id)}/schedule`,
+    {
+      method: 'PUT',
+      body: JSON.stringify({ trigger, ...args }),
+    }
+  );
+}
+
+// ---- Known Agents (scheduler registry) ----
+
+export interface KnownAgent {
+  job_id: string;
+  name: string;
+  description: string;
+}
+
+export async function listKnownAgents(): Promise<KnownAgent[]> {
+  const data = await request<{ agents: KnownAgent[]; total: number }>(
+    '/api/scheduler/agents'
+  );
+  return data.agents ?? [];
+}
+
+// ---- Agent Schedules ----
+
+export async function listAgentSchedules(): Promise<AgentSchedule[]> {
+  const data = await request<{ schedules: AgentSchedule[]; total: number }>(
+    '/api/scheduler/agent-schedules'
+  );
+  return data.schedules ?? [];
+}
+
+export async function createAgentSchedule(payload: {
+  job_id: string;
+  label: string;
+  description?: string;
+  trigger: 'cron' | 'interval';
+  trigger_args: Record<string, number | string>;
+}): Promise<AgentSchedule> {
+  return request<AgentSchedule>('/api/scheduler/agent-schedules', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function updateAgentSchedule(
+  id: number,
+  patch: {
+    label?: string;
+    description?: string;
+    trigger?: 'cron' | 'interval';
+    trigger_args?: Record<string, number | string>;
+    enabled?: boolean;
+  }
+): Promise<AgentSchedule> {
+  return request<AgentSchedule>(`/api/scheduler/agent-schedules/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(patch),
+  });
+}
+
+export async function deleteAgentSchedule(id: number): Promise<void> {
+  await request<{ success: boolean; id: number }>(
+    `/api/scheduler/agent-schedules/${id}`,
+    { method: 'DELETE' }
+  );
+}
+
+export async function triggerAgentSchedule(
+  id: number
+): Promise<{ success: boolean; job_id: string; message: string }> {
+  return request<{ success: boolean; job_id: string; message: string }>(
+    `/api/scheduler/agent-schedules/${id}/trigger`,
+    { method: 'POST' }
+  );
+}
+
 // ---- Settings ----
 
 export async function getAIProviders(): Promise<AIProvider[]> {
@@ -397,6 +513,10 @@ export async function getExportCapabilities(): Promise<ExportCapabilities> {
   return request<ExportCapabilities>('/api/research/briefs/export/capabilities');
 }
 
+export async function getResearchBrief(id: number): Promise<ResearchBrief> {
+  return request<ResearchBrief>(`/api/research/briefs/${id}`);
+}
+
 export async function generateResearchBrief(ticker?: string): Promise<ResearchBrief> {
   return request<ResearchBrief>('/api/research/briefs', {
     method: 'POST',
@@ -447,6 +567,80 @@ export async function askChat(
   return request<ChatResponse>('/api/chat/ask', {
     method: 'POST',
     body: JSON.stringify({ ticker: ticker.trim(), question: question.trim(), thinking_level }),
+  });
+}
+
+export async function sendChatMessage(
+  message: string,
+  history: Array<{ role: string; content: string }>
+): Promise<ChatMessageResponse> {
+  return request<ChatMessageResponse>('/api/chat/message', {
+    method: 'POST',
+    body: JSON.stringify({ message, history }),
+  });
+}
+
+export async function getChatStarters(): Promise<string[]> {
+  const data = await request<{ starters: string[] }>('/api/chat/starters');
+  return data.starters ?? [];
+}
+
+export async function createChatSession(
+  title?: string
+): Promise<{ session_id: string; title: string; created_at: string }> {
+  return request<{ session_id: string; title: string; created_at: string }>(
+    '/api/chat/sessions',
+    {
+      method: 'POST',
+      body: JSON.stringify(title ? { title } : {}),
+    }
+  );
+}
+
+export async function listChatSessions(): Promise<ChatSession[]> {
+  const data = await request<ChatSessionsResponse>('/api/chat/sessions');
+  return data.sessions ?? [];
+}
+
+export async function deleteChatSession(sessionId: string): Promise<void> {
+  await request<{ success: boolean }>(
+    `/api/chat/sessions/${encodeURIComponent(sessionId)}`,
+    { method: 'DELETE' }
+  );
+}
+
+export async function sendSessionMessage(
+  sessionId: string,
+  message: string
+): Promise<ChatMessageResponse> {
+  return request<ChatMessageResponse>(
+    `/api/chat/sessions/${encodeURIComponent(sessionId)}/message`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ message }),
+    }
+  );
+}
+
+export async function getCompareProviders(): Promise<ModelCompareProvider[]> {
+  const data = await request<{ providers: ModelCompareProvider[] }>(
+    '/api/chat/compare/providers'
+  );
+  return data.providers ?? [];
+}
+
+export async function compareModels(
+  prompt: string,
+  providers?: string[],
+  ticker?: string
+): Promise<ModelCompareResponse> {
+  return request<ModelCompareResponse>('/api/chat/compare', {
+    method: 'POST',
+    body: JSON.stringify({
+      prompt,
+      ...(providers && providers.length > 0 ? { providers } : {}),
+      ...(ticker ? { ticker } : {}),
+    }),
   });
 }
 
@@ -556,5 +750,119 @@ export async function removeStockFromWatchlist(
     `/api/watchlist/${watchlistId}/stocks/${ticker.toUpperCase()}`,
     { method: 'DELETE' }
   );
+}
+
+// ---- Portfolio Positions ----
+
+export async function getPortfolio(): Promise<PortfolioResponse> {
+  return request<PortfolioResponse>('/api/portfolio');
+}
+
+export async function addPortfolioPosition(data: {
+  ticker: string;
+  quantity: number;
+  avg_cost: number;
+  currency?: string;
+  notes?: string;
+}): Promise<{ id: number; ticker: string; message: string }> {
+  return request('/api/portfolio', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function updatePortfolioPosition(
+  id: number,
+  data: {
+    quantity?: number;
+    avg_cost?: number;
+    currency?: string;
+    notes?: string;
+  }
+): Promise<{ id: number; message: string }> {
+  return request(`/api/portfolio/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function deletePortfolioPosition(id: number): Promise<void> {
+  await request<{ id: number; message: string }>(`/api/portfolio/${id}`, {
+    method: 'DELETE',
+  });
+}
+
+// ---- Comparison Runs ----
+
+export async function runComparison(
+  prompt: string,
+  providerIds?: string[],
+  ticker?: string
+): Promise<{ run_id: string; status: string }> {
+  return request<{ run_id: string; status: string }>('/api/comparison/run', {
+    method: 'POST',
+    body: JSON.stringify({
+      prompt,
+      ...(providerIds && providerIds.length > 0 ? { provider_ids: providerIds } : {}),
+      ...(ticker ? { ticker } : {}),
+    }),
+  });
+}
+
+export async function getComparisonRun(runId: string): Promise<ComparisonRun> {
+  return request<ComparisonRun>(
+    `/api/comparison/run/${encodeURIComponent(runId)}`
+  );
+}
+
+export async function listComparisonRuns(limit = 10): Promise<ComparisonRunSummary[]> {
+  const data = await request<{ runs: ComparisonRunSummary[] }>(
+    `/api/comparison/runs?limit=${limit}`
+  );
+  return data.runs ?? [];
+}
+
+// ---- Performance Metrics ----
+
+export async function getMetricsSummary(days = 30): Promise<MetricsSummary> {
+  return request<MetricsSummary>(`/api/metrics/summary?days=${days}`);
+}
+
+export async function getAgentMetrics(days = 30): Promise<AgentMetricsResponse> {
+  return request<AgentMetricsResponse>(`/api/metrics/agents?days=${days}`);
+}
+
+export async function getMetricsTimeseries(
+  metric: 'cost' | 'runs' | 'duration' | 'tokens',
+  days = 30
+): Promise<MetricsTimeseriesResponse> {
+  return request<MetricsTimeseriesResponse>(
+    `/api/metrics/timeseries?metric=${metric}&days=${days}`
+  );
+}
+
+export async function getJobMetrics(days = 30): Promise<JobMetricsResponse> {
+  return request<JobMetricsResponse>(`/api/metrics/jobs?days=${days}`);
+}
+
+// ---- UI Preferences ----
+
+/** Fetch all persisted UI preferences from the server. */
+export async function getUiPrefs(): Promise<UiPrefs> {
+  return request<UiPrefs>('/api/settings/ui-prefs');
+}
+
+/**
+ * Persist a single UI preference key/value pair to the server.
+ * Returns the full updated preferences object.
+ */
+export async function setUiPref<K extends keyof UiPrefs>(
+  key: K,
+  value: UiPrefs[K]
+): Promise<UiPrefs> {
+  return request<UiPrefs>('/api/settings/ui-prefs', {
+    method: 'PUT',
+    body: JSON.stringify({ [key]: value }),
+  });
 }
 ```
