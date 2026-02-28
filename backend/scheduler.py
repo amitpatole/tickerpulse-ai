@@ -1,4 +1,4 @@
-```python
+
 """
 APScheduler configuration and management for TickerPulse AI.
 Sets up job store (SQLite), job defaults, and exposes helpers.
@@ -416,4 +416,3 @@ class SchedulerManager:
 
 # Module-level singleton -- populated by backend.jobs.register_all_jobs()
 scheduler_manager = SchedulerManager()
-```

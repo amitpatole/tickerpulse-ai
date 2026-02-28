@@ -9,8 +9,9 @@ API key required -- get a free key at https://www.alphavantage.co/support/#api-k
 
 import logging
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, List, Optional
+from zoneinfo import ZoneInfo
 
 import requests
 
@@ -24,6 +25,9 @@ from .base import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Alpha Vantage intraday timestamps are in US/Eastern time
+_AV_INTRADAY_TZ = ZoneInfo('US/Eastern')
 
 # Map TickerPulse period strings to Alpha Vantage function + parameters
 _PERIOD_CONFIG: Dict[str, Dict] = {
@@ -106,7 +110,7 @@ class AlphaVantageProvider(DataProvider):
         try:
             resp = self.session.get(self._base_url, params=params, timeout=15)
             self._request_count += 1
-            self._last_request_time = datetime.now()
+            self._last_request_time = datetime.now(timezone.utc)
             self._track_request()
             if resp.status_code == 200:
                 data = resp.json()
@@ -155,10 +159,13 @@ class AlphaVantageProvider(DataProvider):
             change_pct = float(change_pct_str)
             latest_day = gq.get('07. latest trading day', '')
 
-            ts = datetime.now()
+            # Default to current UTC time; override with the trading day date if present.
+            # Alpha Vantage's "latest trading day" is a date string (YYYY-MM-DD) with no
+            # time component — treat it as UTC midnight so it is locale-independent.
+            ts: datetime = datetime.now(timezone.utc)
             if latest_day:
                 try:
-                    ts = datetime.strptime(latest_day, '%Y-%m-%d')
+                    ts = datetime.strptime(latest_day, '%Y-%m-%d').replace(tzinfo=timezone.utc)
                 except ValueError:
                     pass
 
@@ -215,16 +222,21 @@ class AlphaVantageProvider(DataProvider):
             if not series:
                 return None
 
-        # Parse bars -- Alpha Vantage returns newest first
-        cutoff = datetime.now().timestamp() - (max_days * 86400)
+        # Parse bars -- Alpha Vantage returns newest first.
+        # Use UTC-based cutoff so the window is server-locale independent.
+        cutoff = datetime.now(timezone.utc).timestamp() - (max_days * 86400)
+        is_intraday = config['function'] == 'TIME_SERIES_INTRADAY'
         bars = []
         for date_str, values in sorted(series.items()):
             try:
-                if 'T' in date_str or ':' in date_str:
-                    # Intraday format: "2024-01-15 09:35:00"
-                    ts_dt = datetime.strptime(date_str, '%Y-%m-%d %H:%M:%S')
+                if is_intraday:
+                    # Intraday format: "2024-01-15 09:35:00" in US/Eastern time
+                    ts_dt = datetime.strptime(date_str, '%Y-%m-%d %H:%M:%S').replace(
+                        tzinfo=_AV_INTRADAY_TZ
+                    )
                 else:
-                    ts_dt = datetime.strptime(date_str, '%Y-%m-%d')
+                    # Daily/weekly/monthly: date-only string — treat as UTC midnight
+                    ts_dt = datetime.strptime(date_str, '%Y-%m-%d').replace(tzinfo=timezone.utc)
 
                 ts_unix = int(ts_dt.timestamp())
                 if ts_unix < cutoff:
