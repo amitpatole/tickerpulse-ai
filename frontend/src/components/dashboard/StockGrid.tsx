@@ -1,33 +1,32 @@
-```typescript
 'use client';
 
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { Search, Plus, Loader2, X, ChevronUp, ChevronDown } from 'lucide-react';
-import { useApi } from '@/hooks/useApi';
-import { useSSE } from '@/hooks/useSSE';
+import { clsx } from 'clsx';
 import {
-  getRatings,
   getWatchlistOrder,
   reorderWatchlist,
   addStockToWatchlist,
   removeStockFromWatchlist,
   searchStocks,
-  getBulkPrices,
   ApiError,
 } from '@/lib/api';
-import type { AIRating, StockSearchResult, PriceUpdateEvent } from '@/lib/types';
+import type { AIRating, StockSearchResult } from '@/lib/types';
 import StockCard from './StockCard';
 
 interface StockGridProps {
   watchlistId?: number;
+  /** Live ratings pre-merged with WS price updates from useDashboardData. null = loading. */
+  ratings: AIRating[] | null;
+  /** Called after add/remove operations so the parent can re-fetch shared data. */
+  onRefetch?: () => void;
+  /** Called when a stock card is clicked (excluding action buttons). Navigates to stock detail. */
+  onRowClick?: (ticker: string) => void;
 }
 
-export default function StockGrid({ watchlistId = 1 }: StockGridProps) {
-  const { data: ratings, loading, error, refetch } = useApi<AIRating[]>(getRatings, [], {
-    refreshInterval: 30000,
-  });
-  const { priceUpdates } = useSSE();
-  const [initPrices, setInitPrices] = useState<Record<string, PriceUpdateEvent>>({});
+export default function StockGrid({ watchlistId = 1, ratings, onRefetch, onRowClick }: StockGridProps) {
+  const loading = ratings === null;
+
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<StockSearchResult[]>([]);
   const [searching, setSearching] = useState(false);
@@ -39,16 +38,15 @@ export default function StockGrid({ watchlistId = 1 }: StockGridProps) {
   const [highlightIdx, setHighlightIdx] = useState(-1);
   const [announceMsg, setAnnounceMsg] = useState('');
   const [order, setOrder] = useState<string[]>([]);
+
+  // Price flash: track which tickers had a recent price change
+  const [flashSet, setFlashSet] = useState<Set<string>>(new Set());
+  const prevPricesRef = useRef<Record<string, number | null | undefined>>({});
+  const flashTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+
   const wrapperRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
-
-  // Fetch current prices on mount so cards show live data before first SSE price_update
-  useEffect(() => {
-    getBulkPrices()
-      .then(setInitPrices)
-      .catch(() => {});
-  }, []);
 
   // Load ordered ticker list for the active watchlist
   useEffect(() => {
@@ -70,24 +68,51 @@ export default function StockGrid({ watchlistId = 1 }: StockGridProps) {
     setOrder((prev) => prev.filter((t) => ratingTickers.has(t)));
   }, [ratings]);
 
-  // Merge live SSE price updates into the sorted ratings list
+  // Detect price changes and apply flash animation for 800ms
+  useEffect(() => {
+    if (!ratings) return;
+    const updated = new Set<string>();
+    for (const rating of ratings) {
+      const prev = prevPricesRef.current[rating.ticker];
+      if (prev !== undefined && prev !== rating.current_price) {
+        updated.add(rating.ticker);
+      }
+      prevPricesRef.current[rating.ticker] = rating.current_price;
+    }
+    if (updated.size === 0) return;
+
+    setFlashSet((prev) => new Set([...prev, ...updated]));
+    for (const ticker of updated) {
+      if (flashTimersRef.current[ticker]) {
+        clearTimeout(flashTimersRef.current[ticker]);
+      }
+      flashTimersRef.current[ticker] = setTimeout(() => {
+        setFlashSet((prev) => {
+          const next = new Set(prev);
+          next.delete(ticker);
+          return next;
+        });
+        delete flashTimersRef.current[ticker];
+      }, 800);
+    }
+  }, [ratings]);
+
+  // Cleanup flash timers on unmount
+  useEffect(() => {
+    return () => {
+      for (const timer of Object.values(flashTimersRef.current)) {
+        clearTimeout(timer);
+      }
+    };
+  }, []);
+
+  // Build sorted list: apply watchlist order to ratings (already live-price-merged)
   const sortedRatings = useMemo(() => {
     if (!ratings) return [];
     return order
-      .map((ticker) => {
-        const rating = ratings.find((r) => r.ticker === ticker);
-        if (!rating) return null;
-        const live = priceUpdates[ticker] ?? initPrices[ticker];
-        if (!live) return rating;
-        return {
-          ...rating,
-          current_price: live.price,
-          price_change: live.change,
-          price_change_pct: live.change_pct,
-        };
-      })
+      .map((ticker) => ratings.find((r) => r.ticker === ticker))
       .filter((r): r is AIRating => r != null);
-  }, [ratings, order, priceUpdates, initPrices]);
+  }, [ratings, order]);
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -145,7 +170,7 @@ export default function StockGrid({ watchlistId = 1 }: StockGridProps) {
       setOrder((prev) =>
         prev.includes(result.ticker) ? prev : [...prev, result.ticker]
       );
-      refetch();
+      onRefetch?.();
       setAnnounceMsg(`${result.ticker} added to watchlist`);
     } catch (err) {
       setAddError(err instanceof Error ? err.message : 'Failed to add stock');
@@ -200,7 +225,7 @@ export default function StockGrid({ watchlistId = 1 }: StockGridProps) {
     try {
       await removeStockFromWatchlist(watchlistId, tickerToRemove);
       setOrder((prev) => prev.filter((t) => t !== tickerToRemove));
-      refetch();
+      onRefetch?.();
       setAnnounceMsg(`${tickerToRemove} removed from watchlist`);
     } catch {
       // Silently handle for now
@@ -323,7 +348,7 @@ export default function StockGrid({ watchlistId = 1 }: StockGridProps) {
       )}
 
       {/* Loading State */}
-      {loading && !ratings && (
+      {loading && (
         <div
           className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3"
           aria-busy="true"
@@ -335,22 +360,6 @@ export default function StockGrid({ watchlistId = 1 }: StockGridProps) {
               className="h-48 animate-pulse rounded-xl border border-slate-700/50 bg-slate-800/30"
             />
           ))}
-        </div>
-      )}
-
-      {/* Error State */}
-      {error && !ratings && (
-        <div
-          className="rounded-xl border border-red-500/30 bg-red-500/10 p-6 text-center"
-          role="alert"
-        >
-          <p className="text-sm text-red-400">{error}</p>
-          <button
-            onClick={refetch}
-            className="mt-3 rounded-lg bg-slate-700 px-4 py-2 text-sm text-white transition-colors hover:bg-slate-600"
-          >
-            Retry
-          </button>
         </div>
       )}
 
@@ -371,7 +380,19 @@ export default function StockGrid({ watchlistId = 1 }: StockGridProps) {
               className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3"
             >
               {sortedRatings.map((rating, idx) => (
-                <li key={rating.ticker} className="group relative">
+                <li
+                  key={rating.ticker}
+                  className={clsx(
+                    'group relative',
+                    onRowClick && 'cursor-pointer',
+                    flashSet.has(rating.ticker) && 'animate-price-flash',
+                  )}
+                  onClick={(e) => {
+                    if (onRowClick && !(e.target as HTMLElement).closest('button')) {
+                      onRowClick(rating.ticker);
+                    }
+                  }}
+                >
                   <StockCard rating={rating} onRemove={handleRemoveStock} />
                   {/* Reorder controls — visible on keyboard focus-within */}
                   <div className="absolute bottom-2 left-2 z-10 flex gap-1 opacity-0 transition-opacity group-focus-within:opacity-100">
@@ -401,4 +422,3 @@ export default function StockGrid({ watchlistId = 1 }: StockGridProps) {
     </div>
   );
 }
-```

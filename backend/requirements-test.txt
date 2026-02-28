@@ -1,0 +1,8 @@
+# TickerPulse AI - Test Dependencies
+# Install alongside backend/requirements.txt:
+#   pip install -r backend/requirements.txt -r backend/requirements-test.txt
+
+pytest>=8.0.0
+pytest-cov>=5.0.0
+pytest-mock>=3.14.0
+PyYAML>=6.0
