@@ -1,5 +1,4 @@
 ```python
-
 """
 TickerPulse AI v3.0 - Database Connection Manager
 Thread-safe SQLite helper with context-manager support and table initialisation.
@@ -16,6 +15,27 @@ from typing import Any, Dict, List, Optional
 from backend.config import Config
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Connection configuration helper
+# ---------------------------------------------------------------------------
+
+def _configure_connection(conn: sqlite3.Connection) -> sqlite3.Connection:
+    """Apply standard PRAGMA settings to a SQLite connection.
+
+    Called by both ``ConnectionPool._make_conn()`` and ``get_db_connection()``
+    to ensure every connection in the application has consistent settings.
+
+    Returns *conn* for convenient chaining.
+    """
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA foreign_keys=ON")
+    conn.execute("PRAGMA synchronous=NORMAL")
+    conn.execute(f"PRAGMA busy_timeout={Config.DB_BUSY_TIMEOUT_MS}")
+    conn.execute(f"PRAGMA cache_size={-Config.DB_CACHE_SIZE_KB}")
+    return conn
 
 
 # ---------------------------------------------------------------------------
@@ -47,11 +67,7 @@ class ConnectionPool:
 
     def _make_conn(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self._db_path, check_same_thread=False)
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA journal_mode=WAL")
-        conn.execute("PRAGMA foreign_keys=ON")
-        conn.execute("PRAGMA synchronous=NORMAL")
-        return conn
+        return _configure_connection(conn)
 
     @contextmanager
     def acquire(self):
@@ -684,6 +700,7 @@ _NEW_TABLES_SQL = [
         prompt     TEXT NOT NULL,
         ticker     TEXT,
         status     TEXT NOT NULL DEFAULT 'pending',
+        template   TEXT NOT NULL DEFAULT 'custom',
         created_at TEXT NOT NULL DEFAULT (datetime('now'))
     )
     """,
@@ -697,6 +714,30 @@ _NEW_TABLES_SQL = [
         tokens_used   INTEGER NOT NULL DEFAULT 0,
         latency_ms    INTEGER NOT NULL DEFAULT 0,
         error         TEXT
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS performance_metrics (
+        id           INTEGER PRIMARY KEY AUTOINCREMENT,
+        source       TEXT NOT NULL,
+        source_id    TEXT NOT NULL,
+        metric_name  TEXT NOT NULL,
+        metric_value REAL NOT NULL,
+        tags         TEXT,
+        recorded_at  TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS agent_schedules (
+        id           INTEGER PRIMARY KEY AUTOINCREMENT,
+        job_id       TEXT NOT NULL UNIQUE,
+        label        TEXT NOT NULL,
+        description  TEXT,
+        trigger      TEXT NOT NULL,
+        trigger_args TEXT NOT NULL DEFAULT '{}',
+        enabled      INTEGER NOT NULL DEFAULT 1,
+        created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
     )
     """,
 ]
@@ -739,6 +780,14 @@ _INDEXES_SQL = [
     "CREATE INDEX IF NOT EXISTS idx_earnings_events_date_ticker ON earnings_events (earnings_date, ticker)",
     "CREATE INDEX IF NOT EXISTS idx_api_request_log_ts          ON api_request_log (log_date DESC)",
     "CREATE INDEX IF NOT EXISTS idx_error_log_ts                ON error_log (created_at DESC)",
+    # Composite indexes for hot-path reads added in v3.2
+    "CREATE INDEX IF NOT EXISTS idx_news_ticker_created         ON news (ticker, created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_agent_runs_name_started     ON agent_runs (agent_name, started_at DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_perf_metrics_source         ON performance_metrics (source, source_id, recorded_at DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_agent_schedules_job_id      ON agent_schedules (job_id)",
+    "CREATE INDEX IF NOT EXISTS idx_agent_schedules_enabled     ON agent_schedules (enabled)",
+    # Covering index for /api/metrics/agents hot path: WHERE started_at >= ? GROUP BY agent_name
+    "CREATE INDEX IF NOT EXISTS idx_agent_runs_agent_started    ON agent_runs (agent_name, started_at DESC)",
 ]
 
 
@@ -912,48 +961,65 @@ def _migrate_ai_ratings_price_columns(cursor) -> None:
         logger.info(f"Migration applied: {sql}")
 
 
+def _migrate_comparison_runs(cursor) -> None:
+    """Add template column to comparison_runs if missing (schema v3.3)."""
+    cols = {row[1] for row in cursor.execute("PRAGMA table_info(comparison_runs)").fetchall()}
+    if not cols:
+        return
+    if 'template' not in cols:
+        cursor.execute(
+            "ALTER TABLE comparison_runs ADD COLUMN template TEXT NOT NULL DEFAULT 'custom'"
+        )
+        logger.info("Migration applied: added template to comparison_runs table")
+
+
 def init_all_tables(db_path: str | None = None) -> None:
     """Create every table (existing + new v3.0) and apply indexes.
 
     Safe to call multiple times -- all statements use
     ``CREATE TABLE IF NOT EXISTS`` / ``CREATE INDEX IF NOT EXISTS``.
+
+    When *db_path* is ``None`` a pooled connection is used (production path).
+    When *db_path* is provided a dedicated connection is opened to that path
+    (used by tests for full isolation).
     """
-    conn = get_db_connection(db_path)
-    cursor = conn.cursor()
     try:
-        for sql in _EXISTING_TABLES_SQL:
-            cursor.execute(sql)
+        with db_session(db_path=db_path) as conn:
+            cursor = conn.cursor()
 
-        # Migrate existing tables before CREATE TABLE (which is a no-op if table exists)
-        _migrate_agent_runs(cursor)
-        _migrate_news(cursor)
-        _migrate_watchlist_stocks(cursor)
-        _migrate_data_providers_config(cursor)
-        _migrate_watchlists(cursor)
-        _migrate_price_alerts(cursor)
-        _migrate_ai_ratings_price_columns(cursor)
-        _migrate_error_log(cursor)
-        _migrate_earnings_events(cursor)
+            for sql in _EXISTING_TABLES_SQL:
+                cursor.execute(sql)
 
-        for sql in _NEW_TABLES_SQL:
-            cursor.execute(sql)
+            # Migrate existing tables before CREATE TABLE (which is a no-op if table exists)
+            _migrate_agent_runs(cursor)
+            _migrate_news(cursor)
+            _migrate_watchlist_stocks(cursor)
+            _migrate_data_providers_config(cursor)
+            _migrate_watchlists(cursor)
+            _migrate_price_alerts(cursor)
+            _migrate_ai_ratings_price_columns(cursor)
+            _migrate_error_log(cursor)
+            _migrate_earnings_events(cursor)
+            _migrate_comparison_runs(cursor)
 
-        for sql in _INDEXES_SQL:
-            cursor.execute(sql)
+            for sql in _NEW_TABLES_SQL:
+                cursor.execute(sql)
 
-        # Seed default watchlist idempotently
-        cursor.execute("INSERT OR IGNORE INTO watchlists (id, name) VALUES (1, 'My Watchlist')")
-        cursor.execute(
-            "INSERT OR IGNORE INTO watchlist_stocks (watchlist_id, ticker) "
-            "SELECT 1, ticker FROM stocks WHERE active = 1"
-        )
+            for sql in _INDEXES_SQL:
+                cursor.execute(sql)
 
-        conn.commit()
+            # Seed default watchlist idempotently
+            cursor.execute("INSERT OR IGNORE INTO watchlists (id, name) VALUES (1, 'My Watchlist')")
+            cursor.execute(
+                "INSERT OR IGNORE INTO watchlist_stocks (watchlist_id, ticker) "
+                "SELECT 1, ticker FROM stocks WHERE active = 1"
+            )
+
+            # Update query planner statistics for all tables
+            conn.execute("ANALYZE")
+
         logger.info("All database tables and indexes initialised successfully")
     except Exception:
-        conn.rollback()
         logger.exception("Failed to initialise database tables")
         raise
-    finally:
-        conn.close()
 ```

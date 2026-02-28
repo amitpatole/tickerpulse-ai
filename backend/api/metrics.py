@@ -234,7 +234,8 @@ def get_system_metrics():
                 'recorded_at': row['recorded_at'],
                 'cpu_pct': round(row['cpu_pct'], 2),
                 'mem_pct': round(row['mem_pct'], 2),
-                'db_pool_active': row['db_pool_active'],
+                # db_pool_in_use matches pool.stats()['in_use'] key
+                'db_pool_in_use': row['db_pool_active'],
                 'db_pool_idle': row['db_pool_idle'],
             }
             for row in snapshot_rows
@@ -430,5 +431,119 @@ def get_job_metrics():
             }
             for row in rows
         ],
+    })
+
+
+@metrics_bp.route('/activity')
+@handle_api_errors
+def get_activity():
+    """Unified chronological activity feed: agent runs and job executions interleaved.
+
+    Query Parameters:
+        days (int): Lookback window in days. Default 7, range 1–90.
+        limit (int): Maximum events to return. Default 100, max 500.
+
+    Returns:
+        JSON object with:
+        - events: Array of ActivityEvent objects sorted newest-first.
+        - summary: Aggregated totals for the period.
+    """
+    days = _days_param(default=7)
+    days = max(1, min(days, 90))
+    try:
+        limit = int(request.args.get('limit', 100))
+        limit = max(1, min(limit, 500))
+    except (ValueError, TypeError):
+        limit = 100
+
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).strftime('%Y-%m-%d %H:%M:%S')
+
+    with pooled_session() as conn:
+        agent_rows = conn.execute(
+            """
+            SELECT
+                id,
+                agent_name,
+                status,
+                estimated_cost,
+                (tokens_input + tokens_output) AS tokens,
+                duration_ms,
+                started_at
+            FROM agent_runs
+            WHERE started_at >= ?
+            ORDER BY started_at DESC
+            LIMIT ?
+            """,
+            (cutoff, limit),
+        ).fetchall()
+
+        job_rows = conn.execute(
+            """
+            SELECT
+                id,
+                job_name,
+                status,
+                cost,
+                duration_ms,
+                executed_at
+            FROM job_history
+            WHERE executed_at >= ?
+            ORDER BY executed_at DESC
+            LIMIT ?
+            """,
+            (cutoff, limit),
+        ).fetchall()
+
+    events = []
+
+    for row in agent_rows:
+        status = row['status']
+        if status == 'completed':
+            status = 'success'
+        elif status == 'failed':
+            status = 'error'
+        events.append({
+            'id': f'agent_{row["id"]}',
+            'type': 'agent_run',
+            'name': row['agent_name'],
+            'status': status,
+            'cost': round(row['estimated_cost'] or 0.0, 6),
+            'tokens': row['tokens'] or 0,
+            'duration_ms': row['duration_ms'] or 0,
+            'triggered_by': None,
+            'timestamp': row['started_at'],
+        })
+
+    for row in job_rows:
+        status = row['status']
+        if status == 'failed':
+            status = 'error'
+        events.append({
+            'id': f'job_{row["id"]}',
+            'type': 'job_execution',
+            'name': row['job_name'],
+            'status': status,
+            'cost': round(row['cost'] or 0.0, 6),
+            'tokens': None,
+            'duration_ms': row['duration_ms'] or 0,
+            'triggered_by': 'scheduler',
+            'timestamp': row['executed_at'],
+        })
+
+    # Merge and sort newest-first, then cap at limit
+    events.sort(key=lambda e: e['timestamp'] or '', reverse=True)
+    events = events[:limit]
+
+    total_cost = sum(e['cost'] for e in events)
+    error_count = sum(1 for e in events if e['status'] in ('error', 'failed'))
+
+    return jsonify({
+        'events': events,
+        'summary': {
+            'total_cost': round(total_cost, 6),
+            'total_runs': len(events),
+            'error_count': error_count,
+            'period_days': days,
+        },
     })
 ```

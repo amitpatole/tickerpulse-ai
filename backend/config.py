@@ -124,6 +124,12 @@ class Config:
     DB_POOL_SIZE: int = int(os.getenv('DB_POOL_SIZE', 5))
     # Seconds to wait for a free connection before raising RuntimeError.
     DB_POOL_TIMEOUT: float = float(os.getenv('DB_POOL_TIMEOUT', 10.0))
+    # Milliseconds SQLite waits on a locked resource before returning SQLITE_BUSY.
+    # Prevents spurious "database is locked" errors under concurrent writes.
+    DB_BUSY_TIMEOUT_MS: int = int(os.getenv('DB_BUSY_TIMEOUT_MS', 5000))
+    # SQLite page-cache size in KiB (stored as negative value per PRAGMA convention).
+    # 2 MB default keeps hot tables in memory, reducing I/O on repeated reads.
+    DB_CACHE_SIZE_KB: int = int(os.getenv('DB_CACHE_SIZE_KB', 8000))
 
     # -------------------------------------------------------------------------
     # Rate limiting
@@ -182,4 +188,9 @@ class Config:
     # Set WS_PRICE_BROADCAST=false to disable WS broadcasting without stopping
     # the SSE price_update feed.
     WS_PRICE_BROADCAST: bool = os.getenv('WS_PRICE_BROADCAST', 'true').lower() == 'true'
+
+    # Number of parallel worker threads for the price refresh job.
+    # Each worker calls _fetch_price() for one ticker; keep <= DB_POOL_SIZE
+    # to avoid pool contention when persisting results.
+    PRICE_REFRESH_WORKERS: int = int(os.getenv('PRICE_REFRESH_WORKERS', 10))
 ```

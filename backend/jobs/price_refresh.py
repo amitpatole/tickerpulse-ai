@@ -10,6 +10,7 @@ AI fields (rating, score, confidence, rsi, etc.) are never touched.
 
 import logging
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -75,7 +76,123 @@ def _fetch_price(ticker: str) -> Optional[dict]:
         return None
 
 
-def _get_watchlist_tickers() -> list[str]:
+def _fetch_prices_parallel(tickers: list, max_workers: int = 0) -> dict:
+    """Fetch prices for all tickers in parallel using ThreadPoolExecutor.
+
+    Each ticker is fetched independently via ``_fetch_price()``.  Partial
+    failures (individual tickers raising or returning None) are silently
+    omitted — mirroring the behaviour of the per-ticker sequential loop it
+    replaces.
+
+    Parameters
+    ----------
+    tickers:     List of ticker symbols to fetch.
+    max_workers: Thread pool size.  Defaults to ``Config.PRICE_REFRESH_WORKERS``
+                 when 0 (the default).
+
+    Returns a ``{ticker: {price, change, change_pct, volume, ts}}`` dict.
+    """
+    if not tickers:
+        return {}
+
+    from backend.config import Config
+    workers = max_workers or Config.PRICE_REFRESH_WORKERS
+
+    results: dict = {}
+    with ThreadPoolExecutor(max_workers=min(workers, len(tickers))) as executor:
+        future_to_ticker = {executor.submit(_fetch_price, t): t for t in tickers}
+        for future in as_completed(future_to_ticker):
+            ticker = future_to_ticker[future]
+            try:
+                data = future.result()
+                if data is not None:
+                    results[ticker] = data
+            except Exception as exc:
+                logger.debug(
+                    "price_refresh: parallel fetch exception for %s: %s", ticker, exc
+                )
+
+    return results
+
+
+def _fetch_prices_batch(tickers: list) -> dict:
+    """Fetch prices for all tickers in a single ``yf.download()`` call.
+
+    Replaces the per-ticker ``_fetch_price()`` loop in the scheduled job,
+    cutting N HTTP round-trips to Yahoo Finance down to one.
+
+    Returns a ``{ticker: {price, change, change_pct, volume, ts}}`` dict.
+    Tickers for which data cannot be parsed are silently omitted (partial
+    success is acceptable, mirroring the old per-ticker behaviour).
+    """
+    import yfinance as yf
+
+    try:
+        df = yf.download(
+            tickers,
+            period="2d",
+            group_by="ticker",
+            auto_adjust=True,
+            progress=False,
+            threads=True,
+        )
+    except Exception as exc:
+        logger.warning("price_refresh: yf.download batch call failed: %s", exc)
+        return {}
+
+    if df is None or df.empty:
+        logger.warning("price_refresh: yf.download returned empty DataFrame")
+        return {}
+
+    now_ts = int(time.time())
+    prices: dict = {}
+
+    for ticker in tickers:
+        try:
+            # Multi-ticker download with group_by='ticker' produces MultiIndex
+            # columns (ticker, field).  Single-ticker download yields flat columns.
+            if hasattr(df.columns, 'levels') and ticker in df.columns.get_level_values(0):
+                ticker_df = df[ticker]
+                close_series = ticker_df['Close'].dropna()
+                vol_series = ticker_df.get('Volume')
+            elif 'Close' in df.columns:
+                # Flat columns — single-ticker path
+                close_series = df['Close'].dropna()
+                vol_series = df.get('Volume')
+            else:
+                logger.debug("price_refresh: no data column found for %s", ticker)
+                continue
+
+            if close_series.empty:
+                logger.debug("price_refresh: empty close series for %s", ticker)
+                continue
+
+            current = float(close_series.iloc[-1])
+            prev = float(close_series.iloc[-2]) if len(close_series) >= 2 else current
+
+            volume = 0
+            if vol_series is not None:
+                vol_clean = vol_series.dropna()
+                if not vol_clean.empty:
+                    volume = int(vol_clean.iloc[-1])
+
+            change = current - prev
+            change_pct = (change / prev * 100.0) if prev else 0.0
+
+            prices[ticker] = {
+                'price': current,
+                'change': change,
+                'change_pct': change_pct,
+                'volume': volume,
+                'ts': now_ts,
+            }
+        except Exception as exc:
+            logger.debug("price_refresh: batch parse error for %s: %s", ticker, exc)
+
+    return prices
+
+
+def _get_watchlist_tickers() -> list:
     """Return all active tickers from the stocks table."""
     from backend.database import pooled_session
     try:
@@ -156,7 +273,7 @@ def run_price_refresh() -> None:
     --------------
     1. Read interval from DB; skip if manual mode (interval == 0).
     2. Load all active watchlist tickers.
-    3. Fetch live prices for each ticker via Yahoo Finance.
+    3. Fetch live prices for each ticker in parallel via ThreadPoolExecutor.
     4. Persist price columns to ai_ratings (AI fields unchanged).
     5. Broadcast via WebSocket (price_batch per subscribed client).
     6. Broadcast via SSE (price_update event per ticker).
@@ -178,12 +295,8 @@ def run_price_refresh() -> None:
 
     logger.info("price_refresh: fetching prices for %d tickers", len(tickers))
 
-    # 3. Fetch prices (partial success is acceptable)
-    prices: dict = {}
-    for ticker in tickers:
-        data = _fetch_price(ticker)
-        if data is not None:
-            prices[ticker] = data
+    # 3. Fetch prices in parallel (ThreadPoolExecutor + individual _fetch_price calls)
+    prices = _fetch_prices_parallel(tickers)
 
     if not prices:
         logger.warning("price_refresh: no price data returned for any ticker")
