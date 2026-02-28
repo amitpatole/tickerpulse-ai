@@ -424,34 +424,39 @@ export async function getChatStarters(ticker?: string): Promise<string[]> {
 // Research briefs
 // ---------------------------------------------------------------------------
 
-export async function getResearchBriefs(params?: {
-  page?: number;
-  page_size?: number;
-  ticker?: string;
-}): Promise<ResearchBriefsResponse> {
-  return _fetch<ResearchBriefsResponse>(`/api/research/briefs${_qs(params ?? {})}`);
+export async function getResearchBriefs(
+  ticker?: string,
+  page?: number,
+  page_size?: number,
+): Promise<ResearchBriefsResponse> {
+  return _fetch<ResearchBriefsResponse>(
+    `/api/research/briefs${_qs({ ticker, page, page_size })}`,
+  );
 }
 
 export async function getResearchBrief(id: number): Promise<ResearchBrief> {
   return _fetch<ResearchBrief>(`/api/research/briefs/${id}`);
 }
 
-export async function generateResearchBrief(ticker: string): Promise<ResearchBrief> {
+export async function generateResearchBrief(ticker?: string): Promise<ResearchBrief> {
   return _fetch<ResearchBrief>('/api/research/briefs', {
     method: 'POST',
     body: JSON.stringify({ ticker }),
   });
 }
 
-export async function getAllBriefIds(): Promise<number[]> {
-  const data = await _fetch<{ ids: number[] }>('/api/research/briefs/ids');
-  return data.ids ?? [];
+export async function getAllBriefIds(
+  ticker?: string,
+): Promise<{ ids: number[]; total: number }> {
+  return _fetch<{ ids: number[]; total: number }>(
+    `/api/research/briefs/ids${_qs({ ticker })}`,
+  );
 }
 
 export async function exportBriefs(
   ids: number[],
   format: ExportFormat,
-): Promise<Blob> {
+): Promise<{ blob: Blob; filename: string }> {
   const res = await fetch(`${API_BASE}/api/research/briefs/export`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -467,7 +472,12 @@ export async function exportBriefs(
       json?.error_code as string | undefined,
     );
   }
-  return res.blob();
+  const disposition = res.headers.get('Content-Disposition') ?? '';
+  const match = disposition.match(/filename="([^"]+)"/);
+  const ext = format === 'markdown' ? 'md' : format;
+  const filename = match ? match[1] : `research-briefs.${ext}`;
+  const blob = await res.blob();
+  return { blob, filename };
 }
 
 export async function getExportCapabilities(): Promise<ExportCapabilities> {
