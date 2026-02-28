@@ -1,5 +1,4 @@
 ```python
-
 """
 TickerPulse AI v3.0 - Price Refresh Job
 Periodic APScheduler job that fetches live prices for the active watchlist,

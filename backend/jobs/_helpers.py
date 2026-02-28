@@ -1,3 +1,4 @@
+```python
 """
 Shared helpers for all scheduled jobs.
 Provides consistent logging, timing, DB persistence, and SSE notification.
@@ -213,3 +214,4 @@ def job_timer(job_id: str, job_name: str):
             'duration_ms': duration_ms,
             'completed_at': datetime.utcnow().isoformat() + 'Z',
         })
+```

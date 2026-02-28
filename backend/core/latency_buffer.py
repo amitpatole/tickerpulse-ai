@@ -20,6 +20,9 @@ _lock = threading.Lock()
 # Key: (endpoint, method, status_class) → {day: [latency_ms, ...]}
 _buffer: Dict[tuple, Dict[str, List[float]]] = defaultdict(lambda: defaultdict(list))
 
+# Public alias so tests can inspect / clear the buffer directly.
+_BUFFER = _buffer
+
 
 def record(endpoint: str, method: str, status_code: int, latency_ms: float) -> None:
     """Add one latency sample to the in-memory buffer (thread-safe)."""
