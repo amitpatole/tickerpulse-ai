@@ -1,3 +1,4 @@
+```typescript
 'use client';
 
 import {
@@ -5,9 +6,13 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useRef,
   useState,
   type ReactNode,
 } from 'react';
+
+import { useApiErrorContext } from '@/lib/apiErrorContext';
+import type { ApiError } from '@/lib/types';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -84,17 +89,37 @@ function ToastItem({
 // Provider — manages state and renders the toast stack
 // ---------------------------------------------------------------------------
 
+const _DEDUP_WINDOW_MS = 10_000;
+
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
+  const dedupeRef = useRef<Map<string, number>>(new Map()); // hash → timestamp
 
   const add = useCallback((message: string, type: ToastType) => {
-    const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const hash = `${type}:${message}`;
+    const now = Date.now();
+    const last = dedupeRef.current.get(hash);
+    if (last !== undefined && now - last < _DEDUP_WINDOW_MS) return;
+    dedupeRef.current.set(hash, now);
+    const id = `${now}-${Math.random().toString(36).slice(2)}`;
     setToasts((prev) => [...prev, { id, message, type }]);
   }, []);
 
   const dismiss = useCallback((id: string) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
+
+  // Auto-show error toasts when ApiErrorContext receives new persistent errors
+  const { errors } = useApiErrorContext();
+  const prevErrorsRef = useRef<ApiError[]>([]);
+  useEffect(() => {
+    const prev = prevErrorsRef.current;
+    const newErrors = errors.filter((e) => !prev.includes(e));
+    for (const error of newErrors) {
+      add(error.message, 'error');
+    }
+    prevErrorsRef.current = errors;
+  }, [errors, add]);
 
   const value: ToastContextValue = {
     error: useCallback((msg) => add(msg, 'error'), [add]),
@@ -119,3 +144,4 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     </ToastContext.Provider>
   );
 }
+```

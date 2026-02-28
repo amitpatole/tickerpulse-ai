@@ -1,3 +1,4 @@
+```python
 """
 TickerPulse AI v3.0 - Typed API Error Hierarchy and Handler Decorator
 Provides a uniform exception-to-JSON-response pipeline for all API blueprints.
@@ -10,6 +11,8 @@ from functools import wraps
 
 from flask import g, jsonify
 
+from backend.api.error_codes import ErrorCode
+
 logger = logging.getLogger(__name__)
 
 
@@ -21,8 +24,9 @@ class ApiError(Exception):
     """
 
     status_code: int = 500
-    error_code: str = 'INTERNAL_ERROR'
+    error_code: str = ErrorCode.INTERNAL_ERROR.value
     retry_after: int | None = None
+    retryable: bool = False
 
     def __init__(
         self,
@@ -43,6 +47,7 @@ class ApiError(Exception):
             'success': False,
             'error': self.message,
             'error_code': self.error_code,
+            'retryable': self.retryable,
         }
         request_id = getattr(g, 'request_id', None)
         if request_id:
@@ -59,57 +64,59 @@ class ValidationError(ApiError):
     """Raised when input data fails validation (400)."""
 
     status_code = 400
-    error_code = 'INVALID_INPUT'
+    error_code = ErrorCode.INVALID_INPUT.value
 
 
 class NotFoundError(ApiError):
     """Raised when a requested resource does not exist (404)."""
 
     status_code = 404
-    error_code = 'NOT_FOUND'
+    error_code = ErrorCode.NOT_FOUND.value
 
 
 class ConflictError(ApiError):
     """Raised when a request conflicts with existing state (409)."""
 
     status_code = 409
-    error_code = 'CONFLICT'
+    error_code = ErrorCode.CONFLICT.value
 
 
 class DatabaseError(ApiError):
     """Raised when a database operation fails (500)."""
 
     status_code = 500
-    error_code = 'DATABASE_ERROR'
+    error_code = ErrorCode.DATABASE_ERROR.value
 
 
 class ServiceUnavailableError(ApiError):
     """Raised when an upstream data provider is unreachable (503)."""
 
     status_code = 503
-    error_code = 'DATA_PROVIDER_UNAVAILABLE'
+    error_code = ErrorCode.DATA_PROVIDER_UNAVAILABLE.value
+    retryable = True
 
 
 class UnauthorizedError(ApiError):
     """Raised when authentication is required but missing or invalid (401)."""
 
     status_code = 401
-    error_code = 'UNAUTHORIZED'
+    error_code = ErrorCode.UNAUTHORIZED.value
 
 
 class ForbiddenError(ApiError):
     """Raised when the authenticated user lacks permission for the action (403)."""
 
     status_code = 403
-    error_code = 'FORBIDDEN'
+    error_code = ErrorCode.FORBIDDEN.value
 
 
 class RateLimitError(ApiError):
     """Raised when the client has exceeded their request quota (429)."""
 
     status_code = 429
-    error_code = 'RATE_LIMIT_EXCEEDED'
+    error_code = ErrorCode.RATE_LIMIT_EXCEEDED.value
     retry_after = 60
+    retryable = True
 
 
 def _emit_to_error_log(
@@ -171,7 +178,7 @@ def handle_api_errors(fn):
             request_id = getattr(g, 'request_id', None)
             stack = traceback.format_exc()
             _emit_to_error_log(
-                error_code='INTERNAL_ERROR',
+                error_code=ErrorCode.INTERNAL_ERROR.value,
                 message=str(exc),
                 request_id=request_id,
                 stack=stack,
@@ -179,3 +186,4 @@ def handle_api_errors(fn):
             return ApiError(str(exc)).to_response()
 
     return wrapper
+```

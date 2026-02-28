@@ -1,3 +1,4 @@
+```typescript
 /**
  * TickerPulse AI v3.0 - API Client
  * Typed fetch wrappers for all backend REST endpoints.
@@ -5,6 +6,7 @@
  */
 
 import { ApiError } from './types';
+import { reportError } from '@/hooks/useErrorReporter';
 import type {
   AlertSoundSettings,
   AlertSoundType,
@@ -37,12 +39,48 @@ const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? '';
 
 const _RETRYABLE_STATUSES = new Set([429, 503]);
 const _MAX_RETRIES = 2;
+const _FETCH_TIMEOUT_MS = 15_000;
+
+function _onFinalFailure(error: ApiError, path: string, method: string): void {
+  reportError({
+    type: 'unhandled_exception',
+    message: error.message,
+    timestamp: new Date().toISOString(),
+    severity: error.status >= 500 ? 'error' : 'warning',
+    source: 'frontend',
+    context: { path, method, error_code: error.error_code, status: error.status },
+  });
+
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(
+      new CustomEvent('tickerpulse:apifetch-error', { detail: error }),
+    );
+  }
+}
 
 async function apiFetch<T>(path: string, init?: RequestInit, _attempt = 0): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
-    headers: { 'Content-Type': 'application/json', ...init?.headers },
-    ...init,
-  });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), _FETCH_TIMEOUT_MS);
+
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}${path}`, {
+      headers: { 'Content-Type': 'application/json', ...init?.headers },
+      ...init,
+      signal: controller.signal,
+    });
+  } catch (fetchErr) {
+    clearTimeout(timeoutId);
+    const isAbort = fetchErr instanceof DOMException && fetchErr.name === 'AbortError';
+    const message = isAbort ? 'Request timed out' : 'Network error';
+    const error_code = isAbort ? 'REQUEST_TIMEOUT' : 'NETWORK_ERROR';
+    const apiError = new ApiError(message, 0, error_code, {});
+    if (_attempt >= _MAX_RETRIES) {
+      _onFinalFailure(apiError, path, init?.method ?? 'GET');
+    }
+    throw apiError;
+  }
+  clearTimeout(timeoutId);
 
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
@@ -63,8 +101,13 @@ async function apiFetch<T>(path: string, init?: RequestInit, _attempt = 0): Prom
 
     const retryAfterHeader = res.headers.get('Retry-After');
     const retry_after = retryAfterHeader ? parseInt(retryAfterHeader, 10) : body?.retry_after;
+    const apiError = new ApiError(message, res.status, error_code, { request_id, retry_after });
 
-    throw new ApiError(message, res.status, error_code, { request_id, retry_after });
+    if (res.status >= 500 || _RETRYABLE_STATUSES.has(res.status)) {
+      _onFinalFailure(apiError, path, init?.method ?? 'GET');
+    }
+
+    throw apiError;
   }
 
   return res.json() as Promise<T>;
@@ -368,3 +411,4 @@ export async function getModelComparisonHistory(
     `/api/ai/compare/history?ticker=${encodeURIComponent(ticker)}&limit=${limit}`,
   );
 }
+```

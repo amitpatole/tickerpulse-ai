@@ -1,3 +1,4 @@
+```typescript
 'use client';
 
 import {
@@ -6,6 +7,7 @@ import {
   type ErrorInfo,
   type ReactNode,
 } from 'react';
+import { usePathname } from 'next/navigation';
 
 import { reportError } from '@/hooks/useErrorReporter';
 
@@ -107,3 +109,21 @@ export class ErrorBoundary extends Component<Props, State> {
     );
   }
 }
+
+// ---------------------------------------------------------------------------
+// Route-aware wrapper — resets the boundary on navigation
+// ---------------------------------------------------------------------------
+
+/**
+ * Wraps ``ErrorBoundary`` with a ``key`` derived from the current pathname so
+ * that navigating to a new route automatically clears any stale crash state.
+ */
+export function RouteAwareErrorBoundary({ children, fallback }: Props) {
+  const pathname = usePathname();
+  return (
+    <ErrorBoundary key={pathname} fallback={fallback}>
+      {children}
+    </ErrorBoundary>
+  );
+}
+```
