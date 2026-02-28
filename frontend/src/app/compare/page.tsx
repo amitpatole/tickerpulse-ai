@@ -1,4 +1,5 @@
-import ModelComparisonPanel from '@/components/compare/ModelComparisonPanel';
+```tsx
+import ComparePageTabs from '@/components/compare/ComparePageTabs';
 
 export const metadata = {
   title: 'Model Comparison — TickerPulse AI',
@@ -16,8 +17,9 @@ export default function ComparePage() {
             ratings, scores, and reasoning side by side.
           </p>
         </div>
-        <ModelComparisonPanel />
+        <ComparePageTabs />
       </div>
     </div>
   );
 }
+```

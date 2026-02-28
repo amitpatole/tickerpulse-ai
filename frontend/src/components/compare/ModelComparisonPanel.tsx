@@ -1,10 +1,12 @@
+```tsx
 'use client';
 
 import { useState } from 'react';
 import { clsx } from 'clsx';
 import { runModelComparison } from '@/lib/api';
-import type { ComparisonProviderRequest, ModelComparisonResponse } from '@/lib/types';
+import type { ComparisonProviderRequest, ComparisonTemplate, ModelComparisonResponse } from '@/lib/types';
 import ProviderResultCard from './ProviderResultCard';
+import ConsensusBar from './ConsensusBar';
 
 const AVAILABLE_PROVIDERS: ComparisonProviderRequest[] = [
   { provider: 'anthropic', model: 'claude-sonnet-4-6' },
@@ -19,6 +21,13 @@ const PROVIDER_LABELS: Record<string, string> = {
   google:    'Google',
   grok:      'xAI Grok',
 };
+
+const TEMPLATE_OPTIONS: { value: ComparisonTemplate; label: string }[] = [
+  { value: 'custom',           label: 'General Analysis' },
+  { value: 'bull_bear_thesis', label: 'Bull/Bear Thesis' },
+  { value: 'risk_summary',     label: 'Risk Summary'     },
+  { value: 'price_target',     label: 'Price Target'     },
+];
 
 function SkeletonCard({ provider }: { provider: string }) {
   return (
@@ -38,6 +47,7 @@ function SkeletonCard({ provider }: { provider: string }) {
 export default function ModelComparisonPanel() {
   const [ticker, setTicker] = useState('');
   const [selected, setSelected] = useState<string[]>(['anthropic', 'openai']);
+  const [template, setTemplate] = useState<ComparisonTemplate>('custom');
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<ModelComparisonResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -60,6 +70,7 @@ export default function ModelComparisonPanel() {
       const response = await runModelComparison({
         ticker: ticker.trim().toUpperCase(),
         providers,
+        template,
       });
       setResult(response);
     } catch (e) {
@@ -87,6 +98,23 @@ export default function ModelComparisonPanel() {
               className="w-28 rounded-lg border border-slate-600 bg-slate-700 px-3 py-2 text-sm text-white focus:border-blue-500 focus:outline-none"
               data-testid="ticker-input"
             />
+          </div>
+
+          {/* Template */}
+          <div>
+            <label className="mb-1 block text-xs text-slate-400">Analysis Template</label>
+            <select
+              value={template}
+              onChange={(e) => setTemplate(e.target.value as ComparisonTemplate)}
+              className="rounded-lg border border-slate-600 bg-slate-700 px-3 py-2 text-sm text-white focus:border-blue-500 focus:outline-none"
+              data-testid="template-select"
+            >
+              {TEMPLATE_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
           </div>
 
           {/* Provider checkboxes */}
@@ -164,6 +192,8 @@ export default function ModelComparisonPanel() {
             </span>
           </div>
 
+          <ConsensusBar results={result.results} />
+
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2" data-testid="results-grid">
             {result.results.map((r, i) => (
               <ProviderResultCard key={`${r.provider}-${i}`} result={r} />
@@ -174,3 +204,4 @@ export default function ModelComparisonPanel() {
     </div>
   );
 }
+```
