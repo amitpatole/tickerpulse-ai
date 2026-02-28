@@ -1,4 +1,3 @@
-```typescript
 'use client';
 
 import { useCallback } from 'react';
@@ -45,4 +44,3 @@ export function useEarnings(watchlistId?: number, days = 30): UseEarningsResult 
     refetch,
   };
 }
-```

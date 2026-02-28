@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { Bot, AlertTriangle, CheckCircle, Clock, Radio } from 'lucide-react';
 import { clsx } from 'clsx';
 import { useSSE } from '@/hooks/useSSE';
+import { formatLocalTime } from '@/lib/formatTime';
 import type { SSEEvent } from '@/lib/types';
 
 function EventIcon({ type }: { type: string }) {
@@ -35,12 +36,6 @@ function formatEventMessage(event: SSEEvent): string {
     default:
       return JSON.stringify(data);
   }
-}
-
-function formatTimestamp(ts?: string): string {
-  if (!ts) return '';
-  const date = new Date(ts);
-  return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
 
 export default function ActivityFeed() {
@@ -118,7 +113,7 @@ export default function ActivityFeed() {
                   <div className="mt-0.5 flex items-center gap-2">
                     <span className="text-[10px] text-slate-500 capitalize">{event.type.replace('_', ' ')}</span>
                     {event.timestamp && (
-                      <span className="text-[10px] text-slate-600">{formatTimestamp(event.timestamp)}</span>
+                      <span className="text-[10px] text-slate-600" suppressHydrationWarning>{formatLocalTime(event.timestamp)}</span>
                     )}
                   </div>
                 </div>

@@ -4,7 +4,9 @@ Job definitions for TickerPulse AI scheduler.
 
 Each module in this package defines a single scheduled job. The
 ``register_all_jobs`` function wires them all into a ``SchedulerManager``
-with the correct cron / interval triggers.
+with the correct cron / interval triggers.  After static registration it
+calls ``_apply_persisted_schedules`` which overlays any user-defined
+overrides stored in the ``agent_schedules`` DB table.
 """
 from backend.jobs.morning_briefing import run_morning_briefing
 from backend.jobs.technical_monitor import run_technical_monitor
@@ -15,7 +17,54 @@ from backend.jobs.regime_check import run_regime_check
 from backend.jobs.download_tracker import run_download_tracker
 from backend.jobs.price_refresh import run_price_refresh
 from backend.jobs.earnings_sync import run_earnings_sync
+from backend.jobs.portfolio_snapshot import run_portfolio_snapshot
+from backend.jobs.metrics_snapshot import run_metrics_snapshot
 from backend.config import Config
+
+import json
+import logging
+
+_logger = logging.getLogger(__name__)
+
+
+def _apply_persisted_schedules(scheduler_manager) -> None:
+    """Overlay user-defined schedule overrides from ``agent_schedules`` DB table.
+
+    Only updates jobs that are already registered with APScheduler.
+    Missing or malformed rows are skipped with a warning.
+    """
+    try:
+        from backend.database import db_session  # local import avoids circular dependency at module load
+        with db_session() as conn:
+            rows = conn.execute(
+                'SELECT job_id, trigger, trigger_args'
+                ' FROM agent_schedules WHERE enabled = 1'
+            ).fetchall()
+    except Exception:
+        _logger.exception("Failed to read agent_schedules from DB — skipping persisted overrides")
+        return
+
+    for row in rows:
+        job_id: str = row['job_id']
+        trigger: str = row['trigger']
+        try:
+            trigger_args: dict = json.loads(row['trigger_args'])
+        except (json.JSONDecodeError, TypeError):
+            _logger.warning("Malformed trigger_args for agent schedule '%s' — skipping", job_id)
+            continue
+
+        if not scheduler_manager.get_job(job_id):
+            _logger.debug("No APScheduler job '%s' registered — persisted schedule deferred", job_id)
+            continue
+
+        ok = scheduler_manager.update_job_schedule(job_id, trigger, **trigger_args)
+        if ok:
+            _logger.info(
+                "Applied persisted schedule override: job=%s trigger=%s args=%s",
+                job_id, trigger, trigger_args,
+            )
+        else:
+            _logger.warning("Failed to apply persisted schedule for job '%s'", job_id)
 
 
 def register_all_jobs(scheduler_manager) -> None:
@@ -157,6 +206,38 @@ def register_all_jobs(scheduler_manager) -> None:
         minute=0,
     )
 
+    # ---- Portfolio Snapshot: 4:00 PM ET, weekdays ----
+    scheduler_manager.register_job(
+        job_id='portfolio_snapshot',
+        func=run_portfolio_snapshot,
+        trigger='cron',
+        name='Portfolio Snapshot',
+        description=(
+            'Records end-of-day portfolio total value and cost basis to '
+            'portfolio_snapshots for historical P&L chart rendering. '
+            'Runs at market close on weekdays.'
+        ),
+        hour=16,
+        minute=0,
+        day_of_week='mon-fri',
+    )
+
+    # ---- Metrics Snapshot: Every 5 minutes ----
+    scheduler_manager.register_job(
+        job_id='metrics_snapshot',
+        func=run_metrics_snapshot,
+        trigger='interval',
+        name='Metrics Snapshot',
+        description=(
+            'Captures system health metrics (CPU, memory, DB pool) and flushes '
+            'API latency data to the database. Runs every 5 minutes.'
+        ),
+        minutes=5,
+    )
+
+    # Apply any user-defined schedule overrides persisted in agent_schedules
+    _apply_persisted_schedules(scheduler_manager)
+
 
 __all__ = [
     'register_all_jobs',
@@ -169,4 +250,6 @@ __all__ = [
     'run_download_tracker',
     'run_price_refresh',
     'run_earnings_sync',
+    'run_portfolio_snapshot',
+    'run_metrics_snapshot',
 ]

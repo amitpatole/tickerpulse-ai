@@ -4,14 +4,16 @@ AI-Powered Stock Analytics
 Analyzes technical indicators, news sentiment, and social media to provide stock ratings
 """
 
+import math
 import sqlite3
 import requests
 import logging
-from datetime import datetime, timedelta
-from typing import Dict, List, Tuple, Optional
+from datetime import datetime, timedelta, timezone
+from typing import Any, Dict, List, Tuple, Optional
 import json
 
 from backend.config import Config
+from backend.database import db_session, batch_upsert_ai_ratings
 
 logger = logging.getLogger(__name__)
 
@@ -164,22 +166,15 @@ class StockAnalytics:
 
     def get_sentiment_analysis(self, ticker: str, days: int = 7) -> Dict:
         """Analyze news and social media sentiment from database"""
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
+        since_date = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
 
-        since_date = (datetime.now() - timedelta(days=days)).isoformat()
-
-        # Get all articles for this ticker in the last N days
-        cursor.execute('''
-            SELECT sentiment_score, sentiment_label, source, engagement_score, created_at
-            FROM news
-            WHERE ticker = ? AND created_at > ?
-            ORDER BY created_at DESC
-        ''', (ticker, since_date))
-
-        articles = cursor.fetchall()
-        conn.close()
+        with db_session(self.db_path) as conn:
+            articles = conn.execute('''
+                SELECT sentiment_score, sentiment_label, source, engagement_score, created_at
+                FROM news
+                WHERE ticker = ? AND created_at > ?
+                ORDER BY created_at DESC
+            ''', (ticker, since_date)).fetchall()
 
         if not articles:
             return {
@@ -217,7 +212,7 @@ class StockAnalytics:
         neutral_count = labels.count('neutral')
 
         # Determine sentiment trend (last 3 days vs previous days)
-        recent_cutoff = (datetime.now() - timedelta(days=3)).isoformat()
+        recent_cutoff = (datetime.now(timezone.utc) - timedelta(days=3)).isoformat()
         recent = [a['sentiment_score'] for a in articles if a['created_at'] > recent_cutoff]
         older = [a['sentiment_score'] for a in articles if a['created_at'] <= recent_cutoff]
 
@@ -420,7 +415,7 @@ class StockAnalytics:
             'sentiment_signals': sentiment_signals,
             'analysis_summary': summary_text,
             'ai_powered': ai_powered,
-            'timestamp': datetime.now().isoformat()
+            'timestamp': datetime.now(timezone.utc).isoformat()
         }
 
         # Cache rating to database
@@ -431,35 +426,8 @@ class StockAnalytics:
     def _save_rating_to_db(self, rating_data: Dict) -> None:
         """Cache computed rating to ai_ratings table for fast subsequent reads."""
         try:
-            conn = sqlite3.connect(self.db_path)
-            conn.execute("""
-                INSERT INTO ai_ratings
-                    (ticker, rating, score, confidence, current_price, price_change, price_change_pct,
-                     rsi, sentiment_score, sentiment_label, technical_score, summary, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-                ON CONFLICT(ticker) DO UPDATE SET
-                    rating=excluded.rating, score=excluded.score, confidence=excluded.confidence,
-                    current_price=excluded.current_price, price_change=excluded.price_change,
-                    price_change_pct=excluded.price_change_pct, rsi=excluded.rsi,
-                    sentiment_score=excluded.sentiment_score, sentiment_label=excluded.sentiment_label,
-                    technical_score=excluded.technical_score, summary=excluded.summary,
-                    updated_at=CURRENT_TIMESTAMP
-            """, (
-                rating_data['ticker'],
-                rating_data['rating'],
-                rating_data['score'],
-                rating_data['confidence'],
-                rating_data.get('current_price'),
-                rating_data.get('price_change'),
-                rating_data.get('price_change_pct'),
-                rating_data.get('rsi'),
-                rating_data.get('sentiment_score'),
-                rating_data.get('sentiment_label', 'neutral'),
-                rating_data.get('technical_score'),
-                rating_data.get('analysis_summary'),
-            ))
-            conn.commit()
-            conn.close()
+            with db_session(self.db_path) as conn:
+                batch_upsert_ai_ratings(conn, [rating_data])
         except Exception as e:
             logger.debug(f"Could not cache rating for {rating_data['ticker']}: {e}")
 
@@ -569,19 +537,141 @@ Be direct and actionable. Avoid disclaimers."""
             'bb_position': bb_position,
         }
 
+    @staticmethod
+    def calculate_volume_profile(
+        candles: List[Dict[str, Any]],
+        buckets: int = 36,
+    ) -> Dict[str, Any]:
+        """Calculate a volume profile from OHLCV candle data.
+
+        Each candle's volume is distributed proportionally across the price
+        buckets its [low, high] range spans.  For flat candles (high == low)
+        all volume is assigned to the bucket containing the midpoint.
+
+        Args:
+            candles: List of dicts with at minimum the keys
+                     ``high``, ``low``, and ``volume``.
+            buckets: Number of equal-width price buckets (must be >= 2).
+
+        Returns:
+            Dict with keys:
+                ``buckets`` — list of ``{price_low, price_high, volume, pct}``
+                              sorted from lowest to highest price.
+                ``value_area`` — ``{poc, poc_volume, vah, val}`` where
+                                 ``poc`` is the midpoint of the highest-volume
+                                 bucket and ``vah``/``val`` are the high/low
+                                 price edges of the 70 % value area.
+                                 ``None`` when data is insufficient.
+        """
+        _empty: Dict[str, Any] = {'buckets': [], 'value_area': None}
+
+        if not candles or buckets < 2:
+            return _empty
+
+        # Collect valid (high, low, volume) triples
+        valid: List[Tuple[float, float, float]] = []
+        for c in candles:
+            try:
+                hi = float(c['high'])
+                lo = float(c['low'])
+                vol = float(c.get('volume') or 0)
+            except (TypeError, ValueError, KeyError):
+                continue
+            if math.isnan(hi) or math.isnan(lo) or hi < lo:
+                continue
+            valid.append((hi, lo, vol))
+
+        if not valid:
+            return _empty
+
+        price_max = max(row[0] for row in valid)
+        price_min = min(row[1] for row in valid)
+
+        if price_max <= price_min:
+            return _empty
+
+        bucket_size = (price_max - price_min) / buckets
+        volume_dist: List[float] = [0.0] * buckets
+
+        for hi, lo, vol in valid:
+            candle_range = hi - lo
+            if candle_range <= 0.0:
+                # Flat candle — assign all volume to the midpoint bucket
+                mid = (hi + lo) / 2.0
+                bi = min(int((mid - price_min) / bucket_size), buckets - 1)
+                volume_dist[bi] += vol
+            else:
+                for i in range(buckets):
+                    blo = price_min + i * bucket_size
+                    bhi = blo + bucket_size
+                    overlap = min(hi, bhi) - max(lo, blo)
+                    if overlap > 0.0:
+                        volume_dist[i] += vol * overlap / candle_range
+
+        total_volume = sum(volume_dist)
+
+        # Build bucket list
+        pct_denom = total_volume if total_volume > 0.0 else 1.0
+        bucket_list: List[Dict[str, Any]] = []
+        for i in range(buckets):
+            blo = round(price_min + i * bucket_size, 6)
+            bhi = round(blo + bucket_size, 6)
+            vol_i = int(round(volume_dist[i]))
+            bucket_list.append({
+                'price_low': blo,
+                'price_high': bhi,
+                'volume': vol_i,
+                'pct': round(volume_dist[i] / pct_denom * 100.0, 2),
+            })
+
+        if total_volume == 0.0:
+            return {'buckets': bucket_list, 'value_area': None}
+
+        # Point of Control (POC) — highest-volume bucket
+        poc_idx = max(range(buckets), key=lambda i: volume_dist[i])
+
+        # Value area expansion: grow outward from POC until 70 % threshold
+        va_threshold = 0.70 * total_volume
+        accumulated = volume_dist[poc_idx]
+        lo_idx = poc_idx
+        hi_idx = poc_idx
+
+        while accumulated < va_threshold:
+            can_lo = lo_idx > 0
+            can_hi = hi_idx < buckets - 1
+            if not can_lo and not can_hi:
+                break
+            next_lo = volume_dist[lo_idx - 1] if can_lo else -1.0
+            next_hi = volume_dist[hi_idx + 1] if can_hi else -1.0
+            if next_hi >= next_lo:
+                hi_idx += 1
+                accumulated += volume_dist[hi_idx]
+            else:
+                lo_idx -= 1
+                accumulated += volume_dist[lo_idx]
+
+        poc_mid = round(
+            price_min + (poc_idx + 0.5) * bucket_size, 6
+        )
+        value_area: Dict[str, Any] = {
+            'poc': poc_mid,
+            'poc_volume': int(round(volume_dist[poc_idx])),
+            'vah': bucket_list[hi_idx]['price_high'],
+            'val': bucket_list[lo_idx]['price_low'],
+        }
+
+        return {'buckets': bucket_list, 'value_area': value_area}
+
     def get_all_ratings(self) -> List[Dict]:
         """Get AI ratings for all active stocks"""
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-
         try:
-            cursor.execute('SELECT ticker FROM stocks WHERE active = 1 ORDER BY ticker')
-            stocks = [row['ticker'] for row in cursor.fetchall()]
+            with db_session(self.db_path) as conn:
+                stocks = [
+                    row['ticker'] for row in
+                    conn.execute('SELECT ticker FROM stocks WHERE active = 1 ORDER BY ticker').fetchall()
+                ]
         except sqlite3.OperationalError:
             stocks = []
-
-        conn.close()
 
         ratings = []
         for ticker in stocks:

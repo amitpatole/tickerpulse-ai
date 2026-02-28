@@ -1,4 +1,3 @@
-```typescript
 /**
  * Tests for frontend/src/hooks/useChartTimeframe.ts — React hook for chart timeframe persistence.
  *
@@ -331,5 +330,52 @@ describe('useChartTimeframes (array variant)', () => {
       expect(result.current[0]).toEqual(['1Y', '1D', '1W']);
     });
   });
+
+  describe('Clamping (min 2 / max 4)', () => {
+    it('clamps to maximum 4 timeframes when reading from localStorage', () => {
+      const { mockLocalStorage } = setupLocalStorage();
+      // 6 valid timeframes stored — only first 4 should be used
+      mockLocalStorage.getItem.mockReturnValue(
+        JSON.stringify(['1D', '1W', '1M', '3M', '6M', '1Y'])
+      );
+
+      const { result } = renderHook(() =>
+        useChartTimeframes('multi_tfs', defaultTimeframes, validTimeframes)
+      );
+
+      expect(result.current[0]).toEqual(['1D', '1W', '1M', '3M']);
+      expect(result.current[0]).toHaveLength(4);
+    });
+
+    it('clamps to maximum 4 timeframes when calling setTimeframes with 5 items', () => {
+      const { store } = setupLocalStorage();
+
+      const { result } = renderHook(() =>
+        useChartTimeframes('multi_tfs', defaultTimeframes, validTimeframes)
+      );
+
+      act(() => {
+        result.current[1](['1D', '1W', '1M', '3M', '6M']); // 5 items
+      });
+
+      expect(result.current[0]).toHaveLength(4);
+      expect(result.current[0]).toEqual(['1D', '1W', '1M', '3M']);
+      // Persisted JSON should also be clamped
+      expect(JSON.parse(store['multi_tfs'])).toHaveLength(4);
+    });
+
+    it('falls back to defaults when only 1 valid timeframe remains after filtering', () => {
+      const { mockLocalStorage } = setupLocalStorage();
+      // Only 1 valid item after filtering — below min 2, must fall back
+      mockLocalStorage.getItem.mockReturnValue(
+        JSON.stringify(['1D', 'INVALID', 'ALSO_INVALID'])
+      );
+
+      const { result } = renderHook(() =>
+        useChartTimeframes('multi_tfs', defaultTimeframes, validTimeframes)
+      );
+
+      expect(result.current[0]).toEqual(defaultTimeframes);
+    });
+  });
 });
-```

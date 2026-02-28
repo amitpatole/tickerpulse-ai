@@ -1,4 +1,3 @@
-```typescript
 /**
  * TickerPulse AI v3.0 — EarningsCalendar Component Tests
  *
@@ -566,4 +565,3 @@ describe('EarningsCalendar', () => {
     });
   });
 });
-```

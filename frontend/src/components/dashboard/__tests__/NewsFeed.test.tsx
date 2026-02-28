@@ -5,20 +5,15 @@
  * sentiment color coding, and graceful handling of loading/error states.
  */
 
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import NewsFeed from '@/components/dashboard/NewsFeed';
 import type { NewsArticle } from '@/lib/types';
 
-// Mock the useApi hook to control data fetching
-jest.mock('@/hooks/useApi', () => ({
-  useApi: jest.fn(),
-}));
-
 // Mock keyboard integration hooks
 jest.mock('@/hooks/useNewsFeedKeyboard', () => ({
   useNewsFeedKeyboard: jest.fn(() => ({
-    focusedIndex: -1,
+    focusedIndex: null,
     itemRefs: { current: [] },
     handleKeyDown: jest.fn(),
     activatePanel: jest.fn(),
@@ -30,10 +25,6 @@ jest.mock('@/components/layout/KeyboardShortcutsProvider', () => ({
     registerNewsFeed: jest.fn(),
   })),
 }));
-
-import { useApi } from '@/hooks/useApi';
-
-const mockUseApi = useApi as jest.MockedFunction<typeof useApi>;
 
 describe('NewsFeed', () => {
   beforeEach(() => {
@@ -48,7 +39,7 @@ describe('NewsFeed', () => {
     it('renders articles with title, link, ticker badge, and sentiment', () => {
       const mockArticles: NewsArticle[] = [
         {
-          id: 'article-1',
+          id: 1,
           title: 'Tesla Q4 Earnings Beat Expectations',
           url: 'https://example.com/article1',
           ticker: 'TSLA',
@@ -57,7 +48,7 @@ describe('NewsFeed', () => {
           created_at: new Date().toISOString(),
         },
         {
-          id: 'article-2',
+          id: 2,
           title: 'Apple Announces New Product Launch',
           url: 'https://example.com/article2',
           ticker: 'AAPL',
@@ -67,13 +58,7 @@ describe('NewsFeed', () => {
         },
       ];
 
-      mockUseApi.mockReturnValue({
-        data: mockArticles,
-        loading: false,
-        error: null,
-      });
-
-      render(<NewsFeed />);
+      render(<NewsFeed articles={mockArticles} loading={false} error={null} />);
 
       // Assert: Article titles render
       expect(screen.getByText(/Tesla Q4 Earnings Beat Expectations/)).toBeInTheDocument();
@@ -95,7 +80,7 @@ describe('NewsFeed', () => {
     it('renders article links with correct attributes (target="_blank", rel="noopener noreferrer")', () => {
       const mockArticles: NewsArticle[] = [
         {
-          id: 'article-1',
+          id: 1,
           title: 'Market Update',
           url: 'https://example.com/market-update',
           ticker: 'SPY',
@@ -105,13 +90,7 @@ describe('NewsFeed', () => {
         },
       ];
 
-      mockUseApi.mockReturnValue({
-        data: mockArticles,
-        loading: false,
-        error: null,
-      });
-
-      const { container } = render(<NewsFeed />);
+      const { container } = render(<NewsFeed articles={mockArticles} loading={false} error={null} />);
 
       const link = container.querySelector('a[href="https://example.com/market-update"]');
       expect(link).toHaveAttribute('target', '_blank');
@@ -121,7 +100,7 @@ describe('NewsFeed', () => {
     it('formats timestamps relative to current time (e.g., "5m ago", "2h ago")', () => {
       const mockArticles: NewsArticle[] = [
         {
-          id: 'article-1',
+          id: 1,
           title: 'Breaking News',
           url: 'https://example.com/breaking',
           ticker: 'BRK',
@@ -131,13 +110,7 @@ describe('NewsFeed', () => {
         },
       ];
 
-      mockUseApi.mockReturnValue({
-        data: mockArticles,
-        loading: false,
-        error: null,
-      });
-
-      render(<NewsFeed />);
+      render(<NewsFeed articles={mockArticles} loading={false} error={null} />);
 
       // Assert: Relative time format appears
       expect(screen.getByText(/m ago|h ago|Just now/)).toBeInTheDocument();
@@ -150,13 +123,7 @@ describe('NewsFeed', () => {
 
   describe('loading state: displays animated skeleton', () => {
     it('shows loading skeleton when loading=true and no articles yet', () => {
-      mockUseApi.mockReturnValue({
-        data: null,
-        loading: true,
-        error: null,
-      });
-
-      const { container } = render(<NewsFeed />);
+      const { container } = render(<NewsFeed articles={null} loading={true} error={null} />);
 
       // Assert: aria-busy indicates loading
       const feedContainer = container.querySelector('[aria-busy="true"]');
@@ -174,13 +141,7 @@ describe('NewsFeed', () => {
 
   describe('no data: displays empty state message gracefully', () => {
     it('shows "No news articles yet" when articles array is empty', () => {
-      mockUseApi.mockReturnValue({
-        data: [],
-        loading: false,
-        error: null,
-      });
-
-      render(<NewsFeed />);
+      render(<NewsFeed articles={[]} loading={false} error={null} />);
 
       expect(screen.getByText(/No news articles yet/i)).toBeInTheDocument();
     });
@@ -192,25 +153,13 @@ describe('NewsFeed', () => {
 
   describe('error case: gracefully handles API errors', () => {
     it('displays error message when news API fails', () => {
-      mockUseApi.mockReturnValue({
-        data: null,
-        loading: false,
-        error: 'Failed to fetch news articles',
-      });
-
-      render(<NewsFeed />);
+      render(<NewsFeed articles={null} loading={false} error="Failed to fetch news articles" />);
 
       expect(screen.getByText(/Failed to fetch news articles/i)).toBeInTheDocument();
     });
 
     it('shows error even if there were previous articles', () => {
-      mockUseApi.mockReturnValue({
-        data: null,
-        loading: false,
-        error: 'Network error: Connection timeout',
-      });
-
-      render(<NewsFeed />);
+      render(<NewsFeed articles={null} loading={false} error="Network error: Connection timeout" />);
 
       expect(screen.getByText(/Network error: Connection timeout/i)).toBeInTheDocument();
     });
@@ -224,7 +173,7 @@ describe('NewsFeed', () => {
     it('renders articles without sentiment_label when null', () => {
       const mockArticles: NewsArticle[] = [
         {
-          id: 'article-1',
+          id: 1,
           title: 'Neutral Article',
           url: 'https://example.com/neutral',
           ticker: 'XYZ',
@@ -234,13 +183,7 @@ describe('NewsFeed', () => {
         },
       ];
 
-      mockUseApi.mockReturnValue({
-        data: mockArticles,
-        loading: false,
-        error: null,
-      });
-
-      render(<NewsFeed />);
+      render(<NewsFeed articles={mockArticles} loading={false} error={null} />);
 
       // Assert: Article still renders, ticker and source still present
       expect(screen.getByText(/Neutral Article/)).toBeInTheDocument();
@@ -252,7 +195,7 @@ describe('NewsFeed', () => {
       const longTitle = 'A'.repeat(200); // Very long title
       const mockArticles: NewsArticle[] = [
         {
-          id: 'article-1',
+          id: 1,
           title: longTitle,
           url: 'https://example.com/long',
           ticker: 'LONG',
@@ -262,13 +205,7 @@ describe('NewsFeed', () => {
         },
       ];
 
-      mockUseApi.mockReturnValue({
-        data: mockArticles,
-        loading: false,
-        error: null,
-      });
-
-      const { container } = render(<NewsFeed />);
+      const { container } = render(<NewsFeed articles={mockArticles} loading={false} error={null} />);
 
       // Assert: Article title element has line-clamp class (max 2 lines)
       const titleElement = container.querySelector('[class*="line-clamp"]');
@@ -278,7 +215,7 @@ describe('NewsFeed', () => {
     it('handles articles with missing created_at gracefully', () => {
       const mockArticles: NewsArticle[] = [
         {
-          id: 'article-1',
+          id: 1,
           title: 'Undated Article',
           url: 'https://example.com/undated',
           ticker: 'UND',
@@ -288,13 +225,7 @@ describe('NewsFeed', () => {
         },
       ];
 
-      mockUseApi.mockReturnValue({
-        data: mockArticles,
-        loading: false,
-        error: null,
-      });
-
-      render(<NewsFeed />);
+      render(<NewsFeed articles={mockArticles} loading={false} error={null} />);
 
       // Assert: Article still renders despite missing/invalid timestamp
       expect(screen.getByText(/Undated Article/)).toBeInTheDocument();
@@ -302,7 +233,7 @@ describe('NewsFeed', () => {
 
     it('maintains container max-height and enables scrolling for many articles', () => {
       const mockArticles: NewsArticle[] = Array.from({ length: 20 }, (_, i) => ({
-        id: `article-${i}`,
+        id: i,
         title: `Article ${i + 1}`,
         url: `https://example.com/article${i}`,
         ticker: `TICK${i}`,
@@ -311,13 +242,7 @@ describe('NewsFeed', () => {
         created_at: new Date(Date.now() - i * 3600000).toISOString(),
       }));
 
-      mockUseApi.mockReturnValue({
-        data: mockArticles,
-        loading: false,
-        error: null,
-      });
-
-      const { container } = render(<NewsFeed />);
+      const { container } = render(<NewsFeed articles={mockArticles} loading={false} error={null} />);
 
       // Assert: Container has max-height and overflow-y-auto for scrolling
       const feedContainer = container.querySelector('[role="feed"]');
@@ -334,7 +259,7 @@ describe('NewsFeed', () => {
     it('has role="feed" and aria-label for screen readers', () => {
       const mockArticles: NewsArticle[] = [
         {
-          id: 'article-1',
+          id: 1,
           title: 'Accessible Article',
           url: 'https://example.com/accessible',
           ticker: 'ACC',
@@ -344,13 +269,7 @@ describe('NewsFeed', () => {
         },
       ];
 
-      mockUseApi.mockReturnValue({
-        data: mockArticles,
-        loading: false,
-        error: null,
-      });
-
-      const { container } = render(<NewsFeed />);
+      const { container } = render(<NewsFeed articles={mockArticles} loading={false} error={null} />);
 
       const feed = container.querySelector('[role="feed"]');
       expect(feed).toHaveAttribute('aria-label', 'Recent news');
@@ -359,7 +278,7 @@ describe('NewsFeed', () => {
     it('each article has role="article" and aria-label with title', () => {
       const mockArticles: NewsArticle[] = [
         {
-          id: 'article-1',
+          id: 1,
           title: 'Test Article Title',
           url: 'https://example.com/test',
           ticker: 'TEST',
@@ -369,13 +288,7 @@ describe('NewsFeed', () => {
         },
       ];
 
-      mockUseApi.mockReturnValue({
-        data: mockArticles,
-        loading: false,
-        error: null,
-      });
-
-      const { container } = render(<NewsFeed />);
+      const { container } = render(<NewsFeed articles={mockArticles} loading={false} error={null} />);
 
       const article = container.querySelector('[role="article"]');
       expect(article).toHaveAttribute('aria-label', 'Test Article Title');

@@ -1,4 +1,3 @@
-```python
 """
 Input validation for scheduler API endpoints.
 
@@ -100,6 +99,8 @@ def validate_cron_args(args: dict):
 
     if 'day_of_week' in args:
         dow = str(args['day_of_week']).strip().lower()
+        if not dow:
+            return False, "day_of_week must not be empty; omit it to mean 'all days'."
         if not _DAY_OF_WEEK_RE.match(dow):
             return False, (
                 f"Invalid day_of_week '{args['day_of_week']}'. "
@@ -191,4 +192,3 @@ def validate_trigger_args(trigger: str, args: dict):
         return validate_date_args(args)
     # Caller is responsible for rejecting unknown trigger types before calling here.
     return False, f"Unknown trigger type: '{trigger}'."
-```

@@ -1,4 +1,3 @@
-```typescript
 'use client';
 
 import { useState, useRef, useEffect, useMemo } from 'react';
@@ -309,4 +308,3 @@ export default function AIRatingsPanel({ ratings, wsPrices }: AIRatingsPanelProp
     </div>
   );
 }
-```

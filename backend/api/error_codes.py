@@ -1,40 +1,20 @@
 """
-TickerPulse AI v3.0 — Structured error code registry.
+Backward-compatible re-export of the canonical error code registry.
 
-Provides an ErrorCode enum and HTTP status mapping used across all API
-blueprints.  Import ErrorCode rather than using ad-hoc string literals
-so that error codes stay consistent and are traceable end-to-end.
+All new code should import directly from ``backend.core.error_codes``.
+This module exists so that existing callers (e.g. settings.py) and the
+PyInstaller spec entry continue to work without modification.
 """
 
-from enum import Enum
+from backend.core.error_codes import (  # noqa: F401
+    ErrorCode,
+    HTTP_STATUS_MAP,
+    http_status,
+)
 
+# Legacy alias — the original module exposed HTTP_STATUS keyed by ErrorCode
+# members.  Since ErrorCode is now a str-Enum the dict is identical; the alias
+# preserves the old name for any code that references it directly.
+HTTP_STATUS = HTTP_STATUS_MAP
 
-class ErrorCode(str, Enum):
-    """Canonical error codes returned in API error responses."""
-
-    # 4xx — client errors
-    BAD_REQUEST = 'BAD_REQUEST'
-    MISSING_FIELD = 'MISSING_FIELD'
-    INVALID_TYPE = 'INVALID_TYPE'
-    NOT_FOUND = 'NOT_FOUND'
-    TICKER_NOT_FOUND = 'TICKER_NOT_FOUND'
-    PAYLOAD_TOO_LARGE = 'PAYLOAD_TOO_LARGE'
-
-    # 5xx — server errors
-    INTERNAL_ERROR = 'INTERNAL_ERROR'
-    DATA_PROVIDER_UNAVAILABLE = 'DATA_PROVIDER_UNAVAILABLE'
-    DATABASE_ERROR = 'DATABASE_ERROR'
-
-
-# HTTP status code for each error code.
-HTTP_STATUS: dict['ErrorCode', int] = {
-    ErrorCode.BAD_REQUEST: 400,
-    ErrorCode.MISSING_FIELD: 400,
-    ErrorCode.INVALID_TYPE: 400,
-    ErrorCode.NOT_FOUND: 404,
-    ErrorCode.TICKER_NOT_FOUND: 404,
-    ErrorCode.PAYLOAD_TOO_LARGE: 413,
-    ErrorCode.INTERNAL_ERROR: 500,
-    ErrorCode.DATA_PROVIDER_UNAVAILABLE: 503,
-    ErrorCode.DATABASE_ERROR: 500,
-}
+__all__ = ['ErrorCode', 'HTTP_STATUS', 'HTTP_STATUS_MAP', 'http_status']

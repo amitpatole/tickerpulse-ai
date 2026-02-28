@@ -1,4 +1,3 @@
-```tsx
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -379,4 +378,3 @@ export default function StockCard({ rating, onRemove }: StockCardProps) {
     </>
   );
 }
-```

@@ -1,4 +1,3 @@
-```typescript
 'use client';
 
 import { useState, useCallback, useEffect, useRef } from 'react';
@@ -7,7 +6,7 @@ import { Loader2 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { useApi } from '@/hooks/useApi';
 import { useChartTimeframes } from '@/hooks/useChartTimeframe';
-import { getStockDetail, getCompareData } from '@/lib/api';
+import { getStockDetail, getCompareData, patchState } from '@/lib/api';
 import type { Timeframe, StockDetail, CompareResponse } from '@/lib/types';
 import PriceChart from '@/components/charts/PriceChart';
 import TimeframeToggle, { STOCK_CHART_TIMEFRAMES } from './TimeframeToggle';
@@ -73,6 +72,19 @@ export default function StockPriceChart({ ticker }: StockPriceChartProps) {
 
   const isFirstMount = useRef(true);
 
+  // Tracks the merged chart prefs written to the server so consecutive updates
+  // within the same render cycle don't lose sub-keys (e.g. timeframe + view_mode).
+  const chartPrefsRef = useRef<Record<string, unknown>>({
+    timeframe: getInitialTimeframe(),
+    view_mode: getInitialViewMode(),
+    multi_timeframes: undefined,
+  });
+
+  function persistChartPrefs(updates: Record<string, unknown>) {
+    chartPrefsRef.current = { ...chartPrefsRef.current, ...updates };
+    patchState({ chart_prefs: chartPrefsRef.current }).catch(() => {});
+  }
+
   // Single-mode data fetch
   const fetcher = useCallback(
     () => getStockDetail(ticker, timeframe),
@@ -127,11 +139,18 @@ export default function StockPriceChart({ ticker }: StockPriceChartProps) {
   function handleViewModeChange(mode: ViewMode) {
     localStorage.setItem(VIEW_MODE_KEY, mode);
     setViewMode(mode);
+    persistChartPrefs({ view_mode: mode });
   }
 
   function handleTimeframeChange(tf: Timeframe) {
     localStorage.setItem(STORAGE_KEY, tf);
     setTimeframe(tf);
+    persistChartPrefs({ timeframe: tf });
+  }
+
+  function handleMultiTimeframesChange(tfs: Timeframe[]) {
+    setMultiTimeframes(tfs);
+    persistChartPrefs({ multi_timeframes: tfs });
   }
 
   // Clicking a mini chart promotes it: lock in the timeframe then switch to single view
@@ -295,7 +314,7 @@ export default function StockPriceChart({ ticker }: StockPriceChartProps) {
 
       {/* ── Multi mode: responsive grid of mini-charts for selected timeframes ── */}
       {viewMode === 'multi' && (
-        <div className="mt-2">
+        <div className="mt-2" data-testid="multi-grid-container">
           <MultiTimeframeGrid
             ticker={ticker}
             timeframes={multiTimeframes}
@@ -306,4 +325,3 @@ export default function StockPriceChart({ ticker }: StockPriceChartProps) {
     </div>
   );
 }
-```

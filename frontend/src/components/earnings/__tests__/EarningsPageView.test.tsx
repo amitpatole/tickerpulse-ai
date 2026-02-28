@@ -1,4 +1,3 @@
-```typescript
 /**
  * TickerPulse AI v3.0 — EarningsPageView Component Tests
  *
@@ -561,4 +560,3 @@ describe('EarningsPageView', () => {
     });
   });
 });
-```

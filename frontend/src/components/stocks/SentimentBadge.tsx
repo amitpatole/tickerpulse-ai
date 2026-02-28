@@ -1,7 +1,9 @@
 'use client';
 
 import { useCallback } from 'react';
+import type React from 'react';
 import { clsx } from 'clsx';
+import { TrendingUp, TrendingDown, Minus } from 'lucide-react';
 import { useApi } from '@/hooks/useApi';
 import { getStockSentiment } from '@/lib/api';
 import { formatDate } from '@/lib/formatTime';
@@ -29,10 +31,23 @@ function isStaleData(data: SentimentData): boolean {
   return ageMs > 15 * 60 * 1000;
 }
 
-function buildSourceLine(sources: { news: number; reddit: number }): string {
+const TREND_ICON: Record<NonNullable<SentimentData['trend']>, React.ReactNode> = {
+  up: <TrendingUp size={12} aria-hidden="true" />,
+  flat: <Minus size={12} aria-hidden="true" />,
+  down: <TrendingDown size={12} aria-hidden="true" />,
+};
+
+const TREND_CLASSES: Record<NonNullable<SentimentData['trend']>, string> = {
+  up: 'text-emerald-400',
+  flat: 'text-slate-400',
+  down: 'text-red-400',
+};
+
+function buildSourceLine(sources: SentimentData['sources']): string {
   const parts: string[] = [];
   if (sources.news > 0) parts.push(`${sources.news} News`);
   if (sources.reddit > 0) parts.push(`${sources.reddit} Reddit`);
+  if (sources.stocktwits > 0) parts.push(`${sources.stocktwits} StockTwits`);
   return parts.join(' · ');
 }
 
@@ -56,10 +71,12 @@ export default function SentimentBadge({ ticker, tz = 'local' }: SentimentBadgeP
   const stale = isStaleData(data);
   const labelText = data.label.charAt(0).toUpperCase() + data.label.slice(1);
   const sourceLine = buildSourceLine(data.sources);
+  const trend = data.trend ?? 'flat';
   const tooltip = [
     `${data.signal_count} signals`,
-    `News: ${data.sources.news}, Reddit: ${data.sources.reddit}`,
+    `News: ${data.sources.news}, Reddit: ${data.sources.reddit}, StockTwits: ${data.sources.stocktwits}`,
     `Score: ${formatScore(data.score)}`,
+    `Trend (24h): ${trend}`,
     `Updated: ${formatDate(data.updated_at, tz)}`,
     stale ? 'Data may be stale' : '',
   ]
@@ -75,9 +92,10 @@ export default function SentimentBadge({ ticker, tz = 'local' }: SentimentBadgeP
           'inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-semibold',
           LABEL_CLASSES[data.label]
         )}
-        aria-label={`Sentiment: ${labelText}`}
+        aria-label={`Sentiment: ${labelText}, trend ${trend}`}
       >
         {stale && <span aria-hidden="true">⚠</span>}
+        <span className={TREND_CLASSES[trend]}>{TREND_ICON[trend]}</span>
         {labelText}
         <span className="font-mono opacity-80">{formatScore(data.score)}</span>
       </span>

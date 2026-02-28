@@ -1,4 +1,3 @@
-```tsx
 'use client';
 
 import { clsx } from 'clsx';
@@ -35,6 +34,7 @@ export default function TimeframeToggle(props: TimeframeToggleProps) {
         if (current.length <= 2) return; // enforce minimum two selected
         props.onChange(current.filter((t) => t !== tf));
       } else {
+        if (current.length >= 4) return; // enforce maximum four selected
         props.onChange([...current, tf]);
       }
     } else {
@@ -50,7 +50,10 @@ export default function TimeframeToggle(props: TimeframeToggleProps) {
   function isDisabled(tf: Timeframe): boolean {
     if (!props.multiSelect) return false;
     // Disable deselection when it would drop below the two-item minimum
-    return props.selected.includes(tf) && props.selected.length <= 2;
+    if (props.selected.includes(tf) && props.selected.length <= 2) return true;
+    // Disable selection when already at the four-item maximum
+    if (!props.selected.includes(tf) && props.selected.length >= 4) return true;
+    return false;
   }
 
   return (
@@ -82,4 +85,3 @@ export default function TimeframeToggle(props: TimeframeToggleProps) {
     </div>
   );
 }
-```

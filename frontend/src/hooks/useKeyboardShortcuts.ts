@@ -1,4 +1,3 @@
-```typescript
 'use client';
 
 import { useEffect } from 'react';
@@ -91,5 +90,3 @@ export function useKeyboardShortcuts({
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
   }, [router, searchRef, onOpenHelp, onCloseHelp, isHelpOpen, onFocusNewsFeed]);
-}
-```

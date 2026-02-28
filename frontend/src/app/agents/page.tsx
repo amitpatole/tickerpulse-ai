@@ -10,6 +10,7 @@ import PriceChart from '@/components/charts/PriceChart';
 import { useApi } from '@/hooks/useApi';
 import { getAgents, getAgentRuns, getCostSummary } from '@/lib/api';
 import type { Agent, AgentRun, CostSummary } from '@/lib/types';
+import { formatLocalDate } from '@/lib/formatTime';
 
 function formatDuration(ms: number): string {
   if (ms < 1000) return `${ms}ms`;
@@ -22,15 +23,13 @@ function formatCost(cost: number): string {
   return `$${cost.toFixed(2)}`;
 }
 
-function formatDate(dateStr: string): string {
-  const date = new Date(dateStr);
-  return date.toLocaleDateString(undefined, {
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
-}
+const AGENT_DATE_OPTS: Intl.DateTimeFormatOptions = {
+  month: 'short',
+  day: 'numeric',
+  hour: '2-digit',
+  minute: '2-digit',
+  hour12: false,
+};
 
 function RunStatusBadge({ status }: { status: string }) {
   const styles: Record<string, string> = {
@@ -213,7 +212,7 @@ export default function AgentsPage() {
                     <tr
                       key={run.id ?? idx}
                       tabIndex={0}
-                      aria-label={`${run.agent_name}, status: ${run.status}, duration: ${formatDuration(run.duration_ms)}, cost: ${formatCost(run.estimated_cost)}, started ${formatDate(run.started_at)}`}
+                      aria-label={`${run.agent_name}, status: ${run.status}, duration: ${formatDuration(run.duration_ms)}, cost: ${formatCost(run.estimated_cost)}, started ${formatLocalDate(run.started_at, AGENT_DATE_OPTS)}`}
                       className="transition-colors hover:bg-slate-700/20 focus:outline-none focus:bg-slate-700/30"
                     >
                       <td className="px-4 py-3 font-medium text-white capitalize">{run.agent_name}</td>
@@ -222,7 +221,7 @@ export default function AgentsPage() {
                       </td>
                       <td className="px-4 py-3 font-mono text-slate-300">{formatDuration(run.duration_ms)}</td>
                       <td className="px-4 py-3 font-mono text-slate-300">{formatCost(run.estimated_cost)}</td>
-                      <td className="px-4 py-3 text-slate-400">{formatDate(run.started_at)}</td>
+                      <td className="px-4 py-3 text-slate-400">{formatLocalDate(run.started_at, AGENT_DATE_OPTS)}</td>
                     </tr>
                   ))}
                 </tbody>

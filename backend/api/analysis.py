@@ -1,4 +1,3 @@
-```python
 """
 TickerPulse AI v3.0 - Analysis API Routes
 Blueprint for AI ratings and chart data endpoints.
@@ -7,11 +6,12 @@ Blueprint for AI ratings and chart data endpoints.
 from flask import Blueprint, jsonify, request
 from datetime import datetime, timedelta, timezone
 import math
-import sqlite3
 import logging
 
 from backend.core.ai_analytics import StockAnalytics
-from backend.config import Config
+from backend.core.error_codes import ErrorCode
+from backend.database import pooled_session
+from backend.core.error_handlers import handle_api_errors, ValidationError, NotFoundError
 
 logger = logging.getLogger(__name__)
 
@@ -31,13 +31,13 @@ def _parse_pagination(args):
         page = int(args.get('page', 1))
         page_size = int(args.get('page_size', 25))
     except (ValueError, TypeError):
-        return None, None, (jsonify({'error': 'page and page_size must be integers'}), 400)
+        return None, None, (jsonify({'error': 'page and page_size must be integers', 'error_code': 'INVALID_INPUT'}), 400)
 
     if page < 1:
-        return None, None, (jsonify({'error': 'page must be a positive integer'}), 400)
+        return None, None, (jsonify({'error': 'page must be a positive integer', 'error_code': 'INVALID_INPUT'}), 400)
 
     if not (1 <= page_size <= 100):
-        return None, None, (jsonify({'error': 'page_size must be between 1 and 100'}), 400)
+        return None, None, (jsonify({'error': 'page_size must be between 1 and 100', 'error_code': 'INVALID_INPUT'}), 400)
 
     return page, page_size, None
 
@@ -45,15 +45,13 @@ def _parse_pagination(args):
 def _get_cached_ratings():
     """Try to read pre-computed ratings from ai_ratings table."""
     try:
-        conn = sqlite3.connect(Config.DB_PATH)
-        conn.row_factory = sqlite3.Row
         cutoff = datetime.utcnow() - timedelta(seconds=AI_RATINGS_CACHE_TTL_SECONDS)
-        rows = conn.execute("""
-            SELECT * FROM ai_ratings
-            WHERE updated_at >= ?
-            ORDER BY ticker
-        """, (cutoff.isoformat(),)).fetchall()
-        conn.close()
+        with pooled_session() as conn:
+            rows = conn.execute("""
+                SELECT * FROM ai_ratings
+                WHERE updated_at >= ?
+                ORDER BY ticker
+            """, (cutoff.isoformat(),)).fetchall()
         if rows:
             return [
                 {
@@ -79,6 +77,7 @@ def _get_cached_ratings():
 
 
 @analysis_bp.route('/ai/ratings', methods=['GET'])
+@handle_api_errors
 def get_ai_ratings():
     """Get AI ratings for all active stocks.
 
@@ -94,24 +93,28 @@ def get_ai_ratings():
 
     # Get active stock tickers, optionally scoped to a watchlist
     try:
-        conn = sqlite3.connect(Config.DB_PATH)
-        conn.row_factory = sqlite3.Row
-        if watchlist_id is not None:
-            rows = conn.execute(
-                """
-                SELECT DISTINCT s.ticker
-                FROM stocks s
-                JOIN watchlist_stocks ws ON ws.ticker = s.ticker
-                WHERE s.active = 1 AND ws.watchlist_id = ?
-                """,
-                (watchlist_id,),
-            ).fetchall()
-        else:
-            rows = conn.execute("SELECT ticker FROM stocks WHERE active = 1").fetchall()
+        with pooled_session() as conn:
+            if watchlist_id is not None:
+                rows = conn.execute(
+                    """
+                    SELECT DISTINCT s.ticker
+                    FROM stocks s
+                    JOIN watchlist_stocks ws ON ws.ticker = s.ticker
+                    WHERE s.active = 1 AND ws.watchlist_id = ?
+                    """,
+                    (watchlist_id,),
+                ).fetchall()
+            else:
+                rows = conn.execute("SELECT ticker FROM stocks WHERE active = 1").fetchall()
         active_tickers = {row['ticker'] for row in rows}
-        conn.close()
-    except Exception:
-        active_tickers = set()
+    except Exception as e:
+        logger.error("Failed to load active tickers from DB: %s", e)
+        return jsonify({
+            'ratings': [],
+            'degraded': True,
+            'error_code': ErrorCode.DATABASE_ERROR,
+            'message': 'Unable to retrieve active stock list',
+        }), 503
 
     # Try cached ratings
     cached = _get_cached_ratings()
@@ -134,35 +137,44 @@ def get_ai_ratings():
                 'rating': 'ERROR',
                 'score': 0,
                 'confidence': 0,
-                'message': str(e)
+                'error_code': ErrorCode.PROVIDER_ERROR,
+                'message': str(e),
             }
 
     # Return only active stocks, sorted by score DESC (best-rated first)
     results = [cached_map[t] for t in active_tickers if t in cached_map]
     results.sort(key=lambda r: r.get('score', 0), reverse=True)
-    return jsonify(results)
+    return jsonify({'ratings': results, 'degraded': False, 'error_code': None})
 
 
 @analysis_bp.route('/ai/rating/<ticker>', methods=['GET'])
+@handle_api_errors
 def get_ai_rating(ticker):
     """Get AI rating for a specific stock."""
     # Try cached first
     try:
-        conn = sqlite3.connect(Config.DB_PATH)
-        conn.row_factory = sqlite3.Row
-        row = conn.execute("SELECT * FROM ai_ratings WHERE ticker = ?", (ticker.upper(),)).fetchone()
-        conn.close()
+        with pooled_session() as conn:
+            row = conn.execute("SELECT * FROM ai_ratings WHERE ticker = ?", (ticker.upper(),)).fetchone()
         if row:
             return jsonify(dict(row))
-    except Exception:
-        pass
-    # Fall back to live calculation
-    analytics = StockAnalytics()
-    rating = analytics.calculate_ai_rating(ticker)
-    return jsonify(rating)
+    except Exception as e:
+        logger.warning("DB cache lookup failed for %s, falling back to live calculation: %s", ticker, e)
+    # Fall back to live calculation — cache miss; annotate response so clients
+    # can surface a degraded-state warning chip.
+    try:
+        analytics = StockAnalytics()
+        rating = analytics.calculate_ai_rating(ticker)
+        return jsonify({**rating, 'degraded': True, 'degraded_reason': 'cache_miss'})
+    except Exception as e:
+        logger.error("Failed to compute live AI rating for %s: %s", ticker, e)
+        return jsonify({
+            'error': f'Unable to compute rating for {ticker}',
+            'error_code': ErrorCode.PROVIDER_ERROR,
+        }), 502
 
 
 @analysis_bp.route('/chart/<ticker>', methods=['GET'])
+@handle_api_errors
 def get_chart_data(ticker):
     """Get historical price data for chart rendering.
 
@@ -184,6 +196,7 @@ def get_chart_data(ticker):
         - page_size: Items per page
         - total: Total number of data points across all pages
         - total_pages: Total number of pages
+        - has_prev: True if a previous page exists
         - has_next: True if a subsequent page exists
         - currency_symbol: '$' or currency symbol based on market
         - stats: Summary statistics computed from the full dataset
@@ -191,7 +204,7 @@ def get_chart_data(ticker):
           price_change_percent, total_volume)
 
     Errors:
-        400: Invalid page or page_size parameter.
+        400: Invalid page or page_size parameter, or page exceeds total_pages.
         404: No data available or no valid data points.
     """
     period = request.args.get('period', '1mo')
@@ -203,7 +216,7 @@ def get_chart_data(ticker):
     price_data = analytics.get_stock_price_data(ticker, period)
 
     if not price_data or not price_data.get('close'):
-        return jsonify({'error': 'No data available'}), 404
+        raise NotFoundError('No data available', error_code='NOT_FOUND')
 
     # Filter out None values and prepare data
     timestamps = price_data.get('timestamps', [])
@@ -228,7 +241,7 @@ def get_chart_data(ticker):
             })
 
     if not data_points:
-        return jsonify({'error': 'No valid data points'}), 404
+        raise NotFoundError('No valid data points', error_code='NOT_FOUND')
 
     # Calculate price change and stats across the full dataset
     first_price = data_points[0]['close']
@@ -238,6 +251,13 @@ def get_chart_data(ticker):
 
     total = len(data_points)
     total_pages = math.ceil(total / page_size)
+
+    # Out-of-bounds validation: page must not exceed total_pages
+    if page > total_pages:
+        raise ValidationError(
+            f'page {page} exceeds total_pages {total_pages}',
+            error_code='INVALID_INPUT',
+        )
 
     # Slice data for the requested page (1-based: offset = (page-1) * page_size)
     offset = (page - 1) * page_size
@@ -255,6 +275,7 @@ def get_chart_data(ticker):
         'page_size': page_size,
         'total': total,
         'total_pages': total_pages,
+        'has_prev': page > 1,
         'has_next': (page * page_size) < total,
         'currency_symbol': currency_symbol,
         'stats': {
@@ -267,4 +288,3 @@ def get_chart_data(ticker):
             'total_volume': sum([p['volume'] for p in data_points if p['volume']])
         }
     })
-```

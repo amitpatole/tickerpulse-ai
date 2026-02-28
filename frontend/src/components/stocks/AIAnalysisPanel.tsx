@@ -4,6 +4,7 @@ import { Brain } from 'lucide-react';
 import { clsx } from 'clsx';
 import type { AIRatingBlock } from '@/lib/types';
 import { RATING_BG_CLASSES } from '@/lib/types';
+import { timeAgo } from '@/lib/formatTime';
 
 export interface AIAnalysisPanelProps {
   aiRating: AIRatingBlock | null;
@@ -16,18 +17,6 @@ function scoreBarColor(score: number): string {
   if (score >= 65) return 'bg-emerald-500';
   if (score >= 40) return 'bg-amber-500';
   return 'bg-red-500';
-}
-
-function timeAgo(dateStr: string | null | undefined): string {
-  if (!dateStr) return '';
-  const date = new Date(dateStr);
-  if (isNaN(date.getTime())) return '';
-  const diffMins = Math.floor((Date.now() - date.getTime()) / 60_000);
-  if (diffMins < 1) return 'Just now';
-  if (diffMins < 60) return `${diffMins}m ago`;
-  const diffHours = Math.floor(diffMins / 60);
-  if (diffHours < 24) return `${diffHours}h ago`;
-  return `${Math.floor(diffHours / 24)}d ago`;
 }
 
 // ---- Sub-components ----------------------------------------------------------

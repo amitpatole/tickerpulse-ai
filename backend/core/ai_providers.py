@@ -22,9 +22,22 @@ class AIProvider(ABC):
         self.api_key = api_key
 
     @abstractmethod
-    def generate_analysis(self, prompt: str, max_tokens: int = 500) -> str:
-        """Generate AI analysis from prompt"""
+    def generate_analysis_with_usage(
+        self, prompt: str, max_tokens: int = 500
+    ) -> tuple[str | None, int, str | None]:
+        """Call the provider API and return (response_text, tokens_used, error_message).
+
+        Never raises. On success: (text, tokens, None).
+        On failure: (None, 0, error_description).
+        """
         pass
+
+    def generate_analysis(self, prompt: str, max_tokens: int = 500) -> str:
+        """Generate AI analysis from prompt. Returns response text or 'Error: ...' string."""
+        text, _, error = self.generate_analysis_with_usage(prompt, max_tokens)
+        if error:
+            return f"Error: {error}"
+        return text or ""
 
     @abstractmethod
     def get_provider_name(self) -> str:
@@ -40,32 +53,32 @@ class OpenAIProvider(AIProvider):
         self.model = model
         self.base_url = "https://api.openai.com/v1/chat/completions"
 
-    def generate_analysis(self, prompt: str, max_tokens: int = 500) -> str:
+    def generate_analysis_with_usage(
+        self, prompt: str, max_tokens: int = 500
+    ) -> tuple[str | None, int, str | None]:
         try:
             headers = {
                 "Authorization": f"Bearer {self.api_key}",
-                "Content-Type": "application/json"
+                "Content-Type": "application/json",
             }
-
             data = {
                 "model": self.model,
                 "messages": [
                     {"role": "system", "content": "You are a financial analyst expert providing stock market analysis."},
-                    {"role": "user", "content": prompt}
+                    {"role": "user", "content": prompt},
                 ],
                 "max_tokens": max_tokens,
-                "temperature": 0.7
+                "temperature": 0.7,
             }
-
             response = requests.post(self.base_url, headers=headers, json=data, timeout=30)
             response.raise_for_status()
-
             result = response.json()
-            return result['choices'][0]['message']['content'].strip()
-
+            text = result["choices"][0]["message"]["content"].strip()
+            tokens = result.get("usage", {}).get("total_tokens", 0)
+            return text, tokens, None
         except Exception as e:
-            logger.error(f"OpenAI API error: {e}")
-            return f"Error: {str(e)}"
+            logger.error("OpenAI API error: %s", e)
+            return None, 0, str(e)
 
     def get_provider_name(self) -> str:
         return f"OpenAI ({self.model})"
@@ -79,32 +92,31 @@ class AnthropicProvider(AIProvider):
         self.model = model
         self.base_url = "https://api.anthropic.com/v1/messages"
 
-    def generate_analysis(self, prompt: str, max_tokens: int = 500) -> str:
+    def generate_analysis_with_usage(
+        self, prompt: str, max_tokens: int = 500
+    ) -> tuple[str | None, int, str | None]:
         try:
             headers = {
                 "x-api-key": self.api_key,
                 "anthropic-version": "2023-06-01",
-                "Content-Type": "application/json"
+                "Content-Type": "application/json",
             }
-
             data = {
                 "model": self.model,
                 "max_tokens": max_tokens,
-                "messages": [
-                    {"role": "user", "content": prompt}
-                ],
-                "system": "You are a financial analyst expert providing stock market analysis."
+                "messages": [{"role": "user", "content": prompt}],
+                "system": "You are a financial analyst expert providing stock market analysis.",
             }
-
             response = requests.post(self.base_url, headers=headers, json=data, timeout=30)
             response.raise_for_status()
-
             result = response.json()
-            return result['content'][0]['text'].strip()
-
+            text = result["content"][0]["text"].strip()
+            usage = result.get("usage", {})
+            tokens = usage.get("input_tokens", 0) + usage.get("output_tokens", 0)
+            return text, tokens, None
         except Exception as e:
-            logger.error(f"Anthropic API error: {e}")
-            return f"Error: {str(e)}"
+            logger.error("Anthropic API error: %s", e)
+            return None, 0, str(e)
 
     def get_provider_name(self) -> str:
         return f"Anthropic ({self.model})"
@@ -118,45 +130,34 @@ class GoogleProvider(AIProvider):
         self.model = model
         self.base_url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 
-    def generate_analysis(self, prompt: str, max_tokens: int = 500) -> str:
+    def generate_analysis_with_usage(
+        self, prompt: str, max_tokens: int = 500
+    ) -> tuple[str | None, int, str | None]:
         try:
-            headers = {
-                "Content-Type": "application/json"
-            }
-
+            headers = {"Content-Type": "application/json"}
             data = {
-                "contents": [{
-                    "parts": [{
-                        "text": f"You are a financial analyst expert. {prompt}"
-                    }]
-                }],
-                "generationConfig": {
-                    "maxOutputTokens": max_tokens,
-                    "temperature": 0.7
-                }
+                "contents": [{"parts": [{"text": f"You are a financial analyst expert. {prompt}"}]}],
+                "generationConfig": {"maxOutputTokens": max_tokens, "temperature": 0.7},
             }
-
             response = requests.post(
                 f"{self.base_url}?key={self.api_key}",
                 headers=headers,
                 json=data,
-                timeout=30
+                timeout=30,
             )
-
-            # Log error details if request fails
             if response.status_code != 200:
                 error_msg = f"HTTP {response.status_code}: {response.text}"
-                logger.error(f"Google API error: HTTP {response.status_code}")
-                return f"Error: {error_msg}"
-
+                logger.error("Google API error: HTTP %s", response.status_code)
+                return None, 0, error_msg
             response.raise_for_status()
-
             result = response.json()
-            return result['candidates'][0]['content']['parts'][0]['text'].strip()
-
+            text = result["candidates"][0]["content"]["parts"][0]["text"].strip()
+            usage = result.get("usageMetadata", {})
+            tokens = usage.get("totalTokenCount", 0)
+            return text, tokens, None
         except Exception as e:
-            logger.error(f"Google API error: {e}")
-            return f"Error: {str(e)}"
+            logger.error("Google API error: %s", e)
+            return None, 0, str(e)
 
     def get_provider_name(self) -> str:
         return f"Google ({self.model})"
@@ -170,51 +171,45 @@ class GrokProvider(AIProvider):
         self.model = model
         self.base_url = "https://api.x.ai/v1/chat/completions"
 
-    def generate_analysis(self, prompt: str, max_tokens: int = 500) -> str:
+    def generate_analysis_with_usage(
+        self, prompt: str, max_tokens: int = 500
+    ) -> tuple[str | None, int, str | None]:
         try:
             headers = {
                 "Authorization": f"Bearer {self.api_key}",
-                "Content-Type": "application/json"
+                "Content-Type": "application/json",
             }
-
             data = {
                 "model": self.model,
                 "messages": [
                     {"role": "system", "content": "You are a financial analyst expert providing stock market analysis."},
-                    {"role": "user", "content": prompt}
+                    {"role": "user", "content": prompt},
                 ],
                 "max_tokens": max_tokens,
-                "temperature": 0.7
+                "temperature": 0.7,
             }
-
-            # Log debug info (API key first 10 chars only for security)
-            api_key_preview = self.api_key[:10] + "..." if len(self.api_key) > 10 else "***"
-            logger.debug(f"Grok API request - Model: {self.model}, API Key: {api_key_preview}, URL: {self.base_url}")
-
+            logger.debug(
+                "Grok API request - model: %s, url: %s",
+                self.model, self.base_url,
+            )
             response = requests.post(self.base_url, headers=headers, json=data, timeout=30)
-
-            # Log error details if request fails
             if response.status_code != 200:
                 error_msg = f"HTTP {response.status_code}: {response.text}"
-                logger.error(f"Grok API error: {error_msg}")
-                return f"Error: {error_msg}"
-
+                logger.error("Grok API error: %s", error_msg)
+                return None, 0, error_msg
             response.raise_for_status()
-
             result = response.json()
-            return result['choices'][0]['message']['content'].strip()
-
+            text = result["choices"][0]["message"]["content"].strip()
+            tokens = result.get("usage", {}).get("total_tokens", 0)
+            return text, tokens, None
         except Exception as e:
-            error_msg = f"Grok API error: {str(e)}"
-            logger.error(error_msg)
-            # Include detailed error info for debugging
-            if hasattr(e, 'response'):
+            logger.error("Grok API error: %s", e)
+            if hasattr(e, "response"):
                 try:
-                    error_detail = e.response.json()
-                    logger.error(f"Grok API response detail: {error_detail}")
-                except Exception as je:
-                    logger.error(f"Could not parse response JSON: {str(je)}")
-            return f"Error: {str(e)}"
+                    logger.error("Grok API response detail: %s", e.response.json())
+                except Exception:
+                    pass
+            return None, 0, str(e)
 
     def get_provider_name(self) -> str:
         return f"xAI ({self.model})"

@@ -1,9 +1,7 @@
-```typescript
 'use client';
 
 import { useEffect, useState, useRef, useCallback } from 'react';
-import type { SSEEvent, SSEEventType, AgentStatusEvent, AlertEvent, JobCompleteEvent, PriceUpdateEvent } from '@/lib/types';
-import type { AlertSoundSettings } from '@/lib/types';
+import type { SSEEvent, SSEEventType, AgentStatusEvent, AlertEvent, JobCompleteEvent, PriceUpdateEvent, AlertSoundSettings, AlertSoundType } from '@/lib/types';
 import { getAlertSoundSettings } from '@/lib/api';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? '';
@@ -20,15 +18,39 @@ interface SSEState {
   announcement: { assertive: string; polite: string };
 }
 
-function playAlertSound(settings: AlertSoundSettings): void {
+function synthesizeTone(soundType: 'chime' | 'alarm', volume: number): void {
+  try {
+    type WebKitWindow = Window & { webkitAudioContext?: typeof AudioContext };
+    const AudioCtx = window.AudioContext || (window as WebKitWindow).webkitAudioContext;
+    if (!AudioCtx) return;
+    const ctx = new AudioCtx();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    gain.gain.value = Math.max(0, Math.min(1, volume / 100));
+    if (soundType === 'alarm') {
+      osc.frequency.value = 880;
+      osc.type = 'sawtooth';
+    } else {
+      osc.frequency.value = 523;
+      osc.type = 'sine';
+    }
+    const duration = soundType === 'alarm' ? 0.6 : 0.35;
+    osc.start();
+    osc.stop(ctx.currentTime + duration);
+    osc.onended = () => { ctx.close(); };
+  } catch {
+    // Audio not available; fail silently.
+  }
+}
+
+function playAlertSound(settings: AlertSoundSettings, alertSoundType: AlertSoundType): void {
   if (!settings.enabled) return;
   if (settings.mute_when_active && document.hasFocus()) return;
-
-  const audio = new Audio(`/sounds/${settings.sound_type}.mp3`);
-  audio.volume = settings.volume / 100;
-  audio.play().catch(() => {
-    // Ignore autoplay errors (e.g. browser policy requires user gesture)
-  });
+  const resolved = alertSoundType === 'default' ? settings.sound_type : alertSoundType;
+  if (resolved === 'silent') return;
+  synthesizeTone(resolved, settings.volume);
 }
 
 export function useSSE() {
@@ -116,8 +138,11 @@ export function useSSE() {
         es.addEventListener(type, (event: MessageEvent) => {
           if (!mountedRef.current) return;
           try {
-            const data = JSON.parse(event.data);
-            handleEvent({ type, data, timestamp: new Date().toISOString() });
+            const data = JSON.parse(event.data) as Record<string, unknown>;
+            // Prefer the server-supplied timestamp so display matches server clock.
+            // Fall back to client time only when the payload omits it (VO-792).
+            const serverTs = typeof data.timestamp === 'string' ? data.timestamp : new Date().toISOString();
+            handleEvent({ type, data, timestamp: serverTs });
           } catch {
             // Ignore malformed events
           }
@@ -187,7 +212,7 @@ export function useSSE() {
         case 'alert': {
           const alertEvent = event.data as unknown as AlertEvent;
           next.recentAlerts = [alertEvent, ...prev.recentAlerts].slice(0, 50);
-          playAlertSound(soundSettingsRef.current);
+          playAlertSound(soundSettingsRef.current, alertEvent.sound_type ?? 'default');
           break;
         }
         case 'job_complete': {
@@ -239,4 +264,3 @@ export function useSSE() {
 
   return state;
 }
-```

@@ -1,4 +1,3 @@
-```typescript
 'use client';
 
 import { useState, useCallback } from 'react';
@@ -39,8 +38,9 @@ export function useChartTimeframe(
 /**
  * Array variant of `useChartTimeframe` — reads/writes an ordered list of
  * timeframe selections persisted as a JSON array.
- * Unknown values are silently dropped on read; if the resulting list would be
- * empty the defaults are restored instead.
+ * Unknown values are silently dropped on read; the resulting list is clamped
+ * to min 2 / max 4 entries. If fewer than 2 valid values remain the defaults
+ * are restored instead.
  */
 export function useChartTimeframes(
   storageKey: string,
@@ -54,10 +54,10 @@ export function useChartTimeframes(
       if (!raw) return defaultTimeframes;
       const parsed: unknown = JSON.parse(raw);
       if (!Array.isArray(parsed)) return defaultTimeframes;
-      const valid = parsed.filter((v): v is Timeframe =>
-        validTimeframes.includes(v as Timeframe),
-      );
-      return valid.length > 0 ? valid : defaultTimeframes;
+      const valid = parsed
+        .filter((v): v is Timeframe => validTimeframes.includes(v as Timeframe))
+        .slice(0, 4); // clamp to max 4
+      return valid.length >= 2 ? valid : defaultTimeframes; // enforce min 2
     } catch {
       return defaultTimeframes;
     }
@@ -65,12 +65,12 @@ export function useChartTimeframes(
 
   const setTimeframes = useCallback(
     (tfs: Timeframe[]) => {
-      localStorage.setItem(storageKey, JSON.stringify(tfs));
-      setTimeframesState(tfs);
+      const clamped = tfs.slice(0, 4); // clamp to max 4
+      localStorage.setItem(storageKey, JSON.stringify(clamped));
+      setTimeframesState(clamped);
     },
     [storageKey],
   );
 
   return [timeframes, setTimeframes];
 }
-```

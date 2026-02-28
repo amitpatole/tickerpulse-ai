@@ -12,6 +12,7 @@ import {
   type Time,
 } from 'lightweight-charts';
 import type { ComparisonSeries, Timeframe } from '@/lib/types';
+import TimeframeToggle, { COMPARISON_TIMEFRAMES } from './TimeframeToggle';
 
 const COMPARISON_PALETTE = ['#f59e0b', '#10b981', '#ef4444', '#8b5cf6'];
 const PRIMARY_COLOR = '#3b82f6';
@@ -20,12 +21,14 @@ interface ComparisonChartProps {
   series: ComparisonSeries[];
   height?: number;
   timeframe: Timeframe;
+  onTimeframeChange?: (tf: Timeframe) => void;
 }
 
 export default function ComparisonChart({
   series,
   height = 320,
   timeframe,
+  onTimeframeChange,
 }: ComparisonChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -146,40 +149,53 @@ export default function ComparisonChart({
 
   return (
     <div>
-      {/* Legend */}
-      <div className="mb-3 flex flex-wrap gap-3">
-        {primarySeries && (
-          <div className="flex items-center gap-1.5">
-            <span
-              className="inline-block h-2 w-6 rounded-full"
-              style={{ backgroundColor: PRIMARY_COLOR }}
-            />
-            <span className="text-xs font-medium text-white">{primarySeries.ticker}</span>
-            <span className="text-xs text-slate-400">(base)</span>
-          </div>
-        )}
-        {comparisonSeries.map((s, idx) => {
-          const color = COMPARISON_PALETTE[idx % COMPARISON_PALETTE.length];
-          const sign = s.delta_pct >= 0 ? '+' : '';
-          return (
-            <div key={s.ticker} className="flex items-center gap-1.5">
+      {/* Header: legend + timeframe toggle */}
+      <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+        {/* Legend */}
+        <div className="flex flex-wrap gap-3">
+          {primarySeries && (
+            <div className="flex items-center gap-1.5">
               <span
                 className="inline-block h-2 w-6 rounded-full"
-                style={{ backgroundColor: color }}
+                style={{ backgroundColor: PRIMARY_COLOR }}
               />
-              <span className="text-xs font-medium text-white">{s.ticker}</span>
-              {s.error ? (
-                <span className="text-xs text-red-400">(error)</span>
-              ) : (
-                <span
-                  className={`text-xs ${s.delta_pct >= 0 ? 'text-emerald-400' : 'text-red-400'}`}
-                >
-                  {sign}{s.delta_pct.toFixed(2)}% vs {primarySeries?.ticker}
-                </span>
-              )}
+              <span className="text-xs font-medium text-white">{primarySeries.ticker}</span>
+              <span className="text-xs text-slate-400">(base)</span>
             </div>
-          );
-        })}
+          )}
+          {comparisonSeries.map((s, idx) => {
+            const color = COMPARISON_PALETTE[idx % COMPARISON_PALETTE.length];
+            const sign = s.delta_pct >= 0 ? '+' : '';
+            return (
+              <div key={s.ticker} className="flex items-center gap-1.5">
+                <span
+                  className="inline-block h-2 w-6 rounded-full"
+                  style={{ backgroundColor: color }}
+                />
+                <span className="text-xs font-medium text-white">{s.ticker}</span>
+                {s.error ? (
+                  <span className="text-xs text-red-400">(error)</span>
+                ) : (
+                  <span
+                    className={`text-xs ${s.delta_pct >= 0 ? 'text-emerald-400' : 'text-red-400'}`}
+                  >
+                    {sign}{s.delta_pct.toFixed(2)}% vs {primarySeries?.ticker}
+                  </span>
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Timeframe selector */}
+        {onTimeframeChange && (
+          <TimeframeToggle
+            selected={timeframe}
+            onChange={onTimeframeChange}
+            timeframes={COMPARISON_TIMEFRAMES}
+            compact
+          />
+        )}
       </div>
 
       {/* Y-axis label */}

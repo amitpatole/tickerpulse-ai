@@ -1,7 +1,7 @@
-```tsx
 import React, { Component, ReactNode } from 'react';
 import ToastContainer from './ToastContainer';
 import { captureReactError } from '@/lib/errorReporter';
+import { ApiError } from '@/lib/api';
 
 interface ErrorBoundaryProps {
   children: ReactNode;
@@ -38,7 +38,8 @@ export default class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBo
 
   componentDidCatch(error: Error, info: React.ErrorInfo): void {
     console.error('[ErrorBoundary] Caught render error:', error.message, info.componentStack);
-    captureReactError(error, info.componentStack ?? '');
+    const code = error instanceof ApiError ? error.code : undefined;
+    captureReactError(error, info.componentStack ?? '', { code });
   }
 
   private handleRetry = (): void => {
@@ -76,4 +77,3 @@ export default class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBo
     );
   }
 }
-```

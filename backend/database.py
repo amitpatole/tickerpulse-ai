@@ -1,4 +1,3 @@
-```python
 
 """
 TickerPulse AI v3.0 - Database Connection Manager
@@ -306,6 +305,31 @@ def batch_upsert_ai_ratings(
         rows.append(row)
     update_cols = [c for c in columns if c != "ticker"]
     return batch_upsert(conn, "ai_ratings", rows, ["ticker"], update_cols)
+
+
+def batch_delete(
+    conn: sqlite3.Connection,
+    table: str,
+    where_col: str,
+    values: List[Any],
+) -> int:
+    """Delete rows where *where_col* matches any value in *values*.
+
+    Parameters
+    ----------
+    conn:      Open connection from ``pooled_session`` / ``db_session``.
+    table:     Target table name (trusted static strings only).
+    where_col: Column to match against *values*.
+    values:    Sequence of values to delete; empty sequence is a no-op.
+
+    Returns the cursor ``rowcount``.
+    """
+    if not values:
+        return 0
+    placeholders = ", ".join("?" * len(values))
+    sql = f"DELETE FROM {table} WHERE {where_col} IN ({placeholders})"
+    cursor = conn.execute(sql, list(values))
+    return cursor.rowcount
 
 
 def batch_upsert_earnings(
@@ -653,6 +677,27 @@ _NEW_TABLES_SQL = [
         updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     )
     """,
+    """
+    CREATE TABLE IF NOT EXISTS comparison_runs (
+        id         TEXT PRIMARY KEY,
+        prompt     TEXT NOT NULL,
+        ticker     TEXT,
+        status     TEXT NOT NULL DEFAULT 'pending',
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS comparison_results (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        run_id        TEXT NOT NULL REFERENCES comparison_runs(id) ON DELETE CASCADE,
+        provider_name TEXT NOT NULL,
+        model         TEXT,
+        response      TEXT,
+        tokens_used   INTEGER NOT NULL DEFAULT 0,
+        latency_ms    INTEGER NOT NULL DEFAULT 0,
+        error         TEXT
+    )
+    """,
 ]
 
 _INDEXES_SQL = [
@@ -686,6 +731,13 @@ _INDEXES_SQL = [
     "CREATE INDEX IF NOT EXISTS idx_perf_snapshots_recorded_at ON perf_snapshots (recorded_at)",
     "CREATE UNIQUE INDEX IF NOT EXISTS idx_api_log_endpoint_date ON api_request_log (endpoint, method, status_class, log_date)",
     "CREATE INDEX IF NOT EXISTS idx_ui_state_updated ON ui_state (updated_at DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_comparison_runs_created    ON comparison_runs (created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_comparison_results_run_id  ON comparison_results (run_id)",
+    # Hot-path indexes added in v3.1
+    "CREATE INDEX IF NOT EXISTS idx_agent_runs_started_at      ON agent_runs (started_at DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_earnings_events_date_ticker ON earnings_events (earnings_date, ticker)",
+    "CREATE INDEX IF NOT EXISTS idx_api_request_log_ts          ON api_request_log (log_date DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_error_log_ts                ON error_log (created_at DESC)",
 ]
 
 
@@ -903,4 +955,3 @@ def init_all_tables(db_path: str | None = None) -> None:
         raise
     finally:
         conn.close()
-```

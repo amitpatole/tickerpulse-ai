@@ -1,4 +1,3 @@
-```python
 """
 TickerPulse AI v3.0 - Central Configuration
 All settings are driven by environment variables with sensible defaults.
@@ -182,4 +181,3 @@ class Config:
     # Set WS_PRICE_BROADCAST=false to disable WS broadcasting without stopping
     # the SSE price_update feed.
     WS_PRICE_BROADCAST: bool = os.getenv('WS_PRICE_BROADCAST', 'true').lower() == 'true'
-```

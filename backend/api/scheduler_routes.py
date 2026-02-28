@@ -1,4 +1,3 @@
-```python
 """
 Scheduler REST API routes.
 
@@ -422,6 +421,123 @@ def job_execution_history():
 
 
 # -----------------------------------------------------------------------
+# Scheduler cost aggregation
+# -----------------------------------------------------------------------
+
+@scheduler_bp.route('/costs', methods=['GET'])
+def get_scheduler_costs() -> tuple:
+    """Aggregate agent run costs by agent_name over a configurable window.
+    ---
+    tags:
+      - Scheduler
+    summary: Get scheduler cost summary
+    parameters:
+      - in: query
+        name: days
+        type: integer
+        required: false
+        default: 30
+        description: Look-back window in days (1–90).
+    responses:
+      200:
+        description: Per-agent cost aggregates for the requested window.
+      400:
+        description: Invalid days parameter.
+    """
+    raw_days = request.args.get('days', 30)
+    try:
+        days = int(raw_days)
+    except (ValueError, TypeError):
+        return jsonify({'error': 'days must be an integer.'}), 400
+    if not (1 <= days <= 90):
+        return jsonify({'error': 'days must be between 1 and 90.'}), 400
+
+    try:
+        import sqlite3
+        from backend.config import Config
+        conn = sqlite3.connect(Config.DB_PATH)
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            '''
+            SELECT
+                agent_name,
+                COUNT(*) AS run_count,
+                COALESCE(SUM(estimated_cost), 0.0) AS total_cost,
+                COALESCE(SUM(COALESCE(tokens_input, 0) + COALESCE(tokens_output, 0)), 0) AS total_tokens
+            FROM agent_runs
+            WHERE started_at >= datetime('now', ? || ' days')
+            GROUP BY agent_name
+            ORDER BY total_cost DESC
+            ''',
+            (f'-{days}',),
+        ).fetchall()
+        conn.close()
+        return jsonify({'costs': [dict(r) for r in rows], 'period_days': days})
+    except Exception as exc:
+        logger.exception("Failed to aggregate scheduler costs: %s", exc)
+        return jsonify({'error': 'Internal server error'}), 500
+
+
+@scheduler_bp.route('/jobs/<job_id>/runs', methods=['GET'])
+def get_job_runs(job_id: str) -> tuple:
+    """Return recent agent_runs for a given job, matched by agent_name == job_id.
+    ---
+    tags:
+      - Scheduler
+    summary: Get run history for a specific job
+    parameters:
+      - name: job_id
+        in: path
+        type: string
+        required: true
+      - in: query
+        name: limit
+        type: integer
+        required: false
+        default: 50
+        description: Maximum records to return (capped at 200).
+    responses:
+      200:
+        description: Run history for the job.
+      400:
+        description: Invalid job_id or limit.
+    """
+    ok, err = validate_job_id(job_id)
+    if not ok:
+        return jsonify({'error': err}), 400
+
+    raw_limit = request.args.get('limit', 50)
+    try:
+        limit = min(int(raw_limit), 200)
+    except (ValueError, TypeError):
+        return jsonify({'error': 'limit must be an integer.'}), 400
+
+    try:
+        import sqlite3
+        from backend.config import Config
+        conn = sqlite3.connect(Config.DB_PATH)
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            '''
+            SELECT id, agent_name, status, output, error,
+                   duration_ms, tokens_input, tokens_output,
+                   estimated_cost, started_at, completed_at
+            FROM agent_runs
+            WHERE agent_name = ?
+            ORDER BY started_at DESC
+            LIMIT ?
+            ''',
+            (job_id, limit),
+        ).fetchall()
+        conn.close()
+        total = len(rows)
+        return jsonify({'runs': [dict(r) for r in rows], 'job_id': job_id, 'total': total})
+    except Exception as exc:
+        logger.exception("Failed to get runs for job %s: %s", job_id, exc)
+        return jsonify({'error': 'Internal server error'}), 500
+
+
+# -----------------------------------------------------------------------
 # Known agents — registry listing
 # -----------------------------------------------------------------------
 
@@ -645,6 +761,12 @@ def update_agent_schedule(schedule_id: int) -> tuple:
     if not updates:
         return jsonify({'error': 'No valid fields to update.'}), 400
 
+    if 'label' in updates:
+        label_stripped = str(updates['label']).strip()
+        if not label_stripped:
+            return jsonify({'error': 'label must not be empty.'}), 400
+        updates['label'] = label_stripped
+
     if 'trigger' in updates and updates['trigger'] not in ('cron', 'interval'):
         return jsonify({'error': 'trigger must be "cron" or "interval".'}), 400
 
@@ -656,14 +778,20 @@ def update_agent_schedule(schedule_id: int) -> tuple:
             if not ok:
                 return jsonify({'error': err}), 400
 
-    # Pre-compute which cases need the cross-validation DB read and whether
-    # trigger_args needs to be JSON-serialised.  Both are resolved inside the
-    # critical section below so that no other writer can change the row between
-    # the validation read and the UPDATE (Race B).
+    # Pre-compute which cases need a DB validation read and whether trigger_args
+    # needs to be JSON-serialised.  All reads happen inside the critical section
+    # to avoid TOCTOU (Race B).
     needs_cross_validation = 'trigger' in updates and 'trigger_args' not in updates
     trigger_args_provided = 'trigger_args' in updates
 
+    # When only trigger_args change (no trigger in payload), validate the new
+    # args against the *current* trigger type stored in the DB.  Without this
+    # check an empty {} payload would be persisted silently.
+    needs_args_only_validation = trigger_args_provided and 'trigger' not in updates
+
+    trigger_args_raw: dict | None = None
     if trigger_args_provided:
+        trigger_args_raw = dict(updates['trigger_args'])  # raw copy for DB-side validation
         updates['trigger_args'] = json.dumps(updates['trigger_args'])
 
     if 'enabled' in updates:
@@ -703,6 +831,22 @@ def update_agent_schedule(schedule_id: int) -> tuple:
                                 "Provide trigger_args alongside trigger."
                             ),
                         }), 400
+
+                if needs_args_only_validation:
+                    # Caller supplied new trigger_args but no trigger change.
+                    # Validate the new args against the current trigger type to
+                    # prevent silent storage of semantically-empty schedules.
+                    existing_trigger_row = conn.execute(
+                        'SELECT trigger FROM agent_schedules WHERE id = ?',
+                        (schedule_id,),
+                    ).fetchone()
+                    if not existing_trigger_row:
+                        return jsonify({'error': f'Schedule {schedule_id} not found.'}), 404
+                    ok, err = validate_trigger_args(
+                        existing_trigger_row['trigger'], trigger_args_raw
+                    )
+                    if not ok:
+                        return jsonify({'error': err}), 400
 
                 result = conn.execute(
                     f'UPDATE agent_schedules SET {set_clause}, updated_at = CURRENT_TIMESTAMP'
@@ -799,4 +943,3 @@ def trigger_agent_schedule(schedule_id: int) -> tuple:
             'message': f'Job {job_id} triggered for immediate execution.',
         })
     return jsonify({'success': False, 'error': f'Failed to trigger job: {job_id}'}), 400
-```

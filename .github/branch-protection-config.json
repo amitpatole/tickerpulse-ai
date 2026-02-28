@@ -1,7 +1,15 @@
 {
   "required_status_checks": {
     "strict": true,
-    "contexts": ["backend-test", "frontend-test", "build-windows-pr", "staging-smoke"]
+    "contexts": [
+      "CI / Backend Tests (Python 3.12)",
+      "CI / Frontend Tests (Node 24)",
+      "CI / Electron Tests (Node 24)",
+      "CI / Windows Build Check (PR)",
+      "CI / Backend Lint & Type-Check (Python 3.12)",
+      "CI / Frontend Lint & Type-Check (Node 24)",
+      "PR Lint / Conventional Commit PR Title"
+    ]
   },
   "enforce_admins": true,
   "required_pull_request_reviews": {

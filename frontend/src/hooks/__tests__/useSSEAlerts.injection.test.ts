@@ -13,6 +13,7 @@ import { useSSEAlerts } from '../useSSEAlerts';
 import * as useSSEModule from '../useSSE';
 import * as toastBusModule from '@/lib/toastBus';
 import * as alertSoundModule from '@/lib/alertSound';
+import * as apiModule from '@/lib/api';
 import type { AlertEvent } from '@/lib/types';
 
 jest.mock('../useSSE');
@@ -24,6 +25,7 @@ describe('useSSEAlerts injection prevention', () => {
   const mockUseSSE = useSSEModule.useSSE as jest.Mock;
   const mockToast = toastBusModule.toast as jest.Mock;
   const mockPlayAlertSound = alertSoundModule.playAlertSound as jest.Mock;
+  const mockGetAlertSoundSettings = apiModule.getAlertSoundSettings as jest.Mock;
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -36,6 +38,12 @@ describe('useSSEAlerts injection prevention', () => {
 
     mockToast.mockImplementation(() => {});
     mockPlayAlertSound.mockImplementation(() => {});
+    mockGetAlertSoundSettings.mockResolvedValue({
+      enabled: true,
+      sound_type: 'chime',
+      volume: 70,
+      mute_when_active: false,
+    });
   });
 
   afterEach(() => {
@@ -134,7 +142,7 @@ describe('useSSEAlerts injection prevention', () => {
   });
 
   describe('error cases — malicious alert properties', () => {
-    it('should handle alert with XSS attempt in message', () => {
+    it('should HTML-encode XSS attempt in message before passing to toast', () => {
       const alertEvent: AlertEvent = {
         ticker: 'AAPL',
         message: '<img src=x onerror="alert(1)">',
@@ -156,14 +164,14 @@ describe('useSSEAlerts injection prevention', () => {
       const { rerender } = renderHook(() => useSSEAlerts());
       rerender();
 
-      // Toast should be called with the raw message (toast library handles escaping)
+      // Hook sanitizes before passing to toast: HTML special chars are encoded
       expect(mockToast).toHaveBeenCalledWith(
-        'AAPL: <img src=x onerror="alert(1)">',
+        'AAPL: &lt;img src=x onerror=&quot;alert(1)&quot;&gt;',
         'info'
       );
     });
 
-    it('should handle alert with SQL injection attempt in message', () => {
+    it('should HTML-encode apostrophe in SQL injection attempt in message', () => {
       const alertEvent: AlertEvent = {
         ticker: 'TSLA',
         message: "'; DELETE FROM alerts; --",
@@ -185,8 +193,111 @@ describe('useSSEAlerts injection prevention', () => {
       const { rerender } = renderHook(() => useSSEAlerts());
       rerender();
 
+      // Single quote is encoded as &#x27;
       expect(mockToast).toHaveBeenCalledWith(
-        "TSLA: '; DELETE FROM alerts; --",
+        "TSLA: &#x27;; DELETE FROM alerts; --",
+        'info'
+      );
+    });
+  });
+
+  describe('sanitization — ticker and message encoding', () => {
+    it('should HTML-encode XSS attempt in ticker field', () => {
+      const alertEvent: AlertEvent = {
+        ticker: '<img onerror="alert(1)">',
+        message: 'price alert triggered',
+        sound_type: 'chime',
+        type: 'price_alert',
+        severity: 'high',
+        alert_id: 1,
+        condition_type: 'price_above',
+        threshold: 150.0,
+        current_price: 151.5,
+        fire_count: 1,
+      };
+
+      mockUseSSE.mockReturnValue({
+        recentAlerts: [alertEvent],
+        connected: true,
+      });
+
+      const mockShowNotification = jest.fn();
+      (window as any).tickerpulse = { showNotification: mockShowNotification };
+
+      const { rerender } = renderHook(() => useSSEAlerts());
+      rerender();
+
+      const escapedTicker = '&lt;img onerror=&quot;alert(1)&quot;&gt;';
+      expect(mockToast).toHaveBeenCalledWith(
+        `${escapedTicker}: price alert triggered`,
+        'info'
+      );
+      expect(mockShowNotification).toHaveBeenCalledWith(
+        escapedTicker,
+        'price alert triggered'
+      );
+
+      delete (window as any).tickerpulse;
+    });
+
+    it('should truncate message longer than 200 characters before notification', () => {
+      const longMessage = 'A'.repeat(300);
+      const alertEvent: AlertEvent = {
+        ticker: 'AAPL',
+        message: longMessage,
+        sound_type: 'chime',
+        type: 'price_alert',
+        severity: 'high',
+        alert_id: 1,
+        condition_type: 'price_above',
+        threshold: 150.0,
+        current_price: 151.5,
+        fire_count: 1,
+      };
+
+      mockUseSSE.mockReturnValue({
+        recentAlerts: [alertEvent],
+        connected: true,
+      });
+
+      const mockShowNotification = jest.fn();
+      (window as any).tickerpulse = { showNotification: mockShowNotification };
+
+      const { rerender } = renderHook(() => useSSEAlerts());
+      rerender();
+
+      const truncated = 'A'.repeat(200);
+      expect(mockToast).toHaveBeenCalledWith(`AAPL: ${truncated}`, 'info');
+      expect(mockShowNotification).toHaveBeenCalledWith('AAPL', truncated);
+
+      delete (window as any).tickerpulse;
+    });
+
+    it('should strip control characters (newlines) from message', () => {
+      const alertEvent: AlertEvent = {
+        ticker: 'AAPL',
+        message: 'line one\ninjected: second line\r\nthird',
+        sound_type: 'chime',
+        type: 'price_alert',
+        severity: 'high',
+        alert_id: 1,
+        condition_type: 'price_above',
+        threshold: 150.0,
+        current_price: 151.5,
+        fire_count: 1,
+      };
+
+      mockUseSSE.mockReturnValue({
+        recentAlerts: [alertEvent],
+        connected: true,
+      });
+
+      const { rerender } = renderHook(() => useSSEAlerts());
+      rerender();
+
+      // \n and \r are stripped; the rest is preserved and HTML-encoded
+      expect(mockToast).toHaveBeenCalledWith(
+        'AAPL: line oneinjected: second linethird',
         'info'
       );
     });
@@ -355,10 +466,36 @@ describe('useSSEAlerts injection prevention', () => {
       // Should fall through to default (global sound_type)
       expect(mockPlayAlertSound).toHaveBeenCalledWith('chime', expect.any(Number));
     });
+
+    it("should fall back to global sound_type for 'rm -rf' shell-injection sound_type", () => {
+      const alertEvent: AlertEvent = {
+        ticker: 'AAPL',
+        message: 'price alert',
+        sound_type: 'rm -rf' as any,
+        type: 'price_alert',
+        severity: 'high',
+        alert_id: 1,
+        condition_type: 'price_above',
+        threshold: 150.0,
+        current_price: 151.5,
+        fire_count: 1,
+      };
+
+      mockUseSSE.mockReturnValue({
+        recentAlerts: [alertEvent],
+        connected: true,
+      });
+
+      const { rerender } = renderHook(() => useSSEAlerts());
+      rerender();
+
+      // 'rm -rf' not in VALID_SOUND_TYPES → falls back to 'default' → global 'chime'
+      expect(mockPlayAlertSound).toHaveBeenCalledWith('chime', expect.any(Number));
+    });
   });
 
   describe('acceptance criteria: defense-in-depth validation', () => {
-    it('AC1: Alert processing does not execute or interpret injected content', () => {
+    it('AC1: Alert processing sanitizes injected content before output', () => {
       const mockShowNotification = jest.fn();
       (window as any).tickerpulse = {
         showNotification: mockShowNotification,
@@ -366,6 +503,7 @@ describe('useSSEAlerts injection prevention', () => {
 
       const evilAlert: AlertEvent = {
         ticker: 'AAPL',
+        // \n is a control char — stripped; remaining text is HTML-encoded
         message: 'data: fake_event\nalert_id: 999',
         sound_type: 'eval("dangerous")',
         type: 'price_alert',
@@ -385,14 +523,14 @@ describe('useSSEAlerts injection prevention', () => {
       const { rerender } = renderHook(() => useSSEAlerts());
       rerender();
 
-      // Toast and notification should use the values as-is (library handles escaping)
+      // \n stripped → 'data: fake_eventalert_id: 999' (no HTML special chars remain)
       expect(mockToast).toHaveBeenCalledWith(
-        'AAPL: data: fake_event\nalert_id: 999',
+        'AAPL: data: fake_eventalert_id: 999',
         'info'
       );
       expect(mockShowNotification).toHaveBeenCalledWith(
         'AAPL',
-        'data: fake_event\nalert_id: 999'
+        'data: fake_eventalert_id: 999'
       );
 
       delete (window as any).tickerpulse;

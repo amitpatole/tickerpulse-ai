@@ -9,7 +9,6 @@ import {
   Bot,
   Filter,
   Play,
-  Download,
   CheckSquare,
   Square,
   ChevronLeft,
@@ -21,29 +20,23 @@ import { useApi } from '@/hooks/useApi';
 import {
   getResearchBriefs,
   generateResearchBrief,
+  getResearchBrief,
   getStocks,
   exportBriefs,
   getExportCapabilities,
+  getAllBriefIds,
 } from '@/lib/api';
 import type {
   ResearchBrief,
+  KeyMetrics,
   Stock,
   ExportFormat,
   ResearchBriefsResponse,
   ExportCapabilities,
 } from '@/lib/types';
 import Toast from '@/components/ui/Toast';
-
-function formatDate(dateStr: string): string {
-  const date = new Date(dateStr);
-  return date.toLocaleDateString(undefined, {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
-}
+import { formatLocalDate } from '@/lib/formatTime';
+import ExportToolbar from '@/components/research/ExportToolbar';
 
 function escapeHtml(text: string): string {
   return text
@@ -84,6 +77,59 @@ function MarkdownContent({ content }: { content: string }) {
 
 const PAGE_SIZE = 25;
 
+function KeyMetricsPanel({ metrics }: { metrics: KeyMetrics }) {
+  const items: [string, string][] = [];
+
+  if (metrics.price != null) {
+    const change = metrics.change_pct;
+    const sign = change != null && change >= 0 ? '+' : '';
+    const changeStr = change != null ? ` (${sign}${change.toFixed(2)}%)` : '';
+    items.push(['Price', `$${metrics.price.toFixed(2)}${changeStr}`]);
+  }
+  if (metrics.rsi != null) {
+    const rsiLabel = metrics.rsi > 70 ? 'Overbought' : metrics.rsi < 30 ? 'Oversold' : 'Neutral';
+    items.push(['RSI', `${metrics.rsi.toFixed(1)} · ${rsiLabel}`]);
+  }
+  if (metrics.rating) {
+    items.push(['Rating', metrics.rating]);
+  }
+  if (metrics.score != null) {
+    items.push(['AI Score', `${metrics.score.toFixed(1)}/10`]);
+  }
+  if (metrics.sentiment_label) {
+    items.push(['Sentiment', metrics.sentiment_label]);
+  }
+
+  if (items.length === 0) return null;
+
+  return (
+    <div className="mb-4 rounded-lg border border-blue-500/20 bg-blue-500/5 p-3">
+      <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-blue-400/70">
+        Key Metrics
+      </p>
+      <div className="grid grid-cols-2 gap-x-4 gap-y-2 sm:grid-cols-3">
+        {items.map(([label, value]) => (
+          <div key={label}>
+            <p className="text-[10px] font-medium text-slate-500">{label}</p>
+            <p className="text-xs font-semibold text-slate-200">{value}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function SummaryCallout({ summary }: { summary: string }) {
+  return (
+    <div className="mb-4 rounded-lg border border-slate-600/40 bg-slate-900/60 p-3">
+      <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+        Executive Summary
+      </p>
+      <p className="text-sm italic leading-relaxed text-slate-300">{summary}</p>
+    </div>
+  );
+}
+
 export default function ResearchPage() {
   const [selectedBrief, setSelectedBrief] = useState<ResearchBrief | null>(null);
   const [filterTicker, setFilterTicker] = useState('');
@@ -93,16 +139,19 @@ export default function ResearchPage() {
 
   // Batch-export selection state — Set<number> persists across page changes
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
-  const [exportFormat, setExportFormat] = useState<ExportFormat>('zip');
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
+  const [selectingAll, setSelectingAll] = useState(false);
+
+  // Full brief loaded on selection — includes key_metrics from ai_ratings
+  const [detailBrief, setDetailBrief] = useState<ResearchBrief | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
 
   // Indeterminate ref for select-all checkbox
   const selectAllRef = useRef<HTMLInputElement>(null);
 
-  // PDF availability from capabilities endpoint
+  // Export capabilities (PDF availability etc.)
   const { data: capabilities } = useApi<ExportCapabilities>(getExportCapabilities, []);
-  const pdfAvailable = capabilities?.formats.pdf.available !== false;
 
   const { data: briefsPage, loading, error, refetch } = useApi<ResearchBriefsResponse>(
     () => getResearchBriefs(filterTicker || undefined, currentPage, PAGE_SIZE),
@@ -168,13 +217,40 @@ export default function ResearchPage() {
     });
   };
 
+  const handleSelectAll = async () => {
+    setSelectingAll(true);
+    try {
+      const { ids } = await getAllBriefIds(filterTicker || undefined);
+      setSelectedIds(new Set(ids));
+    } catch {
+      setExportError('Failed to fetch all brief IDs');
+    } finally {
+      setSelectingAll(false);
+    }
+  };
+
+  const loadBriefDetail = async (brief: ResearchBrief) => {
+    setSelectedBrief(brief);
+    setDetailBrief(null);
+    setDetailLoading(true);
+    try {
+      const full = await getResearchBrief(brief.id);
+      setDetailBrief(full);
+    } catch {
+      // Fall back to the list brief (no key_metrics)
+      setDetailBrief(brief);
+    } finally {
+      setDetailLoading(false);
+    }
+  };
+
   const handleGenerate = async () => {
     setGenerating(true);
     setGenError(null);
     try {
       const brief = await generateResearchBrief(filterTicker || undefined);
       await refetch();
-      setSelectedBrief(brief);
+      await loadBriefDetail(brief);
       setGenerating(false);
     } catch (err) {
       setGenError(err instanceof Error ? err.message : 'Failed to generate brief');
@@ -182,14 +258,12 @@ export default function ResearchPage() {
     }
   };
 
-  const handleExport = async () => {
+  const handleExport = async (format: ExportFormat) => {
     if (selectedIds.size === 0 || selectedIds.size > 100 || exporting) return;
     setExporting(true);
     setExportError(null);
     try {
-      const blob = await exportBriefs([...selectedIds], exportFormat);
-      const today = new Date().toISOString().slice(0, 10);
-      const filename = `research-brief-export-${today}.${exportFormat}`;
+      const { blob, filename } = await exportBriefs([...selectedIds], format);
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -202,19 +276,6 @@ export default function ResearchPage() {
       setExporting(false);
     }
   };
-
-  const exportDisabled = selectedIds.size === 0 || selectedIds.size > 100 || exporting;
-  const exportTitle =
-    selectedIds.size > 100
-      ? 'Max 100 briefs per export'
-      : selectedIds.size === 0
-      ? 'Select briefs to export'
-      : `Export ${selectedIds.size} brief${selectedIds.size !== 1 ? 's' : ''}`;
-  const exportAriaLabel = exporting
-    ? 'Exporting, please wait'
-    : selectedIds.size === 0
-      ? 'Export briefs, none selected'
-      : `Export ${selectedIds.size} brief${selectedIds.size === 1 ? '' : 's'} as ${exportFormat.toUpperCase()}`;
 
   return (
     <div className="flex flex-col">
@@ -236,6 +297,7 @@ export default function ResearchPage() {
               onChange={(e) => {
                 setFilterTicker(e.target.value);
                 setSelectedBrief(null);
+                setDetailBrief(null);
                 setSelectedIds(new Set());
                 setCurrentPage(1);
               }}
@@ -311,50 +373,42 @@ export default function ResearchPage() {
                 {selectedIds.size > 0 ? `${selectedIds.size} brief${selectedIds.size === 1 ? '' : 's'} selected` : ''}
               </span>
 
+              {/* Cross-page "select all N" affordance — shown when current page is fully selected
+                  and there are more briefs on other pages not yet in the selection */}
+              {allPageSelected && totalBriefs > pageIds.size && selectedIds.size < totalBriefs && (
+                <div className="border-b border-slate-700/50 bg-blue-500/5 px-4 py-2 text-center text-xs text-slate-300">
+                  All {pageIds.size} briefs on this page are selected.{' '}
+                  <button
+                    onClick={handleSelectAll}
+                    disabled={selectingAll}
+                    className="font-medium text-blue-400 hover:text-blue-300 underline underline-offset-2 disabled:opacity-50"
+                  >
+                    {selectingAll ? 'Selecting…' : `Select all ${totalBriefs} briefs`}
+                  </button>
+                </div>
+              )}
+
+              {/* Dismiss: when all briefs are selected show a clear option */}
+              {selectedIds.size === totalBriefs && totalBriefs > pageIds.size && (
+                <div className="border-b border-slate-700/50 bg-blue-500/5 px-4 py-2 text-center text-xs text-slate-300">
+                  All {totalBriefs} briefs are selected.{' '}
+                  <button
+                    onClick={() => setSelectedIds(new Set())}
+                    className="font-medium text-blue-400 hover:text-blue-300 underline underline-offset-2"
+                  >
+                    Clear selection
+                  </button>
+                </div>
+              )}
+
               {/* Batch export toolbar — visible when at least one brief is selected */}
               {selectedIds.size > 0 && (
-                <div role="toolbar" aria-label="Batch export" className="border-b border-slate-700/50 px-4 py-2.5 bg-slate-900/60 flex flex-wrap items-center gap-2">
-                  <select
-                    value={exportFormat}
-                    onChange={(e) => setExportFormat(e.target.value as ExportFormat)}
-                    className="rounded bg-slate-700 px-2 py-1 text-xs text-slate-200 outline-none border border-slate-600 focus:border-blue-500"
-                    aria-label="Export format"
-                  >
-                    <option value="zip">ZIP (.md files)</option>
-                    <option value="csv">CSV</option>
-                    <option
-                      value="pdf"
-                      disabled={!pdfAvailable}
-                      title={!pdfAvailable ? 'PDF export not available' : undefined}
-                    >
-                      PDF{!pdfAvailable ? ' (unavailable)' : ''}
-                    </option>
-                  </select>
-
-                  <button
-                    onClick={handleExport}
-                    disabled={exportDisabled}
-                    title={exportTitle}
-                    aria-label={exportAriaLabel}
-                    className={clsx(
-                      'flex items-center gap-1.5 rounded px-3 py-1 text-xs font-medium transition-colors',
-                      exportDisabled
-                        ? 'bg-slate-700 text-slate-500 cursor-not-allowed'
-                        : 'bg-blue-600 text-white hover:bg-blue-700'
-                    )}
-                  >
-                    {exporting ? (
-                      <Loader2 className="h-3 w-3 animate-spin" />
-                    ) : (
-                      <Download className="h-3 w-3" />
-                    )}
-                    {exporting ? 'Exporting…' : 'Export'}
-                  </button>
-
-                  {selectedIds.size > 100 && (
-                    <span className="text-xs text-amber-400">Max 100 briefs per export</span>
-                  )}
-                </div>
+                <ExportToolbar
+                  selectedIds={selectedIds}
+                  capabilities={capabilities ?? null}
+                  onExport={handleExport}
+                  exporting={exporting}
+                />
               )}
 
               <div className="max-h-[calc(100vh-320px)] overflow-y-auto">
@@ -407,7 +461,7 @@ export default function ResearchPage() {
 
                         {/* Row content — clicking opens detail view */}
                         <button
-                          onClick={() => setSelectedBrief(brief)}
+                          onClick={() => loadBriefDetail(brief)}
                           className="flex-1 text-left hover:bg-slate-700/10 rounded transition-colors"
                         >
                           <div className="flex items-center gap-2">
@@ -422,7 +476,7 @@ export default function ResearchPage() {
                           <p className="mt-1 text-sm text-slate-300 line-clamp-2">{brief.title}</p>
                           <div className="mt-1 flex items-center gap-1 text-[10px] text-slate-500">
                             <Calendar className="h-2.5 w-2.5" />
-                            {formatDate(brief.created_at)}
+                            {formatLocalDate(brief.created_at)}
                           </div>
                         </button>
                       </div>
@@ -483,10 +537,28 @@ export default function ResearchPage() {
                     </span>
                     <span className="flex items-center gap-1">
                       <Calendar className="h-3 w-3" />
-                      {formatDate(selectedBrief.created_at)}
+                      {formatLocalDate(selectedBrief.created_at)}
                     </span>
                   </div>
                 </div>
+
+                {/* Loading skeleton for detail fetch */}
+                {detailLoading && (
+                  <div className="mb-4 space-y-2">
+                    <div className="h-4 w-3/4 animate-pulse rounded bg-slate-700/40" />
+                    <div className="h-4 w-1/2 animate-pulse rounded bg-slate-700/40" />
+                  </div>
+                )}
+
+                {/* Key metrics panel — only available on full detail fetch */}
+                {!detailLoading && detailBrief?.key_metrics && (
+                  <KeyMetricsPanel metrics={detailBrief.key_metrics} />
+                )}
+
+                {/* Executive summary callout */}
+                {!detailLoading && (detailBrief?.summary ?? selectedBrief.summary) && (
+                  <SummaryCallout summary={(detailBrief?.summary ?? selectedBrief.summary)!} />
+                )}
 
                 <MarkdownContent content={selectedBrief.content} />
               </div>

@@ -1,9 +1,81 @@
 @import "tailwindcss";
 
+/* ---- Base theme variables (dark by default) -------------------------------- */
+
 :root {
   --background: #0f172a;
   --foreground: #e2e8f0;
 }
+
+/* ---- Light theme: remap Tailwind v4 slate CSS variables -------------------- *
+ *
+ * In Tailwind v4 every colour token is a CSS custom property
+ * (e.g. `bg-slate-950` → `background-color: var(--color-slate-950)`).
+ * Overriding those variables here flips the entire colour scheme without
+ * touching a single component file.
+ *
+ * Strategy: reverse the slate scale so the darkest backgrounds become the
+ * lightest, and the lightest text colours become the darkest.  Accent colours
+ * (emerald, red, blue …) are shifted one stop darker for adequate contrast
+ * on a light background.
+ * --------------------------------------------------------------------------- */
+
+html.light {
+  --background: #f8fafc;
+  --foreground: #0f172a;
+
+  /* Slate scale — reversed */
+  --color-slate-950: #f8fafc;
+  --color-slate-900: #f1f5f9;
+  --color-slate-800: #e2e8f0;
+  --color-slate-700: #cbd5e1;
+  --color-slate-600: #94a3b8;
+  --color-slate-500: #64748b;
+  --color-slate-400: #475569;
+  --color-slate-300: #334155;
+  --color-slate-200: #1e293b;
+  --color-slate-100: #0f172a;
+  --color-slate-50:  #020617;
+
+  /* white / black — so `text-white` renders as near-black on light backgrounds */
+  --color-white: #0f172a;
+  --color-black: #f8fafc;
+
+  /* Accent colours — shifted one stop darker for light-bg contrast */
+  --color-emerald-400: #059669;
+  --color-emerald-500: #047857;
+  --color-green-400:   #16a34a;
+  --color-green-500:   #15803d;
+  --color-red-400:     #dc2626;
+  --color-red-500:     #b91c1c;
+  --color-blue-400:    #2563eb;
+  --color-blue-500:    #1d4ed8;
+  --color-amber-400:   #d97706;
+  --color-amber-500:   #b45309;
+  --color-orange-400:  #ea580c;
+  --color-orange-500:  #c2410c;
+  --color-yellow-400:  #ca8a04;
+  --color-purple-400:  #9333ea;
+  --color-cyan-400:    #0891b2;
+}
+
+/* ---- Smooth theme transition ----------------------------------------------- *
+ * Applied only while the theme is actively switching so normal hover/focus
+ * transitions remain snappy.
+ * --------------------------------------------------------------------------- */
+
+html.theme-transitioning *,
+html.theme-transitioning *::before,
+html.theme-transitioning *::after {
+  transition:
+    background-color 0.25s ease,
+    color 0.25s ease,
+    border-color 0.25s ease,
+    fill 0.25s ease,
+    stroke 0.25s ease !important;
+}
+
+/* ---- Tailwind theme mapping ------------------------------------------------ */
 
 @theme inline {
   --color-background: var(--background);
@@ -18,7 +90,8 @@ body {
   font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
 }
 
-/* Custom scrollbar for dark theme */
+/* ---- Scrollbar — dark mode (default) -------------------------------------- */
+
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -36,6 +109,22 @@ body {
 ::-webkit-scrollbar-thumb:hover {
   background: #64748b;
 }
+
+/* ---- Scrollbar — light mode ----------------------------------------------- */
+
+html.light ::-webkit-scrollbar-track {
+  background: #e2e8f0;
+}
+
+html.light ::-webkit-scrollbar-thumb {
+  background: #94a3b8;
+}
+
+html.light ::-webkit-scrollbar-thumb:hover {
+  background: #64748b;
+}
+
+/* ---- Utilities ------------------------------------------------------------- */
 
 /* Line clamp utility */
 .line-clamp-2 {

@@ -1,4 +1,3 @@
-```python
 #!/usr/bin/env python3
 """
 Settings Manager
@@ -8,10 +7,11 @@ Handles application settings including AI provider API keys
 import sqlite3
 import logging
 import threading
-from typing import Any, Dict, Optional
+from typing import Any
 
 from backend.config import Config
 from backend.database import db_session
+from backend.types import ActiveAIProviderRow, AIProviderRow, ConfiguredProviderRow
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 _lock = threading.RLock()
 
 
-def init_settings_table():
+def init_settings_table() -> None:
     """Initialize settings table in database"""
     conn = sqlite3.connect(Config.DB_PATH)
     cursor = conn.cursor()
@@ -57,7 +57,7 @@ def init_settings_table():
     logger.info("Settings tables initialized")
 
 
-def get_setting(key: str, default: Optional[str] = None) -> Optional[str]:
+def get_setting(key: str, default: str | None = None) -> str | None:
     """Get a setting value.
 
     Acquires ``_lock`` so that a concurrent ``set_setting`` caller in the same
@@ -66,7 +66,7 @@ def get_setting(key: str, default: Optional[str] = None) -> Optional[str]:
     lock, so Python-level serialisation is required).
     """
     with _lock:
-        conn: Optional[sqlite3.Connection] = None
+        conn: sqlite3.Connection | None = None
         try:
             conn = sqlite3.connect(Config.DB_PATH)
             cursor = conn.cursor()
@@ -89,7 +89,7 @@ def set_setting(key: str, value: str) -> None:
     "last-writer-wins" behaviour at the SQLite file-lock level.
     """
     with _lock:
-        conn: Optional[sqlite3.Connection] = None
+        conn: sqlite3.Connection | None = None
         try:
             conn = sqlite3.connect(Config.DB_PATH)
             cursor = conn.cursor()
@@ -109,7 +109,7 @@ def set_setting(key: str, value: str) -> None:
                 conn.close()
 
 
-def get_active_ai_provider() -> Optional[Dict]:
+def get_active_ai_provider() -> ActiveAIProviderRow | None:
     """Get the currently active AI provider.
 
     Acquires ``_lock`` to prevent dirty reads during the deactivate-all →
@@ -119,7 +119,7 @@ def get_active_ai_provider() -> Optional[Dict]:
     providers even though one is about to be activated.
     """
     with _lock:
-        conn: Optional[sqlite3.Connection] = None
+        conn: sqlite3.Connection | None = None
         try:
             conn = sqlite3.connect(Config.DB_PATH)
             conn.row_factory = sqlite3.Row
@@ -149,7 +149,7 @@ def get_active_ai_provider() -> Optional[Dict]:
                 conn.close()
 
 
-def get_all_ai_providers() -> list:
+def get_all_ai_providers() -> list[AIProviderRow]:
     """Get all configured AI providers.
 
     Acquires ``_lock`` for the same dirty-read reason as
@@ -157,7 +157,7 @@ def get_all_ai_providers() -> list:
     transitional state where ``is_active`` counts are inconsistent.
     """
     with _lock:
-        conn: Optional[sqlite3.Connection] = None
+        conn: sqlite3.Connection | None = None
         try:
             conn = sqlite3.connect(Config.DB_PATH)
             conn.row_factory = sqlite3.Row
@@ -186,10 +186,10 @@ def get_all_ai_providers() -> list:
                 conn.close()
 
 
-def add_ai_provider(provider_name: str, api_key: str, model: Optional[str] = None, set_active: bool = True) -> bool:
+def add_ai_provider(provider_name: str, api_key: str, model: str | None = None, set_active: bool = True) -> bool:
     """Add or update an AI provider"""
     with _lock:
-        conn: Optional[sqlite3.Connection] = None
+        conn: sqlite3.Connection | None = None
         try:
             conn = sqlite3.connect(Config.DB_PATH)
             cursor = conn.cursor()
@@ -232,7 +232,7 @@ def add_ai_provider(provider_name: str, api_key: str, model: Optional[str] = Non
 def set_active_provider(provider_id: int) -> bool:
     """Set a provider as active"""
     with _lock:
-        conn: Optional[sqlite3.Connection] = None
+        conn: sqlite3.Connection | None = None
         try:
             conn = sqlite3.connect(Config.DB_PATH)
             cursor = conn.cursor()
@@ -264,7 +264,7 @@ def set_active_provider(provider_id: int) -> bool:
 def delete_ai_provider(provider_id: int) -> bool:
     """Delete an AI provider"""
     with _lock:
-        conn: Optional[sqlite3.Connection] = None
+        conn: sqlite3.Connection | None = None
         try:
             conn = sqlite3.connect(Config.DB_PATH)
             cursor = conn.cursor()
@@ -326,4 +326,3 @@ if __name__ == '__main__':
     # Initialize tables
     init_settings_table()
     print("Settings tables initialized")
-```

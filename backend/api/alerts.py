@@ -1,4 +1,3 @@
-```python
 """
 TickerPulse AI v3.0 - Price Alerts API
 CRUD endpoints for price alerts and per-alert sound type overrides.
@@ -260,4 +259,3 @@ def update_alert_sound(alert_id: int):
         raise DatabaseError('Failed to update alert sound') from exc
 
     return jsonify(_row_to_dict(updated))
-```

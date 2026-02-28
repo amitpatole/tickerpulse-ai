@@ -1,4 +1,3 @@
-```python
 """
 TickerPulse AI v3.0 - Price Refresh Job
 Periodic APScheduler job that fetches live prices for the active watchlist,
@@ -215,4 +214,3 @@ def run_price_refresh() -> None:
         logger.debug("price_refresh: alert_manager not available, skipping alert eval")
     except Exception as exc:
         logger.error("price_refresh: alert evaluation error: %s", exc)
-```

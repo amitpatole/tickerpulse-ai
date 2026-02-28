@@ -4,13 +4,13 @@ Provides consistent logging, timing, DB persistence, and SSE notification.
 """
 import json
 import logging
-import sqlite3
 import time
 from contextlib import contextmanager
-from datetime import datetime
-from typing import Any, Dict, Optional
+from datetime import datetime, timezone
+from typing import Any, Dict, Optional, Sequence
 
 from backend.config import Config
+from backend.database import pooled_session
 
 logger = logging.getLogger(__name__)
 
@@ -37,12 +37,10 @@ def _send_sse(event_type: str, data: dict) -> None:
 def _get_watchlist() -> list:
     """Return the list of active stock tickers from the database."""
     try:
-        conn = sqlite3.connect(Config.DB_PATH)
-        conn.row_factory = sqlite3.Row
-        rows = conn.execute(
-            "SELECT ticker, name, market FROM stocks WHERE active = 1"
-        ).fetchall()
-        conn.close()
+        with pooled_session() as conn:
+            rows = conn.execute(
+                "SELECT ticker, name, market FROM stocks WHERE active = 1"
+            ).fetchall()
         return [dict(r) for r in rows]
     except Exception as exc:
         logger.error("Failed to load watchlist: %s", exc)
@@ -54,45 +52,75 @@ def save_job_history(job_id: str, job_name: str, status: str,
                      duration_ms: int, cost: float = 0.0) -> None:
     """Persist a job execution record to the job_history table."""
     try:
-        conn = sqlite3.connect(Config.DB_PATH)
-        conn.execute(
-            """INSERT INTO job_history
-               (job_id, job_name, status, result_summary, agent_name,
-                duration_ms, cost, executed_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-            (
-                job_id,
-                job_name,
-                status,
-                (result_summary or '')[:5000],  # cap length
-                agent_name,
-                duration_ms,
-                cost,
-                datetime.utcnow().isoformat(),
-            ),
-        )
-        conn.commit()
-        conn.close()
+        with pooled_session() as conn:
+            conn.execute(
+                """INSERT INTO job_history
+                   (job_id, job_name, status, result_summary, agent_name,
+                    duration_ms, cost, executed_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    job_id,
+                    job_name,
+                    status,
+                    (result_summary or '')[:5000],  # cap length
+                    agent_name,
+                    duration_ms,
+                    cost,
+                    datetime.now(timezone.utc).isoformat(),
+                ),
+            )
     except Exception as exc:
         logger.error("Failed to save job_history for %s: %s", job_id, exc)
+
+
+def save_performance_metrics(
+    source: str,
+    source_id: str,
+    metrics: Sequence[tuple[str, float]],
+    tags: Optional[dict] = None,
+) -> None:
+    """Write one or more metric datapoints to the performance_metrics table.
+
+    Args:
+        source:    Category of the emitter, e.g. ``'job'`` or ``'agent'``.
+        source_id: Identifier within that category, e.g. ``job_id`` or ``agent_name``.
+        metrics:   Sequence of ``(metric_name, metric_value)`` pairs.
+        tags:      Optional JSON-serialisable dict for additional context.
+    """
+    recorded_at = datetime.now(timezone.utc).isoformat()
+    tags_json = json.dumps(tags) if tags else None
+    rows = [
+        (source, source_id, name, float(value), tags_json, recorded_at)
+        for name, value in metrics
+    ]
+    try:
+        with pooled_session() as conn:
+            conn.executemany(
+                """INSERT INTO performance_metrics
+                   (source, source_id, metric_name, metric_value, tags, recorded_at)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                rows,
+            )
+    except Exception as exc:
+        logger.error(
+            "Failed to save performance_metrics for %s/%s: %s", source, source_id, exc
+        )
 
 
 def get_job_history(job_id: Optional[str] = None, limit: int = 50) -> list:
     """Retrieve recent job execution history from the database."""
     try:
-        conn = sqlite3.connect(Config.DB_PATH)
-        conn.row_factory = sqlite3.Row
-        if job_id:
-            rows = conn.execute(
-                "SELECT * FROM job_history WHERE job_id = ? ORDER BY executed_at DESC LIMIT ?",
-                (job_id, limit),
-            ).fetchall()
-        else:
-            rows = conn.execute(
-                "SELECT * FROM job_history ORDER BY executed_at DESC LIMIT ?",
-                (limit,),
-            ).fetchall()
-        conn.close()
+        with pooled_session() as conn:
+            if job_id:
+                rows = conn.execute(
+                    "SELECT * FROM job_history WHERE job_id = ? ORDER BY executed_at DESC LIMIT ?",
+                    (job_id, limit),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM job_history ORDER BY executed_at DESC LIMIT ?",
+                    (limit,),
+                ).fetchall()
         return [dict(r) for r in rows]
     except Exception as exc:
         logger.error("Failed to get job_history: %s", exc)
@@ -139,6 +167,16 @@ def job_timer(job_id: str, job_name: str):
             duration_ms=duration_ms,
             cost=ctx['cost'],
         )
+        save_performance_metrics(
+            source='job',
+            source_id=job_id,
+            metrics=[
+                ('duration_ms', duration_ms),
+                ('cost_usd', ctx['cost']),
+                ('success', 1.0 if ctx['status'] == 'success' else 0.0),
+            ],
+            tags={'job_name': job_name, 'status': ctx['status'], 'agent_name': ctx['agent_name']},
+        )
         logger.info("[JOB END] %s -- status=%s, duration=%dms",
                      job_id, ctx['status'], duration_ms)
 
@@ -149,5 +187,5 @@ def job_timer(job_id: str, job_name: str):
             'status': ctx['status'],
             'result_summary': ctx['result_summary'],
             'duration_ms': duration_ms,
-            'completed_at': datetime.utcnow().isoformat() + 'Z',
+            'completed_at': datetime.now(timezone.utc).isoformat(),
         })

@@ -9,15 +9,16 @@ import os
 import queue
 import logging
 import threading
+import time
 from datetime import datetime, timezone
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Any
 
-from flask import Flask, Response, jsonify, send_from_directory
+from flask import Flask, Response, g, jsonify, request, send_from_directory
 
 from backend.config import Config
-from backend.database import db_session, init_all_tables
+from backend.database import db_session, get_pool, init_all_tables
 
 logger = logging.getLogger(__name__)
 
@@ -136,6 +137,12 @@ def send_sse_event(event_type: str, data: dict) -> None:
     if event_type not in _ALLOWED_EVENT_TYPES:
         logger.error("SSE blocked: unknown event_type %r", event_type)
         return
+    # Guarantee a UTC ISO-8601 timestamp on every SSE payload (VO-792).
+    # Callers that already supply one are unaffected; callers that omit it
+    # (e.g. rate_limit_update, provider_fallback) get a server-side stamp
+    # so the client never has to fall back to new Date().toISOString().
+    if 'timestamp' not in data:
+        data = {**data, 'timestamp': datetime.now(timezone.utc).isoformat()}
     try:
         serialized = json.dumps(data)
     except (TypeError, ValueError) as exc:
@@ -231,6 +238,24 @@ def create_app() -> Flask:
     init_request_logging(app)
     logger.info("Request tracing middleware registered")
 
+    from backend.core.error_handlers import register_error_handlers
+    register_error_handlers(app)
+
+    # -- API latency recording (feeds metrics_snapshot job every 5 min) ------
+    @app.after_request
+    def _record_api_latency(response):
+        """Feed per-endpoint latency into the in-memory buffer (zero DB writes)."""
+        start = g.get('request_start')
+        if start is not None:
+            try:
+                latency_ms = (time.monotonic() - start) * 1000
+                endpoint = str(request.url_rule) if request.url_rule else request.path
+                from backend.core.latency_buffer import record as _lat_record
+                _lat_record(endpoint, request.method, response.status_code, latency_ms)
+            except Exception:
+                pass  # Never break a response for metrics
+        return response
+
     # -- CORS ----------------------------------------------------------------
     try:
         from flask_cors import CORS
@@ -265,7 +290,17 @@ def create_app() -> Flask:
     # -- Database ------------------------------------------------------------
     with app.app_context():
         init_all_tables()
-        logger.info("Database tables initialised")
+        # Pre-warm the connection pool so the first request doesn't pay the
+        # connection-creation cost.  Also validates DB_PATH is reachable.
+        pool = get_pool()
+        logger.info(
+            "Database ready: tables initialised, pool warmed (%d conns)",
+            pool.stats()["size"],
+        )
+
+    # Tear down idle pool connections when the process exits cleanly.
+    import atexit
+    atexit.register(get_pool().close_all)
 
     # -- Agent Registry ------------------------------------------------------
     try:
@@ -449,55 +484,6 @@ def create_app() -> Flask:
             "Install with: pip install flask-sock"
         )
 
-    # -- Health check --------------------------------------------------------
-    @app.route('/api/health')
-    def health():
-        """Health-check endpoint with per-subsystem status for monitoring."""
-        import sqlite3
-
-        db_status = 'error'
-        try:
-            conn = sqlite3.connect(Config.DB_PATH)
-            conn.execute('SELECT 1')
-            conn.close()
-            db_status = 'ok'
-        except Exception:
-            pass
-
-        scheduler_status = 'error'
-        try:
-            sched = getattr(app, 'scheduler', None)
-            if sched is None:
-                # Scheduler not initialised (e.g. flask-apscheduler not installed);
-                # treat as ok since it's optional.
-                scheduler_status = 'ok'
-            elif sched.running:
-                scheduler_status = 'ok'
-        except Exception:
-            pass
-
-        error_log_count_1h = 0
-        try:
-            with db_session() as conn:
-                row = conn.execute(
-                    "SELECT COUNT(*) FROM error_log"
-                    " WHERE created_at >= datetime('now', '-1 hours')"
-                ).fetchone()
-                error_log_count_1h = row[0] if row else 0
-        except Exception:
-            pass
-
-        overall = 'ok' if db_status == 'ok' else 'degraded'
-
-        return jsonify({
-            'status': overall,
-            'version': '3.0.0',
-            'timestamp': datetime.utcnow().isoformat() + 'Z',
-            'db': db_status,
-            'scheduler': scheduler_status,
-            'error_log_count_1h': error_log_count_1h,
-        })
-
     # -- Legacy dashboard fallback -------------------------------------------
     @app.route('/legacy')
     def legacy_dashboard():
@@ -604,6 +590,10 @@ def _register_blueprints(app: Flask) -> None:
         'backend.api.error_stats':      'error_stats_bp',
         'backend.api.portfolio':        'portfolio_bp',
         'backend.api.comparison':       'comparison_bp',
+        'backend.api.metrics':          'metrics_bp',
+        'backend.api.app_state':        'app_state_bp',
+        'backend.api.state':            'state_bp',
+        'backend.api.health':           'health_bp',
     }
 
     for module_path, bp_name in blueprint_map.items():

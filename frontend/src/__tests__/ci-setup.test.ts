@@ -1,4 +1,3 @@
-```typescript
 /**
  * Tests validating CI/CD frontend setup and Jest configuration.
  * Ensures test infrastructure is ready before tests run in CI.
@@ -94,4 +93,3 @@ describe('Frontend CI/CD Setup', () => {
     });
   });
 });
-```

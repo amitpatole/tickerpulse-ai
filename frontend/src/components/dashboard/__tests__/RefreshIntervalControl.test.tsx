@@ -1,4 +1,3 @@
-```typescript
 /**
  * Tests for RefreshIntervalControl component.
  *
@@ -145,4 +144,3 @@ describe('RefreshIntervalControl', () => {
     });
   });
 });
-```

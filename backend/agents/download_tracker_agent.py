@@ -1,4 +1,3 @@
-```python
 """
 StockPulse AI v3.0 - Download Tracker Agent
 Monitors GitHub repository traffic (clones/downloads) via GitHub API.
@@ -219,4 +218,3 @@ class DownloadTrackerAgent(BaseAgent):
             stored_count, repo_owner, repo_name,
         )
         return stored_count
-```

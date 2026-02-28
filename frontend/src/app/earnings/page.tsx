@@ -1,4 +1,3 @@
-```typescript
 import Header from '@/components/layout/Header';
 import EarningsPageView from '@/components/earnings/EarningsPageView';
 
@@ -12,4 +11,3 @@ export default function EarningsPage() {
     </div>
   );
 }
-```

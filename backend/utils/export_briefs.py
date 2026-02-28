@@ -1,4 +1,3 @@
-```python
 """
 TickerPulse AI - Research Brief Export Utilities
 Generates ZIP, CSV, and PDF exports from research brief records.
@@ -347,4 +346,3 @@ def build_pdf(briefs: list[dict]) -> bytes:
             pdf.multi_cell(0, 6, _latin1(msg))
 
     return bytes(pdf.output())
-```

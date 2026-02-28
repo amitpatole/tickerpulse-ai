@@ -1,4 +1,3 @@
-```tsx
 'use client';
 
 import { use, useCallback, useEffect, useMemo, useState } from 'react';
@@ -483,4 +482,3 @@ export default function StockDetailPage({ params }: StockDetailPageProps) {
     </div>
   );
 }
-```

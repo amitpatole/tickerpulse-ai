@@ -1,8 +1,10 @@
 'use client';
 
-import { Timer, Wifi } from 'lucide-react';
+import { Palette, Timer, Wifi } from 'lucide-react';
 import Header from '@/components/layout/Header';
 import RefreshIntervalControl from '@/components/dashboard/RefreshIntervalControl';
+import PriceAlertsPanel from '@/components/alerts/PriceAlertsPanel';
+import ThemeToggle from '@/components/settings/ThemeToggle';
 
 export default function SettingsPage() {
   return (
@@ -10,6 +12,27 @@ export default function SettingsPage() {
       <Header title="Settings" subtitle="Configure TickerPulse AI behavior" />
 
       <div className="flex-1 p-6">
+        {/* Appearance */}
+        <section aria-labelledby="appearance-heading" className="mb-6">
+          <div className="rounded-xl border border-slate-700/50 bg-slate-800/50 p-5">
+            <div className="mb-3 flex items-center gap-2">
+              <Palette className="h-4 w-4 text-slate-400" aria-hidden="true" />
+              <h2 id="appearance-heading" className="text-sm font-semibold text-white">
+                Appearance
+              </h2>
+            </div>
+            <p className="mb-4 text-xs leading-relaxed text-slate-400">
+              Choose between dark, light, or system-matched colour scheme.{' '}
+              <strong className="text-slate-300">System</strong> follows your OS preference
+              and updates automatically when it changes.
+            </p>
+            <div className="flex items-center gap-3">
+              <span className="text-xs text-slate-400">Colour scheme</span>
+              <ThemeToggle />
+            </div>
+          </div>
+        </section>
+
         {/* Price Refresh */}
         <section aria-labelledby="price-refresh-heading" className="mb-6">
           <div className="rounded-xl border border-slate-700/50 bg-slate-800/50 p-5">
@@ -52,6 +75,9 @@ export default function SettingsPage() {
             </p>
           </div>
         </section>
+
+        {/* Price Alerts & Sound Settings */}
+        <PriceAlertsPanel />
       </div>
     </div>
   );

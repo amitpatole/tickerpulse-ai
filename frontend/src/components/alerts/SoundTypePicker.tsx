@@ -1,1 +1,77 @@
-*(already exists — 69 lines, no changes needed)*
+'use client';
+
+import { Play } from 'lucide-react';
+import { playAlertSound } from '@/lib/alertSound';
+import type { AlertSoundType } from '@/lib/types';
+
+const ALL_SOUND_OPTIONS: { value: AlertSoundType; label: string }[] = [
+  { value: 'default', label: 'Default' },
+  { value: 'chime', label: 'Chime' },
+  { value: 'alarm', label: 'Alarm' },
+  { value: 'silent', label: 'Silent' },
+];
+
+interface SoundTypePickerProps {
+  value: AlertSoundType | string;
+  onChange: (value: AlertSoundType) => void;
+  /** Preview volume, 0–100. Defaults to 70. */
+  volume?: number;
+  disabled?: boolean;
+  /** id applied to the <select> for external <label htmlFor> association. */
+  id?: string;
+  /** When true, hides the 'default' option (use in global settings context). */
+  hideDefault?: boolean;
+}
+
+/**
+ * Reusable sound-type picker: a <select> with sound options and an audition
+ * button. Keyboard-navigable; the select carries its own aria-label so it
+ * works standalone as well as inside a labelled form field.
+ */
+export default function SoundTypePicker({
+  value,
+  onChange,
+  volume = 70,
+  disabled = false,
+  id,
+  hideDefault = false,
+}: SoundTypePickerProps) {
+  const options = hideDefault
+    ? ALL_SOUND_OPTIONS.filter((o) => o.value !== 'default')
+    : ALL_SOUND_OPTIONS;
+
+  function handlePreview() {
+    if (value === 'silent') return;
+    const effective = value === 'default' ? 'chime' : value;
+    playAlertSound(effective, volume / 100);
+  }
+
+  return (
+    <div className="flex items-center gap-2">
+      <select
+        id={id}
+        value={value}
+        onChange={(e) => onChange(e.target.value as AlertSoundType)}
+        disabled={disabled}
+        aria-label="Alert sound type"
+        className="flex-1 rounded border border-slate-600 bg-slate-800 px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-500/30 disabled:opacity-50"
+      >
+        {options.map((opt) => (
+          <option key={opt.value} value={opt.value}>
+            {opt.label}
+          </option>
+        ))}
+      </select>
+      <button
+        type="button"
+        onClick={handlePreview}
+        disabled={disabled || value === 'silent'}
+        aria-label="Preview selected alert sound"
+        className="flex items-center gap-1 rounded border border-slate-600 bg-slate-700/50 px-2.5 py-2 text-xs text-slate-300 hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
+      >
+        <Play className="h-3 w-3" aria-hidden="true" />
+        Preview
+      </button>
+    </div>
+  );
+}

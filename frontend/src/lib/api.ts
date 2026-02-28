@@ -294,16 +294,22 @@ export async function getNews(params?: {
 // Earnings
 // ---------------------------------------------------------------------------
 
-export async function getEarnings(params?: {
-  days_ahead?: number;
+export interface EarningsParams {
+  days?: number;
   watchlist_id?: number;
-}): Promise<EarningsResponse> {
-  return _fetch<EarningsResponse>(`/api/earnings${_qs(params ?? {})}`);
+  ticker?: string;
+}
+
+export async function getEarnings(params?: EarningsParams): Promise<EarningsResponse> {
+  const normalized = params
+    ? { ...params, ticker: params.ticker ? params.ticker.toUpperCase() : undefined }
+    : {};
+  return _fetch<EarningsResponse>(`/api/earnings${_qs(normalized)}`);
 }
 
 export async function getTickerEarnings(ticker: string): Promise<EarningsEvent[]> {
   const data = await _fetch<{ events: EarningsEvent[] }>(
-    `/api/earnings/${encodeURIComponent(ticker)}`,
+    `/api/earnings/${encodeURIComponent(ticker.toUpperCase())}`,
   );
   return data.events ?? [];
 }

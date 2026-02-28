@@ -1,4 +1,3 @@
-```tsx
 import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -156,19 +155,42 @@ describe('AgentScheduleForm', () => {
     expect(onSave).not.toHaveBeenCalled();
   });
 
-  it('shows error when label is empty', async () => {
-    const { onSave } = renderForm();
+  it('disables Save button when label is empty', () => {
+    renderForm();
 
     // Clear the pre-populated label
     const labelInput = screen.getByLabelText('Schedule label');
     fireEvent.change(labelInput, { target: { value: '' } });
 
-    fireEvent.click(screen.getByText('Create Schedule'));
+    const saveButton = screen.getByText('Create Schedule') as HTMLButtonElement;
+    expect(saveButton).toBeDisabled();
+  });
 
-    await waitFor(() => {
-      expect(screen.getByTestId('form-error')).toHaveTextContent('Label is required');
-    });
-    expect(onSave).not.toHaveBeenCalled();
+  it('disables Save button when label is whitespace-only', () => {
+    renderForm();
+
+    const labelInput = screen.getByLabelText('Schedule label');
+    fireEvent.change(labelInput, { target: { value: '   ' } });
+
+    const saveButton = screen.getByText('Create Schedule') as HTMLButtonElement;
+    expect(saveButton).toBeDisabled();
+  });
+
+  it('re-enables Save button when a non-blank label is entered after clearing', async () => {
+    const user = userEvent.setup();
+    renderForm();
+
+    const labelInput = screen.getByLabelText('Schedule label');
+    await user.clear(labelInput);
+
+    // Button disabled while label is empty
+    expect(screen.getByText('Create Schedule') as HTMLButtonElement).toBeDisabled();
+
+    // Type something valid
+    await user.type(labelInput, 'My Schedule');
+
+    // Button re-enabled
+    expect(screen.getByText('Create Schedule') as HTMLButtonElement).not.toBeDisabled();
   });
 
   it('calls onClose when Cancel button is clicked', () => {
@@ -348,5 +370,161 @@ describe('AgentScheduleForm', () => {
       expect(labelInput.value).toBe('Daily Summary');
     });
   });
+
+  // ---------------------------------------------------------------------------
+  // BUG B FIX: Async agents loading edge cases
+  // AC: Late agents fetch should NOT clobber user-selected job_id/label;
+  //     initializedRef guards against effect re-fire when agents arrive async
+  // ---------------------------------------------------------------------------
+
+  it('does not clobber user selection when agents load asynchronously after modal opens (Bug B fix)', async () => {
+    const user = userEvent.setup();
+    // Render with empty agents list (simulating initial state before async fetch)
+    const { rerender } = render(
+      <AgentScheduleForm
+        open={true}
+        schedule={null}
+        agents={[]}
+        onClose={jest.fn()}
+        onSave={jest.fn()}
+      />
+    );
+
+    // Wait for no-agents notice to appear
+    await waitFor(() => {
+      expect(screen.getByTestId('no-agents-notice')).toBeInTheDocument();
+    });
+
+    // Now agents load asynchronously
+    rerender(
+      <AgentScheduleForm
+        open={true}
+        schedule={null}
+        agents={MOCK_AGENTS}
+        onClose={jest.fn()}
+        onSave={jest.fn()}
+      />
+    );
+
+    // After agents load, the form should initialize (due to deferred initialization)
+    const labelInput = screen.getByLabelText('Schedule label') as HTMLInputElement;
+    await waitFor(() => {
+      // Should be initialized to first agent, not clobbered by re-fire
+      expect(labelInput.value).toBe('Morning Briefing');
+    });
+
+    // User selects a different agent
+    const jobSelect = screen.getByLabelText('Select agent job');
+    await user.selectOptions(jobSelect, 'daily_summary');
+
+    // Label should update to the selected agent
+    await waitFor(() => {
+      expect(labelInput.value).toBe('Daily Summary');
+    });
+
+    // Re-render again (simulating agents prop change, e.g., a refetch)
+    rerender(
+      <AgentScheduleForm
+        open={true}
+        schedule={null}
+        agents={MOCK_AGENTS}
+        onClose={jest.fn()}
+        onSave={jest.fn()}
+      />
+    );
+
+    // User selection should NOT be clobbered by the re-render
+    // (initializedRef prevents effect re-fire)
+    await waitFor(() => {
+      expect(labelInput.value).toBe('Daily Summary');
+    });
+  });
+
+  it('resets initialization flag when modal closes and reopens (Bug B fix)', async () => {
+    const onClose = jest.fn();
+    const { rerender } = render(
+      <AgentScheduleForm
+        open={true}
+        schedule={null}
+        agents={MOCK_AGENTS}
+        onClose={onClose}
+        onSave={jest.fn()}
+      />
+    );
+
+    // Form initializes with first agent
+    const labelInput = screen.getByLabelText('Schedule label') as HTMLInputElement;
+    await waitFor(() => {
+      expect(labelInput.value).toBe('Morning Briefing');
+    });
+
+    // Close modal
+    rerender(
+      <AgentScheduleForm
+        open={false}
+        schedule={null}
+        agents={MOCK_AGENTS}
+        onClose={onClose}
+        onSave={jest.fn()}
+      />
+    );
+
+    // Modal should be hidden
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+
+    // Reopen modal
+    rerender(
+      <AgentScheduleForm
+        open={true}
+        schedule={null}
+        agents={MOCK_AGENTS}
+        onClose={onClose}
+        onSave={jest.fn()}
+      />
+    );
+
+    // Form should re-initialize fresh (initializedRef was reset to false)
+    // This verifies the flag is properly reset on close
+    await waitFor(() => {
+      expect(screen.getByRole('dialog')).toBeInTheDocument();
+      const reopenedLabel = screen.getByLabelText('Schedule label') as HTMLInputElement;
+      expect(reopenedLabel.value).toBe('Morning Briefing');
+    });
+  });
+
+  it('defers initialization in create mode until agents list is non-empty (Bug B fix)', async () => {
+    // Render in create mode with no agents
+    const { rerender } = render(
+      <AgentScheduleForm
+        open={true}
+        schedule={null}
+        agents={[]}
+        onClose={jest.fn()}
+        onSave={jest.fn()}
+      />
+    );
+
+    // Should show no-agents notice, form not yet initialized
+    expect(screen.getByTestId('no-agents-notice')).toBeInTheDocument();
+
+    // User triggers an agents fetch that resolves
+    rerender(
+      <AgentScheduleForm
+        open={true}
+        schedule={null}
+        agents={MOCK_AGENTS}
+        onClose={jest.fn()}
+        onSave={jest.fn()}
+      />
+    );
+
+    // Now initialization should complete and first agent should be selected
+    const labelInput = screen.getByLabelText('Schedule label') as HTMLInputElement;
+    await waitFor(() => {
+      expect(labelInput.value).toBe('Morning Briefing');
+    });
+
+    // No-agents notice should be hidden
+    expect(screen.queryByTestId('no-agents-notice')).not.toBeInTheDocument();
+  });
 });
-```

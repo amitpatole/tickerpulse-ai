@@ -1,4 +1,3 @@
-```typescript
 'use client';
 
 import { memo, useEffect, useRef, useState } from 'react';
@@ -85,4 +84,3 @@ const PriceCell = memo(function PriceCell({
 });
 
 export default PriceCell;
-```

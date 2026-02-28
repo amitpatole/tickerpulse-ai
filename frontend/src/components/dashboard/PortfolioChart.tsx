@@ -1,4 +1,3 @@
-```tsx
 'use client';
 
 import { useEffect, useId, useRef } from 'react';
@@ -177,4 +176,3 @@ export default function PortfolioChart() {
     </div>
   );
 }
-```

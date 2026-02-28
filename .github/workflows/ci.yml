@@ -36,8 +36,8 @@ jobs:
           pip install -r backend/requirements-test.txt
 
       - name: Run tests
-        # pytest.ini supplies: testpaths, --cov=backend, --ignore=backend/agents,
-        # --ignore=backend/data_providers. CI-specific output flags are passed here.
+        # pyproject.toml [tool.pytest.ini_options] supplies: testpaths, --cov=backend,
+        # --ignore=backend/agents, --ignore=backend/data_providers.
         # --cov-fail-under=80 enforces the 80% coverage gate and fails the job if
         # coverage drops below the threshold.
         run: |
@@ -114,6 +114,42 @@ jobs:
           flags: frontend
           fail_ci_if_error: false
 
+  electron-test:
+    name: Electron Tests (Node 24)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: electron/package-lock.json
+
+      - name: Install Electron dependencies
+        working-directory: electron
+        run: npm ci
+
+      - name: Type-check with TypeScript
+        working-directory: electron
+        run: npx tsc --noEmit
+
+      - name: Run tests with coverage
+        # jest.config.ts enforces a 60% threshold across lines/branches/functions/statements.
+        working-directory: electron
+        run: npm run test:ci
+
+      - name: Upload electron coverage artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: electron-coverage
+          path: electron/coverage/lcov.info
+          retention-days: 7
+
   build-windows-pr:
     name: Windows Build Check (PR)
     runs-on: ubuntu-latest
@@ -135,8 +171,73 @@ jobs:
 
       - name: Install Electron dependencies
         working-directory: electron
-        run: npm install
+        run: npm ci
 
       - name: Compile Electron TypeScript (Windows build prerequisite)
         working-directory: electron
         run: npx tsc --noEmit
+
+  backend-lint:
+    name: Backend Lint & Type-Check (Python 3.12)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: |
+            backend/requirements.txt
+            backend/requirements-test.txt
+
+      - name: Install dependencies
+        run: |
+          pip install -r backend/requirements.txt
+          pip install -r backend/requirements-test.txt
+
+      - name: Lint with ruff
+        run: ruff check backend/ --output-format=github
+        env:
+          PYTHONPATH: .
+
+      - name: Type-check with mypy
+        run: |
+          mypy backend/ \
+            --ignore-missing-imports \
+            --python-version 3.12 \
+            --exclude backend/agents \
+            --exclude backend/data_providers \
+            --exclude backend/tests
+        env:
+          PYTHONPATH: .
+
+  frontend-lint:
+    name: Frontend Lint & Type-Check (Node 24)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Lint with ESLint
+        working-directory: frontend
+        run: npx next lint
+
+      - name: Type-check with TypeScript
+        working-directory: frontend
+        run: npm run type-check

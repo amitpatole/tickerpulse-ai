@@ -1,4 +1,3 @@
-```python
 """
 TickerPulse AI v3.0 - Earnings Sync Job
 
@@ -229,4 +228,3 @@ def run_earnings_sync() -> None:
             f"{len(tickers) - no_data_count}/{len(tickers)} tickers"
         )
         logger.info("Earnings sync complete: %s", ctx['result_summary'])
-```

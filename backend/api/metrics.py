@@ -1,4 +1,3 @@
-```python
 """
 TickerPulse AI v3.0 - Performance Metrics API
 Endpoints for tracking and displaying key performance metrics over time.
@@ -431,4 +430,3 @@ def get_job_metrics():
             for row in rows
         ],
     })
-```

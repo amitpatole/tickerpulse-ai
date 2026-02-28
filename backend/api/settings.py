@@ -1,4 +1,3 @@
-```python
 """
 TickerPulse AI v3.0 - Settings API Routes
 Blueprint for AI provider settings, data provider settings, and agent framework configuration.
@@ -858,6 +857,7 @@ _UI_PREF_ALLOWED_KEYS: frozenset[str] = frozenset({
     'selected_watchlist_id',
     'dashboard_layout',
     'color_scheme',
+    'chart_timeframe',
 })
 
 _UI_PREF_DEFAULTS: dict = {
@@ -866,6 +866,7 @@ _UI_PREF_DEFAULTS: dict = {
     'selected_watchlist_id': None,
     'dashboard_layout': None,
     'color_scheme': 'system',
+    'chart_timeframe': '1D',
 }
 
 
@@ -1069,4 +1070,3 @@ def update_alert_sound_settings():
     except Exception as e:
         logger.error("Error updating alert sound settings: %s", e)
         return jsonify({'error': 'Database error'}), 500
-```

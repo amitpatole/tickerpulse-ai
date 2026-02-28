@@ -1,4 +1,3 @@
-```typescript
 import { renderHook, act } from '@testing-library/react';
 import { useRef } from 'react';
 import { useNewsFeedKeyboard } from '@/hooks/useNewsFeedKeyboard';
@@ -361,4 +360,3 @@ describe('useNewsFeedKeyboard Hook', () => {
     expect(result.current.focusedIndex).toBe(0);
   });
 });
-```

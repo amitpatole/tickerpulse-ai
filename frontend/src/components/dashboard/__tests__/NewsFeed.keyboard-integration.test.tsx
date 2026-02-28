@@ -1,4 +1,3 @@
-```tsx
 /**
  * Integration Tests for NewsFeed Keyboard Navigation
  *
@@ -344,4 +343,3 @@ describe('NewsFeed Keyboard Navigation Integration', () => {
     });
   });
 });
-```

@@ -291,19 +291,26 @@ export interface DashboardSummary {
 }
 
 export type WidgetId =
-  | 'ai_ratings'
-  | 'news_feed'
-  | 'earnings_calendar'
-  | 'portfolio_chart'
-  | 'price_alerts'
-  | 'market_mood'
-  | 'sector_breakdown'
-  | 'top_movers'
-  | 'sentiment_chart';
+  | 'kpi-cards'
+  | 'rate-limit'
+  | 'stock-watchlist'
+  | 'portfolio-chart'
+  | 'sector-breakdown'
+  | 'market-mood'
+  | 'news-feed'
+  | 'earnings-calendar'
+  | 'top-movers'
+  | 'sentiment-chart'
+  | 'ai-ratings'
+  | 'alerts-table';
+
+export interface WidgetConfig {
+  enabled: boolean;
+  order: number;
+}
 
 export interface DashboardLayout {
-  widgets: WidgetId[];
-  columns?: number;
+  widgets: Record<WidgetId, WidgetConfig>;
 }
 
 // ---------------------------------------------------------------------------
@@ -349,22 +356,32 @@ export interface ComparisonResult {
 // ---------------------------------------------------------------------------
 
 export interface EarningsEvent {
+  id: number;
   ticker: string;
-  name?: string;
-  date: string;
-  time?: 'before_open' | 'after_close' | 'during_trading' | null;
+  company?: string | null;
+  earnings_date: string;
+  time_of_day?: string | null;
   eps_estimate?: number | null;
   eps_actual?: number | null;
   revenue_estimate?: number | null;
   revenue_actual?: number | null;
+  fiscal_quarter?: string | null;
   surprise_pct?: number | null;
+  on_watchlist: boolean;
+  fetched_at?: string | null;
+  updated_at?: string | null;
 }
 
 export interface EarningsResponse {
+  upcoming: EarningsEvent[];
+  past: EarningsEvent[];
+  stale: boolean;
+  as_of?: string;
+}
+
+export interface TickerEarningsResponse {
+  ticker: string;
   events: EarningsEvent[];
-  total?: number;
-  page?: number;
-  page_size?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -561,11 +578,12 @@ export interface ProviderRateLimitsResponse {
 // ---------------------------------------------------------------------------
 
 export interface UiPrefs {
-  theme?: 'dark' | 'light' | 'system';
+  color_scheme?: 'dark' | 'light' | 'system';
   sidebar_collapsed?: boolean;
   default_watchlist_id?: number;
   timezone_mode?: TimezoneMode;
   dashboard_layout?: DashboardLayout;
+  chart_timeframe?: Timeframe;
   [key: string]: unknown;
 }
 

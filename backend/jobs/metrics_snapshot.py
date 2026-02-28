@@ -1,4 +1,3 @@
-```python
 """
 TickerPulse AI v3.0 - Performance Metrics Snapshot Job
 
@@ -101,4 +100,3 @@ def run_metrics_snapshot() -> None:
             f"pool_active={db_pool_active}/{db_pool_active + db_pool_idle}, "
             f"api_log_rows={len(latency_rows)}"
         )
-```

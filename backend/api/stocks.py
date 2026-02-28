@@ -12,7 +12,14 @@ from flask import Blueprint, jsonify, request
 
 from backend.core.stock_manager import get_all_stocks, add_stock, remove_stock, search_stock_ticker
 from backend.core.ai_analytics import StockAnalytics
-from backend.database import get_db_connection
+from backend.database import pooled_session
+from backend.core.error_handlers import (
+    handle_api_errors,
+    ValidationError,
+    NotFoundError,
+    ServiceUnavailableError,
+    DatabaseError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -24,11 +31,10 @@ _FINANCIALS_CACHE_TTL_HOURS = 4
 def _get_financials_from_cache(ticker: str):
     """Return cached financials dict for ticker if within TTL, else None."""
     try:
-        conn = get_db_connection()
-        row = conn.execute(
-            'SELECT * FROM financials_cache WHERE ticker = ?', (ticker,)
-        ).fetchone()
-        conn.close()
+        with pooled_session() as conn:
+            row = conn.execute(
+                'SELECT * FROM financials_cache WHERE ticker = ?', (ticker,)
+            ).fetchone()
         if not row or not row['fetched_at']:
             return None
         cache_time = datetime.fromisoformat(row['fetched_at'].replace('Z', '+00:00'))
@@ -44,41 +50,39 @@ def _get_financials_from_cache(ticker: str):
 def _save_financials_to_cache(ticker: str, data: dict) -> None:
     """Upsert financials data into financials_cache."""
     try:
-        conn = get_db_connection()
-        conn.execute(
-            '''INSERT INTO financials_cache
-               (ticker, pe_ratio, eps, market_cap, dividend_yield, beta, avg_volume,
-                book_value, week_52_high, week_52_low, name, fetched_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-               ON CONFLICT(ticker) DO UPDATE SET
-               pe_ratio=excluded.pe_ratio,
-               eps=excluded.eps,
-               market_cap=excluded.market_cap,
-               dividend_yield=excluded.dividend_yield,
-               beta=excluded.beta,
-               avg_volume=excluded.avg_volume,
-               book_value=excluded.book_value,
-               week_52_high=excluded.week_52_high,
-               week_52_low=excluded.week_52_low,
-               name=excluded.name,
-               fetched_at=excluded.fetched_at''',
-            (
-                ticker,
-                data.get('pe_ratio'),
-                data.get('eps'),
-                data.get('market_cap'),
-                data.get('dividend_yield'),
-                data.get('beta'),
-                data.get('avg_volume'),
-                data.get('book_value'),
-                data.get('week_52_high'),
-                data.get('week_52_low'),
-                data.get('name'),
-                datetime.now(timezone.utc).isoformat(),
-            ),
-        )
-        conn.commit()
-        conn.close()
+        with pooled_session() as conn:
+            conn.execute(
+                '''INSERT INTO financials_cache
+                   (ticker, pe_ratio, eps, market_cap, dividend_yield, beta, avg_volume,
+                    book_value, week_52_high, week_52_low, name, fetched_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(ticker) DO UPDATE SET
+                   pe_ratio=excluded.pe_ratio,
+                   eps=excluded.eps,
+                   market_cap=excluded.market_cap,
+                   dividend_yield=excluded.dividend_yield,
+                   beta=excluded.beta,
+                   avg_volume=excluded.avg_volume,
+                   book_value=excluded.book_value,
+                   week_52_high=excluded.week_52_high,
+                   week_52_low=excluded.week_52_low,
+                   name=excluded.name,
+                   fetched_at=excluded.fetched_at''',
+                (
+                    ticker,
+                    data.get('pe_ratio'),
+                    data.get('eps'),
+                    data.get('market_cap'),
+                    data.get('dividend_yield'),
+                    data.get('beta'),
+                    data.get('avg_volume'),
+                    data.get('book_value'),
+                    data.get('week_52_high'),
+                    data.get('week_52_low'),
+                    data.get('name'),
+                    datetime.now(timezone.utc).isoformat(),
+                ),
+            )
     except Exception as e:
         logger.warning("Could not write financials cache for %s: %s", ticker, e)
 
@@ -96,11 +100,16 @@ def get_stocks():
 
 
 @stocks_bp.route('/stocks', methods=['POST'])
+@handle_api_errors
 def add_stock_endpoint():
     """Add a new stock to the monitored list."""
     data = request.json
     if not data or 'ticker' not in data:
-        return jsonify({'success': False, 'error': 'Missing required field: ticker'}), 400
+        raise ValidationError(
+            'Missing required field: ticker',
+            error_code='MISSING_FIELD',
+            field_errors=[{'field': 'ticker', 'message': 'Ticker is required'}],
+        )
 
     ticker = data['ticker'].strip().upper()
     name = data.get('name')
@@ -112,15 +121,15 @@ def add_stock_endpoint():
             name = match.get('name', ticker)
         elif results:
             suggestions = [f"{r['ticker']} ({r['name']})" for r in results[:3]]
-            return jsonify({
-                'success': False,
-                'error': f"Ticker '{ticker}' not found. Did you mean: {', '.join(suggestions)}?"
-            }), 404
+            raise NotFoundError(
+                f"Ticker '{ticker}' not found. Did you mean: {', '.join(suggestions)}?",
+                error_code='TICKER_NOT_FOUND',
+            )
         else:
-            return jsonify({
-                'success': False,
-                'error': f"Ticker '{ticker}' not found on any exchange."
-            }), 404
+            raise NotFoundError(
+                f"Ticker '{ticker}' not found on any exchange.",
+                error_code='TICKER_NOT_FOUND',
+            )
 
     market = data.get('market', 'US')
     success = add_stock(ticker, name, market)
@@ -135,6 +144,7 @@ def remove_stock_endpoint(ticker):
 
 
 @stocks_bp.route('/stocks/prices', methods=['GET'])
+@handle_api_errors
 def get_bulk_prices():
     """Get the most-recent cached prices for all active stocks.
 
@@ -147,18 +157,15 @@ def get_bulk_prices():
         Tickers with no cached price are omitted.
     """
     try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute(
-            '''SELECT ar.ticker, ar.current_price, ar.price_change,
-                      ar.price_change_pct, ar.updated_at
-               FROM ai_ratings ar
-               INNER JOIN stocks s ON s.ticker = ar.ticker
-               WHERE s.active = 1
-                 AND ar.current_price IS NOT NULL'''
-        )
-        rows = cursor.fetchall()
-        conn.close()
+        with pooled_session() as conn:
+            rows = conn.execute(
+                '''SELECT ar.ticker, ar.current_price, ar.price_change,
+                          ar.price_change_pct, ar.updated_at
+                   FROM ai_ratings ar
+                   INNER JOIN stocks s ON s.ticker = ar.ticker
+                   WHERE s.active = 1
+                     AND ar.current_price IS NOT NULL'''
+            ).fetchall()
 
         result = {}
         for row in rows:
@@ -172,7 +179,7 @@ def get_bulk_prices():
         return jsonify(result)
     except Exception as e:
         logger.error("Error fetching bulk prices: %s", e)
-        return jsonify({}), 500
+        raise DatabaseError('Unable to retrieve price data')
 
 
 _TIMEFRAME_MAP = {
@@ -182,10 +189,13 @@ _TIMEFRAME_MAP = {
     '3M': ('3mo', '1d'),
     '6M': ('6mo', '1d'),
     '1Y': ('1y', '1d'),
+    '5Y': ('5y', '1wk'),
+    'All': ('max', '1mo'),
 }
 
 
 @stocks_bp.route('/stocks/<ticker>/detail', methods=['GET'])
+@handle_api_errors
 def get_stock_detail(ticker):
     """Aggregate quote, candlestick data, technical indicators, and news for a single ticker."""
     ticker = ticker.upper().strip()
@@ -198,7 +208,7 @@ def get_stock_detail(ticker):
         hist = tk.history(period=period, interval=interval)
 
         if hist.empty:
-            return jsonify({'error': 'ticker not found'}), 404
+            raise NotFoundError(f"Ticker '{ticker}' not found", error_code='TICKER_NOT_FOUND')
 
         candles = []
         for ts, row in hist.iterrows():
@@ -218,7 +228,7 @@ def get_stock_detail(ticker):
             })
 
         if not candles:
-            return jsonify({'error': 'ticker not found'}), 404
+            raise NotFoundError(f"Ticker '{ticker}' not found", error_code='TICKER_NOT_FOUND')
 
         fast_info = tk.fast_info
         last_price = getattr(fast_info, 'last_price', None)
@@ -303,10 +313,15 @@ def get_stock_detail(ticker):
 
     except ImportError:
         logger.error("yfinance is not installed")
-        return jsonify({'error': 'data provider unavailable'}), 503
+        raise ServiceUnavailableError(
+            'Data provider unavailable',
+            error_code='DATA_PROVIDER_UNAVAILABLE',
+        )
+    except (NotFoundError, ServiceUnavailableError):
+        raise
     except Exception as e:
-        logger.error(f"Error fetching stock detail for {ticker}: {e}")
-        return jsonify({'error': 'ticker not found'}), 404
+        logger.error("Error fetching stock detail for %s: %s", ticker, e)
+        raise NotFoundError(f"Ticker '{ticker}' not found", error_code='TICKER_NOT_FOUND')
 
     indicators = None
     try:
@@ -316,16 +331,20 @@ def get_stock_detail(ticker):
         logger.warning("Could not compute technical indicators for %s: %s", ticker, e)
 
     news = []
+    ai_rating = None
     try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute(
-            '''SELECT title, source, published_date, url, sentiment_label, sentiment_score
-               FROM news WHERE ticker = ? ORDER BY created_at DESC LIMIT 10''',
-            (ticker,)
-        )
-        news_rows = cursor.fetchall()
-        conn.close()
+        with pooled_session() as conn:
+            news_rows = conn.execute(
+                '''SELECT title, source, published_date, url, sentiment_label, sentiment_score
+                   FROM news WHERE ticker = ? ORDER BY created_at DESC LIMIT 10''',
+                (ticker,)
+            ).fetchall()
+            ai_row = conn.execute(
+                '''SELECT rating, score, confidence, technical_score, fundamental_score,
+                          summary, sentiment_label, updated_at
+                   FROM ai_ratings WHERE ticker = ?''',
+                (ticker,)
+            ).fetchone()
         news = [{
             'title': row['title'],
             'source': row['source'],
@@ -334,33 +353,19 @@ def get_stock_detail(ticker):
             'sentiment_label': row['sentiment_label'],
             'sentiment_score': row['sentiment_score'],
         } for row in news_rows]
-    except Exception as e:
-        logger.warning("Could not fetch news for %s: %s", ticker, e)
-
-    # Inline AI rating from ai_ratings table (no live compute on detail load)
-    ai_rating = None
-    try:
-        conn = get_db_connection()
-        row = conn.execute(
-            '''SELECT rating, score, confidence, technical_score, fundamental_score,
-                      summary, sentiment_label, updated_at
-               FROM ai_ratings WHERE ticker = ?''',
-            (ticker,)
-        ).fetchone()
-        conn.close()
-        if row:
+        if ai_row:
             ai_rating = {
-                'rating': row['rating'],
-                'score': row['score'] or 0,
-                'confidence': row['confidence'] or 0,
-                'technical_score': row['technical_score'],
-                'fundamental_score': row['fundamental_score'],
-                'summary': row['summary'],
-                'sentiment_label': row['sentiment_label'],
-                'updated_at': row['updated_at'],
+                'rating': ai_row['rating'],
+                'score': ai_row['score'] or 0,
+                'confidence': ai_row['confidence'] or 0,
+                'technical_score': ai_row['technical_score'],
+                'fundamental_score': ai_row['fundamental_score'],
+                'summary': ai_row['summary'],
+                'sentiment_label': ai_row['sentiment_label'],
+                'updated_at': ai_row['updated_at'],
             }
     except Exception as e:
-        logger.warning("Could not fetch ai_rating for %s: %s", ticker, e)
+        logger.warning("Could not fetch DB data for %s: %s", ticker, e)
 
     return jsonify({
         'quote': quote,
@@ -380,3 +385,108 @@ def search_stocks():
 
     results = search_stock_ticker(query)
     return jsonify(results)
+
+
+_VOLUME_PROFILE_MAX_BUCKETS = 200
+_VOLUME_PROFILE_DEFAULT_BUCKETS = 36
+
+
+@stocks_bp.route('/stocks/<ticker>/volume-profile', methods=['GET'])
+@handle_api_errors
+def get_volume_profile(ticker: str):
+    """Return a volume profile for *ticker* over a given timeframe.
+
+    Volume is distributed proportionally across equal-width price buckets
+    based on each candle's [low, high] range.  Also returns Value Area
+    metrics (POC, VAH, VAL at the 70 % threshold).
+
+    Query params:
+        timeframe (str): Any key from the shared timeframe map (default '1M').
+        buckets   (int): Price bucket count, 2–200 (default 36).
+
+    Returns:
+        200 JSON::
+
+            {
+              "ticker":     "AAPL",
+              "timeframe":  "1M",
+              "buckets": [
+                {"price_low": 180.0, "price_high": 181.5,
+                 "volume": 12345678, "pct": 4.2},
+                ...
+              ],
+              "value_area": {
+                "poc": 182.75,
+                "poc_volume": 25000000,
+                "vah": 185.0,
+                "val": 180.0
+              }
+            }
+    """
+    ticker = ticker.upper().strip()
+
+    timeframe = request.args.get('timeframe', '1M')
+    if timeframe not in _TIMEFRAME_MAP:
+        raise ValidationError(
+            f"Unknown timeframe '{timeframe}'. "
+            f"Valid options: {', '.join(_TIMEFRAME_MAP)}",
+            error_code='INVALID_TIMEFRAME',
+        )
+
+    raw_buckets = request.args.get('buckets', str(_VOLUME_PROFILE_DEFAULT_BUCKETS))
+    try:
+        n_buckets = int(raw_buckets)
+    except ValueError:
+        raise ValidationError(
+            "'buckets' must be an integer",
+            error_code='INVALID_PARAM',
+        )
+    n_buckets = max(2, min(_VOLUME_PROFILE_MAX_BUCKETS, n_buckets))
+
+    period, interval = _TIMEFRAME_MAP[timeframe]
+
+    try:
+        import yfinance as yf
+        tk = yf.Ticker(ticker)
+        hist = tk.history(period=period, interval=interval)
+    except ImportError:
+        raise ServiceUnavailableError(
+            'Data provider unavailable',
+            error_code='DATA_PROVIDER_UNAVAILABLE',
+        )
+    except Exception as e:
+        logger.error("yfinance error fetching volume profile for %s: %s", ticker, e)
+        raise NotFoundError(f"Ticker '{ticker}' not found", error_code='TICKER_NOT_FOUND')
+
+    if hist.empty:
+        raise NotFoundError(f"Ticker '{ticker}' not found", error_code='TICKER_NOT_FOUND')
+
+    candles = []
+    for _, row in hist.iterrows():
+        try:
+            close = float(row['Close'])
+            if math.isnan(close):
+                continue
+        except (TypeError, ValueError):
+            continue
+        candles.append({
+            'open': float(row['Open']),
+            'high': float(row['High']),
+            'low': float(row['Low']),
+            'close': close,
+            'volume': int(row.get('Volume', 0) or 0),
+        })
+
+    if not candles:
+        raise NotFoundError(
+            f"No price data available for '{ticker}'",
+            error_code='TICKER_NOT_FOUND',
+        )
+
+    profile = StockAnalytics.calculate_volume_profile(candles, buckets=n_buckets)
+
+    return jsonify({
+        'ticker': ticker,
+        'timeframe': timeframe,
+        **profile,
+    })

@@ -31,12 +31,18 @@ contextBridge.exposeInMainWorld('tickerpulse', {
   /**
    * Show a native OS desktop notification for a triggered price alert.
    * Invoked by useSSEAlerts when an `alert` SSE event arrives.
+   *
+   * Ticker and message are truncated before crossing the IPC boundary to
+   * prevent unbounded strings reaching the OS notification daemon.
    */
-  showNotification: (ticker: string, message: string) =>
-    ipcRenderer.invoke('alerts:notify', {
-      title: `Alert: ${ticker}`,
-      body: message,
-    }),
+  showNotification: (ticker: string, message: string) => {
+    const safeTicker = String(ticker).slice(0, 20);
+    const safeBody = String(message).slice(0, 500);
+    return ipcRenderer.invoke('alerts:notify', {
+      title: `Alert: ${safeTicker}`,
+      body: safeBody,
+    });
+  },
 });
 
 /**

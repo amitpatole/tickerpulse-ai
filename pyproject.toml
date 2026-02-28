@@ -1,0 +1,42 @@
+[tool.pytest.ini_options]
+testpaths = ["backend/tests"]
+addopts = [
+    "--cov=backend",
+    "--ignore=backend/agents",
+    "--ignore=backend/data_providers",
+]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 120
+exclude = [
+    "backend/agents",
+    "backend/data_providers",
+    "__pycache__",
+    ".git",
+    ".venv",
+    "build",
+    "dist",
+]
+
+[tool.ruff.lint]
+# E: pycodestyle errors, F: pyflakes, W: pycodestyle warnings
+select = ["E", "F", "W"]
+ignore = [
+    "E402",  # module-level import not at top of file (config-driven imports)
+    "E711",  # comparison to None via ==  (explicit is sometimes clearer)
+    "E712",  # comparison to True/False   (ditto)
+    "F401",  # imported but unused (needed in __init__.py re-exports)
+    "W503",  # line break before binary operator (Black-compatible style)
+]
+
+[tool.mypy]
+python_version = "3.12"
+ignore_missing_imports = true
+check_untyped_defs = true
+warn_unused_ignores = true
+exclude = [
+    "backend/agents/",
+    "backend/data_providers/",
+    "backend/tests/",
+]

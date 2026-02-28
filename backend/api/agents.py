@@ -1,4 +1,3 @@
-```python
 """
 TickerPulse AI v3.0 - Agents API Routes
 Blueprint for agent management, execution, run history, and cost tracking.
@@ -20,6 +19,9 @@ from datetime import datetime, timedelta
 from flask import Blueprint, current_app, jsonify, request
 
 from backend.config import Config
+from backend.core.error_codes import ErrorCode
+from backend.core.error_handlers import handle_api_errors
+from backend.api.validators.agent_validators import validate_date_range
 
 logger = logging.getLogger(__name__)
 
@@ -161,6 +163,7 @@ def _format_agent(stub_name: str, agent_obj) -> dict:
 # ---------------------------------------------------------------------------
 
 @agents_bp.route('/agents', methods=['GET'])
+@handle_api_errors
 def list_agents():
     """List all registered agents with their current status.
 
@@ -232,6 +235,7 @@ def list_agents():
 
 
 @agents_bp.route('/agents/<name>', methods=['GET'])
+@handle_api_errors
 def get_agent_detail(name):
     """Get detailed information about a specific agent including run history.
 
@@ -247,15 +251,15 @@ def get_agent_detail(name):
     """
     registry = _get_registry()
     if registry is None:
-        return jsonify({'error': 'Agent registry not initialised'}), 503
+        return jsonify({'error': 'Agent registry not initialised', 'error_code': ErrorCode.PROVIDER_ERROR}), 503
 
     real_name = AGENT_ID_MAP.get(name)
     if real_name is None:
-        return jsonify({'error': f'Agent not found: {name}'}), 404
+        return jsonify({'error': f'Agent not found: {name}', 'error_code': ErrorCode.NOT_FOUND}), 404
 
     agent_obj = registry.get(real_name)
     if agent_obj is None:
-        return jsonify({'error': f'Agent not found: {name}'}), 404
+        return jsonify({'error': f'Agent not found: {name}', 'error_code': ErrorCode.NOT_FOUND}), 404
 
     detail = _format_agent(name, agent_obj)
 
@@ -294,6 +298,7 @@ def get_agent_detail(name):
 
 
 @agents_bp.route('/agents/<name>/run', methods=['POST'])
+@handle_api_errors
 def trigger_agent_run(name):
     """Manually trigger an agent run.
 
@@ -318,20 +323,21 @@ def trigger_agent_run(name):
     """
     registry = _get_registry()
     if registry is None:
-        return jsonify({'error': 'Agent registry not initialised'}), 503
+        return jsonify({'error': 'Agent registry not initialised', 'error_code': ErrorCode.PROVIDER_ERROR}), 503
 
     real_name = AGENT_ID_MAP.get(name)
     if real_name is None:
-        return jsonify({'error': f'Agent not found: {name}'}), 404
+        return jsonify({'error': f'Agent not found: {name}', 'error_code': ErrorCode.NOT_FOUND}), 404
 
     agent_obj = registry.get(real_name)
     if agent_obj is None:
-        return jsonify({'error': f'Agent not found: {name}'}), 404
+        return jsonify({'error': f'Agent not found: {name}', 'error_code': ErrorCode.NOT_FOUND}), 404
 
     if not agent_obj.config.enabled:
         return jsonify({
             'success': False,
-            'error': f'Agent "{name}" is currently disabled. Enable it in settings first.'
+            'error': f'Agent "{name}" is currently disabled. Enable it in settings first.',
+            'error_code': ErrorCode.BAD_REQUEST,
         }), 400
 
     data = request.get_json(silent=True) or {}
@@ -386,7 +392,7 @@ def trigger_agent_run(name):
     # result in a single operation — exactly one row written to agent_runs.
     result, run_id = registry.run_agent(real_name, params)
     if result is None:
-        return jsonify({'error': f'Agent {real_name} execution failed internally'}), 500
+        return jsonify({'error': f'Agent {real_name} execution failed internally', 'error_code': ErrorCode.INTERNAL_ERROR}), 500
     success = result.status == 'success'
 
     logger.info(
@@ -416,6 +422,7 @@ def trigger_agent_run(name):
 
 
 @agents_bp.route('/agents/runs', methods=['GET'])
+@handle_api_errors
 def list_recent_runs():
     """List recent agent runs across all agents with cursor-based pagination.
 
@@ -424,6 +431,11 @@ def list_recent_runs():
         page (int, optional): 1-based page number. Default 1.
         agent (str, optional): Filter by agent name (stub aliases accepted).
         status (str, optional): Filter by run status (running, success, error).
+        date_from (str, optional): Lower bound on started_at (inclusive).
+            Accepts YYYY-MM-DD or ISO 8601 datetime.
+        date_to (str, optional): Upper bound on started_at (inclusive).
+            Accepts YYYY-MM-DD or ISO 8601 datetime.  A date-only value is
+            extended to 23:59:59.999999 so the full day is included.
 
     Returns:
         JSON object with:
@@ -439,18 +451,18 @@ def list_recent_runs():
     try:
         limit = int(raw_limit)
     except ValueError:
-        return jsonify({'error': 'limit must be a positive integer'}), 400
+        return jsonify({'error': 'limit must be a positive integer', 'error_code': ErrorCode.INVALID_INPUT}), 400
     if limit <= 0:
-        return jsonify({'error': 'limit must be a positive integer'}), 400
+        return jsonify({'error': 'limit must be a positive integer', 'error_code': ErrorCode.INVALID_INPUT}), 400
     limit = min(limit, 200)
 
     raw_page = request.args.get('page', '1')
     try:
         page = int(raw_page)
     except ValueError:
-        return jsonify({'error': 'page must be a positive integer'}), 400
+        return jsonify({'error': 'page must be a positive integer', 'error_code': ErrorCode.INVALID_INPUT}), 400
     if page <= 0:
-        return jsonify({'error': 'page must be a positive integer'}), 400
+        return jsonify({'error': 'page must be a positive integer', 'error_code': ErrorCode.INVALID_INPUT}), 400
 
     # Correct 1-based offset: page 1 → offset 0, page 2 → offset limit, …
     offset = (page - 1) * limit
@@ -461,10 +473,19 @@ def list_recent_runs():
     status_filter = request.args.get('status')
     if status_filter and status_filter not in _VALID_STATUSES:
         return jsonify({
-            'error': f"Invalid status. Must be one of: {', '.join(sorted(_VALID_STATUSES))}"
+            'error': f"Invalid status. Must be one of: {', '.join(sorted(_VALID_STATUSES))}",
+            'error_code': ErrorCode.INVALID_INPUT,
         }), 400
 
-    runs = []
+    # Date-range params — empty string treated as absent
+    date_from = request.args.get('date_from') or None
+    date_to   = request.args.get('date_to')   or None
+
+    valid, date_err, parsed_from, parsed_to = validate_date_range(date_from, date_to)
+    if not valid:
+        return jsonify({'error': date_err, 'error_code': ErrorCode.INVALID_INPUT}), 400
+
+    runs: list[dict] = []
     total = 0
     try:
         conn = sqlite3.connect(Config.DB_PATH)
@@ -481,6 +502,12 @@ def list_recent_runs():
         if status_filter:
             where += ' AND status = ?'
             filter_params.append(status_filter)
+        if parsed_from is not None:
+            where += ' AND started_at >= ?'
+            filter_params.append(parsed_from.isoformat())
+        if parsed_to is not None:
+            where += ' AND started_at <= ?'
+            filter_params.append(parsed_to.isoformat())
 
         # True total count so pagination metadata is accurate regardless of limit
         total = conn.execute(
@@ -522,11 +549,14 @@ def list_recent_runs():
             'limit': limit,
             'agent': agent_filter,
             'status': status_filter,
+            'date_from': date_from,
+            'date_to': date_to,
         },
     })
 
 
 @agents_bp.route('/agents/costs', methods=['GET'])
+@handle_api_errors
 def get_cost_summary():
     """Get cost summary for agent runs (AI API usage).
 
@@ -648,4 +678,3 @@ def _get_agent_tools(agent_name: str) -> list:
         ],
     }
     return tool_map.get(agent_name, [])
-```

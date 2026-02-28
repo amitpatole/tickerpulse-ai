@@ -1,4 +1,3 @@
-```tsx
 'use client';
 
 import { useEffect } from 'react';
@@ -17,4 +16,3 @@ export default function GlobalErrorSetup(): null {
 
   return null;
 }
-```

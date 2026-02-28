@@ -1,4 +1,3 @@
-```python
 """
 TickerPulse AI v3.0 - In-memory API Latency Buffer
 
@@ -57,4 +56,3 @@ def flush() -> List[Dict[str, Any]]:
                 'log_date': day,
             })
     return rows
-```

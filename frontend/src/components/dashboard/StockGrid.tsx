@@ -1,8 +1,25 @@
 'use client';
 
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
-import { Search, Plus, Loader2, X, ChevronUp, ChevronDown } from 'lucide-react';
+import { Search, Plus, Loader2, X, ChevronUp, ChevronDown, GripVertical } from 'lucide-react';
 import { clsx } from 'clsx';
+import {
+  DndContext,
+  DragEndEvent,
+  PointerSensor,
+  KeyboardSensor,
+  useSensor,
+  useSensors,
+  closestCenter,
+} from '@dnd-kit/core';
+import {
+  SortableContext,
+  useSortable,
+  sortableKeyboardCoordinates,
+  rectSortingStrategy,
+  arrayMove,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import {
   getWatchlistOrder,
   reorderWatchlist,
@@ -13,6 +30,93 @@ import {
 } from '@/lib/api';
 import type { AIRating, StockSearchResult } from '@/lib/types';
 import StockCard from './StockCard';
+
+interface SortableStockItemProps {
+  rating: AIRating;
+  idx: number;
+  total: number;
+  flashSet: Set<string>;
+  onRowClick?: (ticker: string) => void;
+  onRemove: (ticker: string) => void;
+  onMoveUp: (ticker: string) => void;
+  onMoveDown: (ticker: string) => void;
+}
+
+function SortableStockItem({
+  rating,
+  idx,
+  total,
+  flashSet,
+  onRowClick,
+  onRemove,
+  onMoveUp,
+  onMoveDown,
+}: SortableStockItemProps) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    setActivatorNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: rating.ticker });
+
+  const style: React.CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.4 : 1,
+    zIndex: isDragging ? 10 : undefined,
+  };
+
+  return (
+    <li
+      ref={setNodeRef}
+      style={style}
+      className={clsx(
+        'group relative',
+        onRowClick && 'cursor-pointer',
+        flashSet.has(rating.ticker) && 'animate-price-flash',
+      )}
+      onClick={(e) => {
+        if (onRowClick && !(e.target as HTMLElement).closest('button')) {
+          onRowClick(rating.ticker);
+        }
+      }}
+    >
+      {/* Drag handle — visible on hover */}
+      <div
+        ref={setActivatorNodeRef}
+        {...attributes}
+        {...listeners}
+        className="absolute right-2 top-2 z-10 cursor-grab touch-none opacity-0 transition-opacity group-hover:opacity-60 active:cursor-grabbing"
+        aria-label={`Drag to reorder ${rating.ticker}`}
+      >
+        <GripVertical className="h-4 w-4 text-slate-400" aria-hidden="true" />
+      </div>
+      <StockCard rating={rating} onRemove={onRemove} />
+      {/* Keyboard reorder controls — visible on focus-within */}
+      <div className="absolute bottom-2 left-2 z-10 flex gap-1 opacity-0 transition-opacity group-focus-within:opacity-100">
+        <button
+          onClick={(e) => { e.stopPropagation(); onMoveUp(rating.ticker); }}
+          disabled={idx === 0}
+          aria-label={`Move ${rating.ticker} up in watchlist`}
+          className="flex h-6 w-6 items-center justify-center rounded bg-slate-700/90 text-slate-300 hover:bg-slate-600 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          <ChevronUp className="h-3 w-3" aria-hidden="true" />
+        </button>
+        <button
+          onClick={(e) => { e.stopPropagation(); onMoveDown(rating.ticker); }}
+          disabled={idx === total - 1}
+          aria-label={`Move ${rating.ticker} down in watchlist`}
+          className="flex h-6 w-6 items-center justify-center rounded bg-slate-700/90 text-slate-300 hover:bg-slate-600 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          <ChevronDown className="h-3 w-3" aria-hidden="true" />
+        </button>
+      </div>
+    </li>
+  );
+}
 
 interface StockGridProps {
   watchlistId?: number;
@@ -203,6 +307,23 @@ export default function StockGrid({ watchlistId = 1, ratings, onRefetch, onRowCl
     }
   };
 
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
+
+  function handleDragEnd(event: DragEndEvent) {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    const oldIdx = order.indexOf(active.id as string);
+    const newIdx = order.indexOf(over.id as string);
+    if (oldIdx === -1 || newIdx === -1) return;
+    const next = arrayMove(order, oldIdx, newIdx);
+    setOrder(next);
+    reorderWatchlist(watchlistId, next).catch(() => {});
+    setAnnounceMsg(`${active.id as string} moved to position ${newIdx + 1}`);
+  }
+
   function moveUp(ticker: string) {
     const idx = order.indexOf(ticker);
     if (idx <= 0) return;
@@ -374,48 +495,33 @@ export default function StockGrid({ watchlistId = 1, ratings, onRefetch, onRowCl
               </p>
             </div>
           ) : (
-            <ul
-              role="list"
-              aria-label="Watchlist stocks"
-              className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3"
+            <DndContext
+              sensors={sensors}
+              collisionDetection={closestCenter}
+              onDragEnd={handleDragEnd}
             >
-              {sortedRatings.map((rating, idx) => (
-                <li
-                  key={rating.ticker}
-                  className={clsx(
-                    'group relative',
-                    onRowClick && 'cursor-pointer',
-                    flashSet.has(rating.ticker) && 'animate-price-flash',
-                  )}
-                  onClick={(e) => {
-                    if (onRowClick && !(e.target as HTMLElement).closest('button')) {
-                      onRowClick(rating.ticker);
-                    }
-                  }}
+              <SortableContext items={order} strategy={rectSortingStrategy}>
+                <ul
+                  role="list"
+                  aria-label="Watchlist stocks"
+                  className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3"
                 >
-                  <StockCard rating={rating} onRemove={handleRemoveStock} />
-                  {/* Reorder controls — visible on keyboard focus-within */}
-                  <div className="absolute bottom-2 left-2 z-10 flex gap-1 opacity-0 transition-opacity group-focus-within:opacity-100">
-                    <button
-                      onClick={() => moveUp(rating.ticker)}
-                      disabled={idx === 0}
-                      aria-label={`Move ${rating.ticker} up in watchlist`}
-                      className="flex h-6 w-6 items-center justify-center rounded bg-slate-700/90 text-slate-300 hover:bg-slate-600 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
-                    >
-                      <ChevronUp className="h-3 w-3" aria-hidden="true" />
-                    </button>
-                    <button
-                      onClick={() => moveDown(rating.ticker)}
-                      disabled={idx === sortedRatings.length - 1}
-                      aria-label={`Move ${rating.ticker} down in watchlist`}
-                      className="flex h-6 w-6 items-center justify-center rounded bg-slate-700/90 text-slate-300 hover:bg-slate-600 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
-                    >
-                      <ChevronDown className="h-3 w-3" aria-hidden="true" />
-                    </button>
-                  </div>
-                </li>
-              ))}
-            </ul>
+                  {sortedRatings.map((rating, idx) => (
+                    <SortableStockItem
+                      key={rating.ticker}
+                      rating={rating}
+                      idx={idx}
+                      total={sortedRatings.length}
+                      flashSet={flashSet}
+                      onRowClick={onRowClick}
+                      onRemove={handleRemoveStock}
+                      onMoveUp={moveUp}
+                      onMoveDown={moveDown}
+                    />
+                  ))}
+                </ul>
+              </SortableContext>
+            </DndContext>
           )}
         </>
       )}

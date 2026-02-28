@@ -1,4 +1,3 @@
-```typescript
 /**
  * TickerPulse AI v3.0 — Client-side error reporter.
  *
@@ -45,6 +44,7 @@ interface ErrorPayload {
   session_id: string;
   severity: ErrorSeverity;
   code?: string;
+  path?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -136,10 +136,11 @@ async function _send(payload: ErrorPayload): Promise<void> {
  * @param error  The Error object to report.
  * @param options.code      Optional structured error code (e.g. from ApiError).
  * @param options.severity  Defaults to 'error'.
+ * @param options.path      Optional API path that triggered the error.
  */
 export async function captureException(
   error: Error,
-  options?: { code?: string; severity?: ErrorSeverity },
+  options?: { code?: string; severity?: ErrorSeverity; path?: string },
 ): Promise<void> {
   await _send({
     type: 'unhandled_exception',
@@ -151,6 +152,7 @@ export async function captureException(
     session_id: SESSION_ID,
     severity: options?.severity ?? 'error',
     code: options?.code,
+    path: options?.path,
   });
 }
 
@@ -191,10 +193,12 @@ export async function captureRejection(
  *
  * @param error           The render error.
  * @param componentStack  React component stack from ErrorInfo.
+ * @param options.code    Optional structured error code (e.g. from ApiError).
  */
 export async function captureReactError(
   error: Error,
   componentStack: string,
+  options?: { code?: string },
 ): Promise<void> {
   await _send({
     type: 'react_error',
@@ -206,6 +210,7 @@ export async function captureReactError(
     timestamp: new Date().toISOString(),
     session_id: SESSION_ID,
     severity: 'critical',
+    code: options?.code,
   });
 }
 
@@ -226,4 +231,3 @@ export function setupGlobalHandlers(): void {
     captureRejection(event.reason);
   });
 }
-```
