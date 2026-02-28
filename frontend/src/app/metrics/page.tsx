@@ -1,4 +1,4 @@
-```typescript
+```tsx
 'use client';
 
 import { useState } from 'react';
@@ -9,6 +9,7 @@ import TimeseriesChart from '@/components/metrics/TimeseriesChart';
 import AgentsTable from '@/components/metrics/AgentsTable';
 import JobsTable from '@/components/metrics/JobsTable';
 import SystemPanel from '@/components/metrics/SystemPanel';
+import PeriodSelector from '@/components/metrics/PeriodSelector';
 import { useApi } from '@/hooks/useApi';
 import {
   getMetricsSummary,
@@ -24,12 +25,6 @@ import {
 
 type TabId = 'overview' | 'agents' | 'jobs' | 'system';
 type MetricId = 'cost' | 'runs' | 'duration' | 'tokens';
-
-const PERIODS = [
-  { label: '7d',  value: 7  },
-  { label: '30d', value: 30 },
-  { label: '90d', value: 90 },
-] as const;
 
 const TABS: { id: TabId; label: string; Icon: React.ComponentType<{ className?: string }> }[] = [
   { id: 'overview', label: 'Overview', Icon: BarChart3 },
@@ -50,24 +45,20 @@ const METRICS: { id: MetricId; label: string }[] = [
 // ---------------------------------------------------------------------------
 
 export default function MetricsPage() {
-  const [days, setDays]           = useState(30);
-  const [tab, setTab]             = useState<TabId>('overview');
-  const [metric, setMetric]       = useState<MetricId>('cost');
+  const [days, setDays]             = useState(30);
+  const [tab, setTab]               = useState<TabId>('overview');
+  const [metric, setMetric]         = useState<MetricId>('cost');
   const [refreshKey, setRefreshKey] = useState(0);
 
   const summaryResult    = useApi(() => getMetricsSummary(days),            [days, refreshKey]);
   const agentsResult     = useApi(() => getAgentMetrics(days),              [days, refreshKey]);
   const timeseriesResult = useApi(() => getMetricsTimeseries(days, metric), [days, metric, refreshKey]);
   const jobsResult       = useApi(() => getJobMetrics(days),                [days, refreshKey]);
-  // System metrics are always fetched so pool stats appear in SummaryCards on all tabs.
-  const systemResult     = useApi(() => getSystemMetrics(),                 [refreshKey]);
+  const systemResult     = useApi(() => getSystemMetrics(),                 [refreshKey], { enabled: tab === 'system' });
 
-  const agents    = agentsResult.data?.agents    ?? [];
-  const timeseries = timeseriesResult.data?.data ?? [];
-  const jobs      = jobsResult.data?.jobs        ?? [];
-
-  const snapshots = systemResult.data?.snapshots ?? [];
-  const latestSnapshot = snapshots.length > 0 ? snapshots[snapshots.length - 1] : null;
+  const agents     = agentsResult.data?.agents    ?? [];
+  const timeseries = timeseriesResult.data?.data  ?? [];
+  const jobs       = jobsResult.data?.jobs        ?? [];
 
   return (
     <div className="min-h-screen bg-slate-950 text-white">
@@ -82,22 +73,7 @@ export default function MetricsPage() {
           </div>
 
           <div className="flex items-center gap-3">
-            {/* Period selector */}
-            <div className="flex rounded-lg border border-slate-700/50 p-0.5">
-              {PERIODS.map(({ label, value }) => (
-                <button
-                  key={value}
-                  onClick={() => setDays(value)}
-                  className={`rounded-md px-3 py-1 text-sm font-medium transition-colors ${
-                    days === value
-                      ? 'bg-blue-600 text-white'
-                      : 'text-slate-400 hover:text-white'
-                  }`}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
+            <PeriodSelector value={days} onChange={setDays} />
 
             <button
               onClick={() => setRefreshKey((k) => k + 1)}
@@ -111,11 +87,7 @@ export default function MetricsPage() {
 
         {/* ── Summary cards ─────────────────────────────────────────── */}
         <div className="mb-6">
-          <SummaryCards
-            summary={summaryResult.data}
-            loading={summaryResult.loading}
-            poolStats={latestSnapshot}
-          />
+          <SummaryCards summary={summaryResult.data} loading={summaryResult.loading} />
         </div>
 
         {/* ── Tab navigation ────────────────────────────────────────── */}
