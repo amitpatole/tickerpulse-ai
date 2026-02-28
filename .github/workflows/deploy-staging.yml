@@ -29,11 +29,23 @@ jobs:
 
       - name: Deploy to staging environment
         run: |
-          echo "Deploying commit ${{ github.event.workflow_run.head_sha }} to staging"
-          echo "Replace this with the real deploy command for your platform"
+          install -m 600 /dev/null ~/.ssh/id_deploy
+          printf '%s' "$DEPLOY_TOKEN" > ~/.ssh/id_deploy
+          ssh -i ~/.ssh/id_deploy \
+              -o StrictHostKeyChecking=no \
+              -o BatchMode=yes \
+              "$DEPLOY_USER@$DEPLOY_HOST" \
+              "set -e
+               cd /opt/tickerpulse-staging
+               git fetch --quiet
+               git checkout ${{ github.event.workflow_run.head_sha }}
+               docker compose pull --quiet
+               docker compose up -d --remove-orphans
+               echo 'Staging deploy complete: ${{ github.event.workflow_run.head_sha }}'"
         env:
           DEPLOY_TOKEN: ${{ secrets.STAGING_DEPLOY_TOKEN }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DEPLOY_HOST: ${{ secrets.STAGING_HOST }}
+          DEPLOY_USER: ${{ secrets.STAGING_USER }}
 
   staging-smoke:
     name: Staging Smoke Tests

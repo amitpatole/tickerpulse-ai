@@ -22,11 +22,23 @@ jobs:
 
       - name: Deploy to production environment
         run: |
-          echo "Deploying ${{ github.ref_name }} to production"
-          echo "Replace this with the real deploy command for your platform"
+          install -m 600 /dev/null ~/.ssh/id_deploy
+          printf '%s' "$DEPLOY_TOKEN" > ~/.ssh/id_deploy
+          ssh -i ~/.ssh/id_deploy \
+              -o StrictHostKeyChecking=no \
+              -o BatchMode=yes \
+              "$DEPLOY_USER@$DEPLOY_HOST" \
+              "set -e
+               cd /opt/tickerpulse
+               git fetch --tags --quiet
+               git checkout ${{ github.ref_name }}
+               docker compose pull --quiet
+               docker compose up -d --remove-orphans
+               echo 'Production deploy complete: ${{ github.ref_name }}'"
         env:
           DEPLOY_TOKEN: ${{ secrets.PRODUCTION_DEPLOY_TOKEN }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DEPLOY_HOST: ${{ secrets.PRODUCTION_HOST }}
+          DEPLOY_USER: ${{ secrets.PRODUCTION_USER }}
 
   create-release:
     name: Create GitHub Release
