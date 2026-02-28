@@ -1,6 +1,5 @@
 ```python
 
-
 """
 TickerPulse AI v3.0 - Database Connection Manager
 Thread-safe SQLite helper with context-manager support and table initialisation.
