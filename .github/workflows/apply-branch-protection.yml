@@ -1,0 +1,30 @@
+name: Apply Branch Protection
+
+# One-shot workflow: run manually after initial repo setup or any time the
+# branch-protection-config.json ruleset needs to be (re)applied to main.
+# Requires a PAT with repo admin scope stored as REPO_ADMIN_TOKEN.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  apply:
+    name: Apply Branch Protection Rules
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Apply branch protection to main
+        run: |
+          gh api \
+            --method PUT \
+            -H "Accept: application/vnd.github+json" \
+            "/repos/${{ github.repository }}/branches/main/protection" \
+            --input .github/branch-protection-config.json
+          echo "Branch protection applied to main"
+        env:
+          GH_TOKEN: ${{ secrets.REPO_ADMIN_TOKEN }}

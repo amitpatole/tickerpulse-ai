@@ -1,3 +1,4 @@
+```json
 {
   "name": "tickerpulse-ai",
   "version": "3.2.2",
@@ -9,7 +10,9 @@
     "dev": "tsc && electron .",
     "build:main": "tsc",
     "build:installer": "electron-builder --win --config electron-builder.yml",
-    "build": "npm run build:main && npm run build:installer"
+    "build": "npm run build:main && npm run build:installer",
+    "test": "jest",
+    "test:ci": "jest --ci --coverage"
   },
   "dependencies": {
     "dotenv": "^16.4.0",
@@ -20,6 +23,10 @@
     "electron": "^34.0.0",
     "electron-builder": "^25.0.0",
     "typescript": "^5.5.0",
-    "@types/node": "^20.0.0"
+    "@types/node": "^20.0.0",
+    "jest": "^29.0.0",
+    "ts-jest": "^29.0.0",
+    "@types/jest": "^29.0.0"
   }
 }
+```
