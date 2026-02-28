@@ -1,4 +1,3 @@
-```python
 """
 TickerPulse AI v3.0 - Earnings Calendar API
 Blueprint serving upcoming and past earnings events with watchlist filtering.
@@ -10,6 +9,8 @@ from datetime import datetime, timedelta, timezone
 from flask import Blueprint, jsonify, request
 
 from backend.database import db_session
+from backend.core.error_handlers import handle_api_errors, NotFoundError, ServiceUnavailableError, ValidationError
+from backend.core.error_codes import ErrorCode
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +51,7 @@ def _row_to_dict(row):
 
 
 @earnings_bp.route('/earnings', methods=['GET'])
+@handle_api_errors
 def get_earnings():
     """Return upcoming and past earnings events split at today's date.
 
@@ -60,9 +62,19 @@ def get_earnings():
     """
     try:
         days = int(request.args.get('days', 30))
-        days = max(1, min(90, days))
     except (TypeError, ValueError):
         days = 30
+    else:
+        if days < 1:
+            raise ValidationError(
+                "days parameter must be at least the minimum value of 1",
+                field_errors=[{'field': 'days', 'message': 'Minimum value is 1'}],
+            )
+        if days > 90:
+            raise ValidationError(
+                "days parameter exceeds maximum value of 90",
+                field_errors=[{'field': 'days', 'message': 'Maximum value is 90'}],
+            )
 
     watchlist_id = request.args.get('watchlist_id', type=int)
 
@@ -137,6 +149,7 @@ def get_earnings():
 
 
 @earnings_bp.route('/earnings/<ticker>', methods=['GET'])
+@handle_api_errors
 def get_ticker_earnings(ticker: str):
     """Return all earnings events for a specific ticker, sorted by date descending."""
     ticker = ticker.upper()
@@ -161,13 +174,14 @@ def get_ticker_earnings(ticker: str):
         ).fetchall()
 
     if stock_row is None and not rows:
-        return jsonify({'error': f'Ticker {ticker} not found'}), 404
+        raise NotFoundError(f'Ticker {ticker} not found', error_code=ErrorCode.TICKER_NOT_FOUND)
 
     events = [_row_to_dict(row) for row in rows]
     return jsonify({'ticker': ticker, 'events': events})
 
 
 @earnings_bp.route('/earnings/sync', methods=['POST'])
+@handle_api_errors
 def sync_earnings():
     """Manually trigger an earnings calendar sync from Yahoo Finance."""
     try:
@@ -179,7 +193,7 @@ def sync_earnings():
         })
     except Exception as exc:
         logger.error("Manual earnings sync failed: %s", exc)
-        return jsonify({'error': str(exc)}), 500
+        raise ServiceUnavailableError(str(exc), error_code=ErrorCode.SYNC_FAILED)
 
 
 def _is_stale(fetched_at_str: str | None) -> bool:
@@ -194,4 +208,3 @@ def _is_stale(fetched_at_str: str | None) -> bool:
         return age_hours > _STALE_THRESHOLD_HOURS
     except (ValueError, OverflowError):
         return True
-```

@@ -20,6 +20,8 @@ import type {
   EarningsResponse,
   ExportCapabilities,
   ExportFormat,
+  HealthReadyResponse,
+  HealthResponse,
   JobMetricsResponse,
   MetricsSummary,
   MetricsTimeseriesResponse,
@@ -54,19 +56,19 @@ export interface FieldError {
 export class ApiError extends Error {
   status: number;
   code?: string;
-  field_errors?: FieldError[];
+  fieldErrors: FieldError[];
 
   constructor(
     message: string,
     status: number,
     code?: string,
-    field_errors?: FieldError[],
+    fieldErrors?: FieldError[],
   ) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
     this.code = code;
-    this.field_errors = field_errors;
+    this.fieldErrors = fieldErrors ?? [];
   }
 }
 
@@ -133,8 +135,8 @@ export async function getStockCandles(
 // ---------------------------------------------------------------------------
 
 export interface KnownAgent {
+  job_id: string;
   name: string;
-  label: string;
   description?: string;
 }
 
@@ -289,8 +291,9 @@ export async function getNews(params?: {
 // ---------------------------------------------------------------------------
 
 export async function getEarnings(params?: {
-  days_ahead?: number;
+  days?: number;
   watchlist_id?: number;
+  ticker?: string;
 }): Promise<EarningsResponse> {
   return _fetch<EarningsResponse>(`/api/earnings${_qs(params ?? {})}`);
 }
@@ -526,23 +529,24 @@ export async function resumeJob(jobId: string): Promise<{ message: string }> {
 
 export async function updateJobSchedule(
   jobId: string,
-  schedule: { trigger: string; trigger_args: Record<string, unknown> },
+  trigger: string,
+  args: Record<string, unknown>,
 ): Promise<ScheduledJob> {
   return _fetch<ScheduledJob>(
     `/api/scheduler/jobs/${encodeURIComponent(jobId)}/schedule`,
-    { method: 'PATCH', body: JSON.stringify(schedule) },
+    { method: 'PUT', body: JSON.stringify({ trigger, ...args }) },
   );
 }
 
 export async function listAgentSchedules(): Promise<AgentSchedule[]> {
-  const data = await _fetch<{ schedules: AgentSchedule[] }>('/api/scheduler/schedules');
+  const data = await _fetch<{ schedules: AgentSchedule[] }>('/api/scheduler/agent-schedules');
   return data.schedules ?? [];
 }
 
 export async function createAgentSchedule(
-  data: Omit<AgentSchedule, 'id' | 'last_run' | 'next_run' | 'created_at'>,
+  data: Omit<AgentSchedule, 'id' | 'created_at' | 'updated_at' | 'last_run' | 'next_run'>,
 ): Promise<AgentSchedule> {
-  return _fetch<AgentSchedule>('/api/scheduler/schedules', {
+  return _fetch<AgentSchedule>('/api/scheduler/agent-schedules', {
     method: 'POST',
     body: JSON.stringify(data),
   });
@@ -550,21 +554,21 @@ export async function createAgentSchedule(
 
 export async function updateAgentSchedule(
   id: number,
-  data: Partial<AgentSchedule>,
+  data: Partial<Pick<AgentSchedule, 'label' | 'description' | 'trigger' | 'trigger_args' | 'enabled'>>,
 ): Promise<AgentSchedule> {
-  return _fetch<AgentSchedule>(`/api/scheduler/schedules/${id}`, {
-    method: 'PATCH',
+  return _fetch<AgentSchedule>(`/api/scheduler/agent-schedules/${id}`, {
+    method: 'PUT',
     body: JSON.stringify(data),
   });
 }
 
 export async function deleteAgentSchedule(id: number): Promise<void> {
-  await _fetch<void>(`/api/scheduler/schedules/${id}`, { method: 'DELETE' });
+  await _fetch<void>(`/api/scheduler/agent-schedules/${id}`, { method: 'DELETE' });
 }
 
 export async function triggerAgentSchedule(id: number): Promise<{ message: string }> {
   return _fetch<{ message: string }>(
-    `/api/scheduler/schedules/${id}/trigger`,
+    `/api/scheduler/agent-schedules/${id}/trigger`,
     { method: 'POST' },
   );
 }
@@ -633,4 +637,16 @@ export async function getMetricsTimeseries(
 
 export async function getSystemMetrics(days: number = 7): Promise<SystemMetricsResponse> {
   return _fetch<SystemMetricsResponse>(`/api/metrics/system${_qs({ days })}`);
+}
+
+// ---------------------------------------------------------------------------
+// Health
+// ---------------------------------------------------------------------------
+
+export async function getHealth(): Promise<HealthResponse> {
+  return _fetch<HealthResponse>('/api/health');
+}
+
+export async function getHealthReady(): Promise<HealthReadyResponse> {
+  return _fetch<HealthReadyResponse>('/api/health/ready');
 }

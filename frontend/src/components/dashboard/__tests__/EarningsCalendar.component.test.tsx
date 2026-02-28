@@ -1,4 +1,3 @@
-```tsx
 /**
  * EarningsCalendar — Component Structure Tests
  *
@@ -287,4 +286,3 @@ describe('EarningsCalendar — Component Structure', () => {
     });
   });
 });
-```
