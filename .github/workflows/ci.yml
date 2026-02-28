@@ -1,4 +1,3 @@
-```yaml
 name: CI
 
 on:
@@ -12,6 +11,9 @@ on:
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
+
+permissions:
+  contents: read
 
 jobs:
   # ── Backend: lint + test ────────────────────────────────────────────────────
@@ -108,4 +110,3 @@ jobs:
 
       - name: Validate Docker images build
         run: docker compose build
-```

@@ -1,4 +1,3 @@
-```yaml
 # TickerPulse AI v3.0 - Docker Compose
 # Optional containerized deployment
 
@@ -56,4 +55,3 @@ services:
 volumes:
   tickerpulse-data:
     driver: local
-```
