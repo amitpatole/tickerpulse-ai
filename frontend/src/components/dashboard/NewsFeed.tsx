@@ -1,3 +1,4 @@
+```tsx
 'use client';
 
 import { useEffect, useRef } from 'react';
@@ -149,3 +150,4 @@ export default function NewsFeed({ articles, loading = false, error = null }: Ne
     </div>
   );
 }
+```
