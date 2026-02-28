@@ -6,6 +6,9 @@ flask>=3.1.0
 flask-cors>=4.0.0
 flask-apscheduler>=1.13.0
 
+# WebSocket support (real-time price streaming via /api/ws/prices)
+flask-sock>=0.7.0
+
 # HTTP Requests
 requests>=2.32.0
 
@@ -40,6 +43,9 @@ apscheduler>=3.10.0
 
 # Timezone support
 pytz>=2024.1
+
+# Structured JSON logging
+python-json-logger>=2.0
 
 # ==========================================
 # OPTIONAL: Premium Data Providers

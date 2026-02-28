@@ -20,7 +20,7 @@ You can test your provider standalone by running this file:
 """
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional
 
 from .base import (
@@ -105,7 +105,10 @@ class CustomProvider(DataProvider):
         #     high=data['high'],
         #     low=data['low'],
         #     volume=data['volume'],
-        #     timestamp=datetime.fromtimestamp(data['timestamp']),
+        #     # Always pass tz=timezone.utc so the timestamp is locale-independent.
+        #     # If your API returns Unix seconds: datetime.fromtimestamp(data['ts'], tz=timezone.utc)
+        #     # If your API returns Unix milliseconds: datetime.fromtimestamp(data['ts'] / 1000, tz=timezone.utc)
+        #     timestamp=datetime.fromtimestamp(data['timestamp'], tz=timezone.utc),
         #     currency='USD',
         #     change=data.get('change', 0.0),
         #     change_percent=data.get('change_pct', 0.0),
