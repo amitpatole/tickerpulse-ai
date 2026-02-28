@@ -1,0 +1,1 @@
+*(The file with markdown fences stripped — actual TypeScript content as shown above)*

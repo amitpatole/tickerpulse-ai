@@ -7,13 +7,14 @@ initialises the database and scheduler.
 
 import json
 import queue
+import time
 import logging
 import threading
 from datetime import datetime
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
-from flask import Flask, Response, jsonify, send_from_directory
+from flask import Flask, Response, jsonify, request, send_from_directory
 
 from backend.config import Config
 from backend.database import db_session, init_all_tables
@@ -243,6 +244,30 @@ def create_app() -> Flask:
     # -- Register API blueprints ---------------------------------------------
     _register_blueprints(app)
 
+    # -- Latency tracking hooks ----------------------------------------------
+    @app.before_request
+    def _record_request_start() -> None:
+        from flask import g
+        g._request_start = time.monotonic()
+
+    @app.after_request
+    def _record_request_latency(response):
+        try:
+            from flask import g
+            start = getattr(g, '_request_start', None)
+            if start is not None:
+                latency_ms = (time.monotonic() - start) * 1000
+                from backend.core.latency_buffer import record as _record_latency
+                _record_latency(
+                    request.path,
+                    request.method,
+                    response.status_code,
+                    latency_ms,
+                )
+        except Exception:
+            pass
+        return response
+
     # -- SSE endpoint --------------------------------------------------------
     @app.route('/api/stream')
     def stream():
@@ -385,6 +410,8 @@ def _register_blueprints(app: Flask) -> None:
         'backend.api.providers':        'providers_bp',
         'backend.api.compare':          'compare_bp',
         'backend.api.watchlist':        'watchlist_bp',
+        'backend.api.app_state':        'app_state_bp',
+        'backend.api.metrics':          'metrics_bp',
     }
 
     for module_path, bp_name in blueprint_map.items():

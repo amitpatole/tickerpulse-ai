@@ -1,0 +1,30 @@
+name: Apply Branch Protection
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/branch-protection-config.json'
+  workflow_dispatch:
+
+permissions:
+  administration: write
+
+jobs:
+  apply-protection:
+    name: Apply branch protection rules to main
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Apply branch protection rules
+        run: |
+          curl -s -X PUT \
+            -H "Authorization: Bearer $GITHUB_TOKEN" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/${{ github.repository }}/branches/main/protection" \
+            -d @.github/branch-protection-config.json
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

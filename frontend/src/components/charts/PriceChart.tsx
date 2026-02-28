@@ -1,12 +1,29 @@
 'use client';
 
 import { useEffect, useId, useRef } from 'react';
-import { createChart, AreaSeries, ColorType, TickMarkType, type IChartApi, type Time, type UTCTimestamp } from 'lightweight-charts';
+import {
+  createChart,
+  AreaSeries,
+  LineSeries,
+  ColorType,
+  TickMarkType,
+  type IChartApi,
+  type Time,
+  type UTCTimestamp,
+} from 'lightweight-charts';
 import { ChartDataSummary } from './ChartDataSummary';
+import type { Timeframe } from '@/lib/types';
 
 interface PriceDataPoint {
   time: string | number;
   value: number;
+}
+
+interface CompareOverlay {
+  symbol: string;
+  color: string;
+  points: { time: number; value: number }[];
+  current_pct: number;
 }
 
 interface PriceChartProps {
@@ -14,7 +31,9 @@ interface PriceChartProps {
   title?: string;
   height?: number;
   color?: string;
-  timeframe?: '1D' | '1W' | '1M' | '3M' | '1Y' | 'All';
+  timeframe?: Timeframe;
+  primarySymbol?: string;
+  compareOverlays?: CompareOverlay[];
 }
 
 export default function PriceChart({
@@ -23,6 +42,8 @@ export default function PriceChart({
   height = 300,
   color = '#3b82f6',
   timeframe,
+  primarySymbol,
+  compareOverlays,
 }: PriceChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -103,6 +124,7 @@ export default function PriceChart({
       topColor: `${color}33`,
       bottomColor: `${color}05`,
       lineWidth: 2,
+      ...(primarySymbol ? { title: primarySymbol } : {}),
     });
 
     if (data.length > 0) {
@@ -111,6 +133,25 @@ export default function PriceChart({
         value: d.value,
       }));
       areaSeries.setData(chartData);
+    }
+
+    if (compareOverlays && compareOverlays.length > 0) {
+      for (const overlay of compareOverlays) {
+        if (overlay.points.length === 0) continue;
+        const lineSeries = chart.addSeries(LineSeries, {
+          color: overlay.color,
+          lineWidth: 2,
+          title: overlay.symbol,
+          priceLineVisible: false,
+          lastValueVisible: true,
+        });
+        lineSeries.setData(
+          overlay.points.map((p) => ({
+            time: p.time as UTCTimestamp,
+            value: p.value,
+          })),
+        );
+      }
     }
 
     chart.timeScale().fitContent();
@@ -128,7 +169,7 @@ export default function PriceChart({
       chart.remove();
       chartRef.current = null;
     };
-  }, [data, height, color, timeframe]);
+  }, [data, height, color, timeframe, primarySymbol, compareOverlays]);
 
   return (
     <div className="rounded-xl border border-slate-700/50 bg-slate-800/50 p-4">

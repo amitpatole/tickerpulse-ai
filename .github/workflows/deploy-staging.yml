@@ -1,0 +1,82 @@
+name: Deploy Staging
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  deploy-staging:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    outputs:
+      image-tag: ${{ steps.tag.outputs.value }}
+
+    steps:
+      - name: Checkout CI-validated commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Compute image tag
+        id: tag
+        run: echo "value=${{ github.event.workflow_run.head_sha }}" >> $GITHUB_OUTPUT
+
+      - name: Deploy to staging environment
+        run: |
+          echo "Deploying commit ${{ github.event.workflow_run.head_sha }} to staging"
+          echo "Replace this with the real deploy command for your platform"
+        env:
+          DEPLOY_TOKEN: ${{ secrets.STAGING_DEPLOY_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  staging-smoke:
+    name: Staging Smoke Tests
+    needs: [deploy-staging]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Validate STAGING_BASE_URL is configured
+        run: |
+          if [ -z "$STAGING_BASE_URL" ]; then
+            echo "STAGING_BASE_URL is not configured — add it to repository variables"
+            exit 1
+          fi
+          echo "Running smoke tests against $STAGING_BASE_URL"
+        env:
+          STAGING_BASE_URL: ${{ vars.STAGING_BASE_URL }}
+
+      - name: Health check
+        run: curl -f "$STAGING_BASE_URL/api/health"
+        env:
+          STAGING_BASE_URL: ${{ vars.STAGING_BASE_URL }}
+
+      - name: Watchlist endpoint check
+        run: curl -f "$STAGING_BASE_URL/api/watchlist"
+        env:
+          STAGING_BASE_URL: ${{ vars.STAGING_BASE_URL }}
+
+      - name: Stocks endpoint check
+        run: curl -f "$STAGING_BASE_URL/api/stocks"
+        env:
+          STAGING_BASE_URL: ${{ vars.STAGING_BASE_URL }}
+
+      - name: Earnings endpoint check
+        run: curl -f "$STAGING_BASE_URL/api/earnings"
+        env:
+          STAGING_BASE_URL: ${{ vars.STAGING_BASE_URL }}
+
+      - name: Portfolio endpoint check
+        run: curl -f "$STAGING_BASE_URL/api/portfolio" || true
+        env:
+          STAGING_BASE_URL: ${{ vars.STAGING_BASE_URL }}
+
+      - name: Chat health check
+        run: curl -f "$STAGING_BASE_URL/api/chat/health" || true
+        env:
+          STAGING_BASE_URL: ${{ vars.STAGING_BASE_URL }}

@@ -1,3 +1,4 @@
+```python
 """
 TickerPulse AI v3.0 - Central Configuration
 All settings are driven by environment variables with sensible defaults.
@@ -41,11 +42,9 @@ class Config:
     # -------------------------------------------------------------------------
     MARKET_TIMEZONE = os.getenv('MARKET_TIMEZONE', 'US/Eastern')
 
-    # US market hours
     US_MARKET_OPEN = '09:30'
     US_MARKET_CLOSE = '16:00'
 
-    # India market hours (IST / Asia/Kolkata)
     INDIA_MARKET_OPEN = '09:15'
     INDIA_MARKET_CLOSE = '15:30'
     INDIA_MARKET_TIMEZONE = 'Asia/Kolkata'
@@ -55,18 +54,17 @@ class Config:
     # -------------------------------------------------------------------------
     CHECK_INTERVAL = int(os.getenv('CHECK_INTERVAL', 300))  # seconds (5 min)
 
-    SCHEDULER_API_ENABLED = False  # Disabled -- we use our own scheduler_routes blueprint
+    SCHEDULER_API_ENABLED = False
     SCHEDULER_API_PREFIX = '/api/scheduler'
 
     # -------------------------------------------------------------------------
-    # AI Providers (can also be configured via the Settings UI)
+    # AI Providers
     # -------------------------------------------------------------------------
     ANTHROPIC_API_KEY = os.getenv('ANTHROPIC_API_KEY', '')
     OPENAI_API_KEY = os.getenv('OPENAI_API_KEY', '')
     GOOGLE_AI_KEY = os.getenv('GOOGLE_AI_KEY', '')
     XAI_API_KEY = os.getenv('XAI_API_KEY', '')
 
-    # Default AI model per provider (used when no model is specified in DB)
     DEFAULT_MODELS = {
         'anthropic': 'claude-sonnet-4-20250514',
         'openai': 'gpt-4o',
@@ -92,13 +90,13 @@ class Config:
     TWELVE_DATA_KEY = os.getenv('TWELVE_DATA_KEY', '')
 
     # -------------------------------------------------------------------------
-    # Reddit (optional, for PRAW social-media monitoring)
+    # Reddit
     # -------------------------------------------------------------------------
     REDDIT_CLIENT_ID = os.getenv('REDDIT_CLIENT_ID', '')
     REDDIT_CLIENT_SECRET = os.getenv('REDDIT_CLIENT_SECRET', '')
 
     # -------------------------------------------------------------------------
-    # GitHub (for repository analytics)
+    # GitHub
     # -------------------------------------------------------------------------
     GITHUB_TOKEN = os.getenv('GITHUB_TOKEN', '')
 
@@ -107,13 +105,28 @@ class Config:
     # -------------------------------------------------------------------------
     DEFAULT_AGENT_FRAMEWORK = os.getenv(
         'DEFAULT_AGENT_FRAMEWORK', 'crewai'
-    )  # 'crewai' or 'openclaw'
+    )
 
     # -------------------------------------------------------------------------
     # Cost management
     # -------------------------------------------------------------------------
     MONTHLY_BUDGET_LIMIT = float(os.getenv('MONTHLY_BUDGET_LIMIT', 1500.0))
     DAILY_BUDGET_WARNING = float(os.getenv('DAILY_BUDGET_WARNING', 75.0))
+
+    # -------------------------------------------------------------------------
+    # Database connection pool
+    # -------------------------------------------------------------------------
+    # Number of SQLite connections kept alive in the process-wide pool.
+    # Increase if you see "DB pool exhausted" errors under high concurrency.
+    DB_POOL_SIZE: int = int(os.getenv('DB_POOL_SIZE', 5))
+    # Seconds to wait for a free connection before raising RuntimeError.
+    DB_POOL_TIMEOUT: float = float(os.getenv('DB_POOL_TIMEOUT', 10.0))
+    # Milliseconds SQLite waits on a locked resource before returning SQLITE_BUSY.
+    # Prevents spurious "database is locked" errors under concurrent writes.
+    DB_BUSY_TIMEOUT_MS: int = int(os.getenv('DB_BUSY_TIMEOUT_MS', 5000))
+    # SQLite page-cache size in KiB (stored as negative value per PRAGMA convention).
+    # 2 MB default keeps hot tables in memory, reducing I/O on repeated reads.
+    DB_CACHE_SIZE_KB: int = int(os.getenv('DB_CACHE_SIZE_KB', 8000))
 
     # -------------------------------------------------------------------------
     # Rate limiting
@@ -130,3 +143,35 @@ class Config:
     LOG_FORMAT = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     LOG_MAX_BYTES = int(os.getenv('LOG_MAX_BYTES', 10_485_760))  # 10 MB
     LOG_BACKUP_COUNT = int(os.getenv('LOG_BACKUP_COUNT', 5))
+    LOG_FORMAT_JSON: bool = (
+        os.getenv('LOG_FORMAT_JSON', os.getenv('LOG_JSON', 'false')).lower() == 'true'
+    )
+    LOG_REQUEST_BODY: bool = os.getenv('LOG_REQUEST_BODY', 'false').lower() == 'true'
+
+    # -------------------------------------------------------------------------
+    # Swagger / OpenAPI
+    # -------------------------------------------------------------------------
+    SWAGGER_ENABLED: bool = os.getenv('SWAGGER_ENABLED', 'true').lower() == 'true'
+
+    # -------------------------------------------------------------------------
+    # Price refresh
+    # -------------------------------------------------------------------------
+    PRICE_REFRESH_INTERVAL_SECONDS: int = int(
+        os.getenv('PRICE_REFRESH_INTERVAL_SECONDS', 30)
+    )
+
+    REFRESH_INTERVAL_DEFAULT_SEC: int = int(
+        os.getenv('PRICE_REFRESH_INTERVAL_SECONDS', 30)
+    )
+
+    WS_MAX_SUBSCRIPTIONS_PER_CLIENT: int = int(
+        os.getenv('WS_MAX_SUBSCRIPTIONS_PER_CLIENT', 50)
+    )
+
+    WS_PRICE_BROADCAST: bool = os.getenv('WS_PRICE_BROADCAST', 'true').lower() == 'true'
+
+    # Number of parallel worker threads for the price refresh job.
+    # Each worker calls _fetch_price() for one ticker; keep <= DB_POOL_SIZE
+    # to avoid pool contention when persisting results.
+    PRICE_REFRESH_WORKERS: int = int(os.getenv('PRICE_REFRESH_WORKERS', 10))
+```
