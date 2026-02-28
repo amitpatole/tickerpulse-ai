@@ -241,6 +241,13 @@ def create_app() -> Flask:
     # -- Register API blueprints ---------------------------------------------
     _register_blueprints(app)
 
+    # -- Request ID and logging middleware -----------------------------------
+    try:
+        from backend.middleware.request_logging import init_request_logging
+        init_request_logging(app)
+    except Exception as exc:
+        logger.warning("Could not initialise request logging middleware: %s", exc)
+
     # -- Latency tracking hooks ----------------------------------------------
     @app.before_request
     def _record_request_start() -> None:
@@ -304,7 +311,7 @@ def create_app() -> Flask:
             mimetype='text/event-stream',
             headers={
                 'Cache-Control': 'no-cache',
-                'X-Accel-Buffering': 'no',  # nginx compatibility
+                'X-Accel-Buffering': 'no',
                 'Connection': 'keep-alive',
             },
         )
@@ -358,10 +365,8 @@ def _setup_logging(app: Flask) -> None:
 def _register_blueprints(app: Flask) -> None:
     """Import and register API blueprints.
 
-    Each blueprint lives in ``backend/api/<module>.py`` and exposes a
-    Flask ``Blueprint`` instance named ``<name>_bp``.  Missing modules
-    are logged as warnings so the app can still start during incremental
-    development.
+    Each blueprint lives in ``backend/api/<module>.py``.  Missing modules
+    are logged as warnings so the app starts during incremental development.
     """
     blueprint_map = {
         'backend.api.stocks':           'stocks_bp',
@@ -379,11 +384,11 @@ def _register_blueprints(app: Flask) -> None:
         'backend.api.providers':        'providers_bp',
         'backend.api.compare':          'compare_bp',
         'backend.api.watchlist':        'watchlist_bp',
+        'backend.api.app_state':        'app_state_bp',
+        'backend.api.metrics':          'metrics_bp',
         'backend.api.health':           'health_bp',
         'backend.api.errors':           'errors_bp',
         'backend.api.error_stats':      'error_stats_bp',
-        'backend.api.metrics':          'metrics_bp',
-        'backend.api.app_state':        'app_state_bp',
         'backend.api.activity':         'activity_bp',
     }
 
