@@ -1,0 +1,1 @@
+Added `Server` icon import, `'system'` to `TabId`, System tab to `TABS`, lazy `useApi` call for system data (only enabled when `tab === 'system'`), and the System tab panel rendering `<SystemPanel>`.

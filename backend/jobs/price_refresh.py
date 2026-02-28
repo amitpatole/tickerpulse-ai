@@ -1,210 +1,218 @@
+```python
 """
 TickerPulse AI v3.0 - Price Refresh Job
-Fetches live prices for all active tickers and pushes ``price_update`` SSE events.
-The refresh interval is configurable via GET/PUT /api/settings/refresh-interval.
-When interval is 0 (manual mode) this job is a no-op.
+Periodic APScheduler job that fetches live prices for the active watchlist,
+persists price columns to ai_ratings, and broadcasts via both WebSocket and SSE.
+
+Key invariant: only current_price, price_change, price_change_pct are updated.
+AI fields (rating, score, confidence, rsi, etc.) are never touched.
 """
 
 import logging
-import sqlite3
 import time
 from datetime import datetime, timezone
 from typing import Optional
 
-from backend.config import Config
-from backend.jobs._helpers import _get_watchlist, _send_sse
-
 logger = logging.getLogger(__name__)
 
+
 # ---------------------------------------------------------------------------
-# Settings helpers
+# Helpers
 # ---------------------------------------------------------------------------
 
-def _get_refresh_interval() -> int:
-    """Return the configured refresh interval in seconds from app_settings.
+def _get_refresh_interval_from_db() -> int:
+    """Read price_refresh_interval from the settings table.
 
-    Falls back to Config.PRICE_REFRESH_INTERVAL_SECONDS if not set.
-    Returns 0 when manual mode is selected (job should not fire).
+    Returns the stored interval in seconds, or the config default on error.
+    Returns 0 when manual mode is explicitly stored.
     """
+    from backend.config import Config
+    from backend.database import pooled_session
     try:
-        conn = sqlite3.connect(Config.DB_PATH)
-        conn.row_factory = sqlite3.Row
-        row = conn.execute(
-            "SELECT value FROM settings WHERE key = 'price_refresh_interval'"
-        ).fetchone()
-        conn.close()
-        if row:
+        with pooled_session() as conn:
+            row = conn.execute(
+                "SELECT value FROM settings WHERE key = 'price_refresh_interval'"
+            ).fetchone()
+        if row is not None:
             return int(row['value'])
     except Exception as exc:
-        logger.debug("Could not read price_refresh_interval from DB: %s", exc)
+        logger.warning("price_refresh: could not read interval from DB: %s", exc)
     return Config.PRICE_REFRESH_INTERVAL_SECONDS
 
 
-# ---------------------------------------------------------------------------
-# Price fetching
-# ---------------------------------------------------------------------------
+def _fetch_price(ticker: str) -> Optional[dict]:
+    """Fetch the current price for *ticker* from Yahoo Finance.
 
-def _fetch_price_yfinance(ticker: str) -> Optional[dict]:
-    """Fetch current price data for a single ticker via yfinance.
+    Returns a dict with keys: price, change, change_pct, volume, ts.
+    Returns None when the fetch fails or the symbol yields no data.
 
-    Returns a dict with price, change, change_pct or None on failure.
+    This function is also imported by app.py for manual WS refresh requests,
+    so the return contract must stay stable.
     """
     try:
-        import yfinance as yf  # type: ignore
-        stock = yf.Ticker(ticker)
-        info = stock.fast_info
+        import yfinance as yf
+        info = yf.Ticker(ticker).fast_info
+
         price = getattr(info, 'last_price', None)
-        prev_close = getattr(info, 'previous_close', None)
         if price is None:
             return None
-        change = (price - prev_close) if prev_close else 0.0
-        change_pct = (change / prev_close * 100) if prev_close else 0.0
-        volume = int(getattr(info, 'last_volume', 0) or 0)
+
+        prev_close = getattr(info, 'previous_close', None)
+        volume = getattr(info, 'last_volume', None)
+
+        change = float(price - prev_close) if prev_close else 0.0
+        change_pct = (change / prev_close * 100.0) if prev_close else 0.0
+
         return {
-            'price': round(float(price), 4),
-            'change': round(float(change), 4),
-            'change_pct': round(float(change_pct), 4),
-            'volume': volume,
+            'price': float(price),
+            'change': change,
+            'change_pct': change_pct,
+            'volume': int(volume) if volume is not None else 0,
+            'ts': int(time.time()),
         }
     except Exception as exc:
-        logger.debug("yfinance price fetch failed for %s: %s", ticker, exc)
+        logger.debug("price_refresh: fetch failed for %s: %s", ticker, exc)
         return None
 
 
-def _fetch_price_finnhub(ticker: str) -> Optional[dict]:
-    """Fetch current price data for a single ticker via Finnhub REST API.
-
-    Only used when a Finnhub API key is configured.
-    Returns a dict with price, change, change_pct or None on failure.
-    """
-    api_key = Config.FINNHUB_API_KEY
-    if not api_key:
-        return None
+def _get_watchlist_tickers() -> list[str]:
+    """Return all active tickers from the stocks table."""
+    from backend.database import pooled_session
     try:
-        import urllib.request
-        import json as _json
-        url = (
-            f"https://finnhub.io/api/v1/quote"
-            f"?symbol={ticker}&token={api_key}"
-        )
-        with urllib.request.urlopen(url, timeout=5) as resp:  # noqa: S310
-            data = _json.loads(resp.read())
-        price = data.get('c')
-        prev_close = data.get('pc')
-        change = data.get('d', 0.0)
-        change_pct = data.get('dp', 0.0)
-        if price is None or price == 0:
-            return None
-        return {
-            'price': round(float(price), 4),
-            'change': round(float(change or 0), 4),
-            'change_pct': round(float(change_pct or 0), 4),
-            'volume': 0,  # Finnhub /quote endpoint does not include volume
-        }
+        with pooled_session() as conn:
+            rows = conn.execute(
+                "SELECT ticker FROM stocks WHERE active = 1"
+            ).fetchall()
+        return [row['ticker'] for row in rows]
     except Exception as exc:
-        logger.debug("Finnhub price fetch failed for %s: %s", ticker, exc)
-        return None
+        logger.error("price_refresh: could not load watchlist tickers: %s", exc)
+        return []
 
 
-def _fetch_price(ticker: str) -> Optional[dict]:
-    """Try Finnhub first (if key configured), then fall back to yfinance."""
-    result = _fetch_price_finnhub(ticker) if Config.FINNHUB_API_KEY else None
-    if result is None:
-        result = _fetch_price_yfinance(ticker)
-    return result
+def _persist_prices(prices: dict) -> None:
+    """Write price fields to ai_ratings for each ticker in *prices*.
 
-
-# ---------------------------------------------------------------------------
-# Main job function
-# ---------------------------------------------------------------------------
-
-def run_price_refresh() -> None:
-    """Fetch live prices for all active tickers and push SSE price_update events.
-
-    This function is designed to be called by APScheduler at a configurable
-    interval. When the interval is 0 (manual mode) it exits immediately.
-
-    In addition to broadcasting SSE events, each fetched price is persisted
-    back to the ``ai_ratings`` table so that a fresh page load shows the
-    most-recent live price rather than the stale value from the last AI run.
+    Only updates current_price, price_change, price_change_pct, and updated_at.
+    Does NOT touch rating, score, confidence, or any AI analysis field.
+    Uses batch_upsert to INSERT-or-UPDATE all tickers in a single executemany
+    call, cutting 2*N round-trips down to 1.
     """
-    interval = _get_refresh_interval()
-    if interval == 0:
-        logger.debug("Price refresh is in manual mode -- skipping run")
+    if not prices:
         return
+    from backend.database import pooled_session, batch_upsert
+    try:
+        now_iso = datetime.now(timezone.utc).isoformat()
+        rows = [
+            {
+                'ticker': ticker,
+                'rating': 'hold',
+                'score': 0,
+                'confidence': 0,
+                'current_price': data['price'],
+                'price_change': data['change'],
+                'price_change_pct': data['change_pct'],
+                'updated_at': now_iso,
+            }
+            for ticker, data in prices.items()
+        ]
+        with pooled_session() as conn:
+            batch_upsert(
+                conn, 'ai_ratings', rows,
+                conflict_cols=['ticker'],
+                update_cols=['current_price', 'price_change', 'price_change_pct', 'updated_at'],
+            )
+    except Exception as exc:
+        logger.error("price_refresh: DB persist error: %s", exc)
 
-    watchlist = _get_watchlist()
-    if not watchlist:
-        logger.debug("Price refresh: watchlist is empty -- nothing to do")
+
+def _broadcast_sse(prices: dict) -> None:
+    """Emit a price_update SSE event per ticker to all connected SSE clients."""
+    try:
+        from backend.app import send_sse_event
+    except ImportError:
+        logger.debug("price_refresh: send_sse_event not available, skipping SSE broadcast")
         return
 
     timestamp = datetime.now(timezone.utc).isoformat()
-    fetched = 0
-    failed = 0
+    for ticker, data in prices.items():
+        send_sse_event('price_update', {
+            'ticker': ticker,
+            'price': data['price'],
+            'change': data['change'],
+            'change_pct': data['change_pct'],
+            'volume': data['volume'],
+            'timestamp': timestamp,
+        })
 
-    # Open one DB connection for all ai_ratings persistence writes this cycle.
-    # A failure to open the connection is non-fatal: SSE events still fire.
-    db_conn: Optional[sqlite3.Connection] = None
+
+# ---------------------------------------------------------------------------
+# Scheduler entry point
+# ---------------------------------------------------------------------------
+
+def run_price_refresh() -> None:
+    """APScheduler entry point for the periodic price refresh job.
+
+    Execution flow
+    --------------
+    1. Read interval from DB; skip if manual mode (interval == 0).
+    2. Load all active watchlist tickers.
+    3. Fetch live prices for each ticker via Yahoo Finance.
+    4. Persist price columns to ai_ratings (AI fields unchanged).
+    5. Broadcast via WebSocket (price_batch per subscribed client).
+    6. Broadcast via SSE (price_update event per ticker).
+    7. Evaluate enabled price alerts against the persisted prices.
+    """
+    from backend.config import Config
+
+    # 1. Check manual mode
+    interval = _get_refresh_interval_from_db()
+    if interval == 0:
+        logger.debug("price_refresh: skipping — manual mode (interval=0)")
+        return
+
+    # 2. Load tickers
+    tickers = _get_watchlist_tickers()
+    if not tickers:
+        logger.debug("price_refresh: skipping — empty watchlist")
+        return
+
+    logger.info("price_refresh: fetching prices for %d tickers", len(tickers))
+
+    # 3. Fetch prices (partial success is acceptable)
+    prices: dict = {}
+    for ticker in tickers:
+        data = _fetch_price(ticker)
+        if data is not None:
+            prices[ticker] = data
+
+    if not prices:
+        logger.warning("price_refresh: no price data returned for any ticker")
+        return
+
+    logger.info("price_refresh: fetched %d/%d tickers", len(prices), len(tickers))
+
+    # 4. Persist price columns (AI fields untouched)
+    _persist_prices(prices)
+
+    # 5. WebSocket broadcast (price_batch per subscribed client)
+    if Config.WS_PRICE_BROADCAST:
+        try:
+            from backend.core.ws_manager import ws_manager
+            ws_count = ws_manager.broadcast_prices(prices)
+            if ws_count > 0:
+                logger.debug("price_refresh: WS price_batch sent to %d clients", ws_count)
+        except Exception as exc:
+            logger.error("price_refresh: WS broadcast error: %s", exc)
+
+    # 6. SSE broadcast (price_update per ticker)
+    _broadcast_sse(prices)
+
+    # 7. Evaluate price alerts against freshly persisted prices
     try:
-        db_conn = sqlite3.connect(Config.DB_PATH)
+        from backend.core.alert_manager import evaluate_price_alerts
+        evaluate_price_alerts(list(prices.keys()))
+    except ImportError:
+        logger.debug("price_refresh: alert_manager not available, skipping alert eval")
     except Exception as exc:
-        logger.warning("Price refresh: could not open DB connection for persistence: %s", exc)
-
-    try:
-        for stock in watchlist:
-            ticker = stock['ticker']
-            price_data = _fetch_price(ticker)
-            if price_data is None:
-                failed += 1
-                logger.debug("No price data for %s", ticker)
-                continue
-
-            _send_sse('price_update', {
-                'ticker': ticker,
-                'price': price_data['price'],
-                'change': price_data['change'],
-                'change_pct': price_data['change_pct'],
-                'volume': price_data.get('volume', 0),
-                'timestamp': timestamp,
-            })
-
-            # Persist live price to ai_ratings so page reload hydration is current.
-            if db_conn is not None:
-                try:
-                    db_conn.execute(
-                        """UPDATE ai_ratings
-                           SET current_price    = ?,
-                               price_change     = ?,
-                               price_change_pct = ?,
-                               updated_at       = ?
-                           WHERE ticker = ?""",
-                        (
-                            price_data['price'],
-                            price_data['change'],
-                            price_data['change_pct'],
-                            timestamp,
-                            ticker,
-                        ),
-                    )
-                except Exception as exc:
-                    logger.debug("Failed to persist price for %s to ai_ratings: %s", ticker, exc)
-
-            fetched += 1
-
-        if db_conn is not None:
-            try:
-                db_conn.commit()
-            except Exception as exc:
-                logger.debug("Price refresh: DB commit error: %s", exc)
-
-    finally:
-        if db_conn is not None:
-            try:
-                db_conn.close()
-            except Exception:
-                pass
-
-    if fetched > 0 or failed > 0:
-        logger.debug(
-            "Price refresh complete: %d fetched, %d failed", fetched, failed
-        )
+        logger.error("price_refresh: alert evaluation error: %s", exc)
+```

@@ -1,0 +1,1 @@
+New component — CPU/mem gauge cards with inline SVG sparklines, DB pool counters, endpoint latency table with method/status color badges.
