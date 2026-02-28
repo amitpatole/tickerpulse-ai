@@ -1,3 +1,4 @@
+```
 # TickerPulse AI v3.0 - Backend Dependencies
 # ==========================================
 
@@ -42,12 +43,10 @@ apscheduler>=3.10.0
 pytz>=2024.1
 
 # ==========================================
-# Testing & Linting
+# Testing
 # ==========================================
-pytest>=8.0.0
 pytest-cov>=5.0.0
 pytest-timeout>=2.3.0
-ruff>=0.3.0
 
 # ==========================================
 # OPTIONAL: Premium Data Providers
@@ -58,3 +57,4 @@ ruff>=0.3.0
 # pip install finnhub-python>=2.4.0         # Finnhub
 # pip install twelvedata>=1.2.0             # Twelve Data
 # pip install alpaca-py>=0.28.0             # Alpaca
+```

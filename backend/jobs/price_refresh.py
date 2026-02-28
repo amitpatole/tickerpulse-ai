@@ -80,8 +80,9 @@ def _fetch_prices_parallel(tickers: list, max_workers: int = 0) -> dict:
     """Fetch prices for all tickers in parallel using ThreadPoolExecutor.
 
     Each ticker is fetched independently via ``_fetch_price()``.  Partial
-    failures are silently omitted — mirroring the behaviour of the per-ticker
-    sequential loop it replaces.
+    failures (individual tickers raising or returning None) are silently
+    omitted — mirroring the behaviour of the per-ticker sequential loop it
+    replaces.
 
     Parameters
     ----------
@@ -125,9 +126,6 @@ def _fetch_prices_batch(tickers: list) -> dict:
     success is acceptable, mirroring the old per-ticker behaviour).
     """
     import yfinance as yf
-
-    if not tickers:
-        return {}
 
     try:
         df = yf.download(

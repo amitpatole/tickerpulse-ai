@@ -2,8 +2,10 @@
 /**
  * TickerPulse AI v3.0 - API Client
  * Typed fetch wrappers for all backend REST endpoints.
+ * apiFetch throws ApiError on failure; 429/503 are retried up to 2 times.
  */
 
+import { ApiError } from './types';
 import type {
   AlertSoundSettings,
   AlertSoundType,
@@ -27,19 +29,45 @@ import type {
   ActivityFilterType,
   ScheduleTrigger,
   NextRunsResponse,
+  ComparisonProviderRequest,
+  ModelComparisonResponse,
+  ModelComparisonHistoryResponse,
 } from './types';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? '';
 
-async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
+const _RETRYABLE_STATUSES = new Set([429, 503]);
+const _MAX_RETRIES = 2;
+
+async function apiFetch<T>(path: string, init?: RequestInit, _attempt = 0): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     headers: { 'Content-Type': 'application/json', ...init?.headers },
     ...init,
   });
+
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    throw new Error(body?.error ?? `HTTP ${res.status}`);
+    const message: string = body?.error ?? `HTTP ${res.status}`;
+    const error_code: string = body?.error_code ?? (res.status >= 500 ? 'INTERNAL_ERROR' : 'API_ERROR');
+    const request_id: string | undefined = body?.request_id;
+
+    if (_RETRYABLE_STATUSES.has(res.status) && _attempt < _MAX_RETRIES) {
+      const retryAfterHeader = res.headers.get('Retry-After');
+      const retryAfterBody: number | undefined = body?.retry_after;
+      const delaySec = retryAfterHeader
+        ? parseInt(retryAfterHeader, 10)
+        : (retryAfterBody ?? 1);
+      const delayMs = Math.min(delaySec * 1000, 30_000);
+      await new Promise<void>((resolve) => setTimeout(resolve, delayMs));
+      return apiFetch<T>(path, init, _attempt + 1);
+    }
+
+    const retryAfterHeader = res.headers.get('Retry-After');
+    const retry_after = retryAfterHeader ? parseInt(retryAfterHeader, 10) : body?.retry_after;
+
+    throw new ApiError(message, res.status, error_code, { request_id, retry_after });
   }
+
   return res.json() as Promise<T>;
 }
 
@@ -261,6 +289,84 @@ export async function updateJobSchedule(
 export async function getNextRuns(jobId: string, n = 5): Promise<NextRunsResponse> {
   return apiFetch<NextRunsResponse>(
     `/api/scheduler/jobs/${encodeURIComponent(jobId)}/next-runs?n=${n}`,
+  );
+}
+
+export async function getKnownAgents(): Promise<{ agents: KnownAgent[]; total: number }> {
+  return apiFetch<{ agents: KnownAgent[]; total: number }>('/api/scheduler/agents');
+}
+
+export async function getAgentSchedules(): Promise<{ schedules: AgentSchedule[]; total: number }> {
+  return apiFetch<{ schedules: AgentSchedule[]; total: number }>('/api/scheduler/agent-schedules');
+}
+
+export async function createAgentSchedule(data: {
+  job_id: string;
+  label: string;
+  description?: string;
+  trigger: 'cron' | 'interval';
+  trigger_args: Record<string, unknown>;
+}): Promise<AgentSchedule> {
+  return apiFetch<AgentSchedule>('/api/scheduler/agent-schedules', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function updateAgentSchedule(
+  scheduleId: number,
+  data: Partial<{
+    label: string;
+    description: string;
+    trigger: 'cron' | 'interval';
+    trigger_args: Record<string, unknown>;
+    enabled: boolean;
+  }>,
+): Promise<AgentSchedule> {
+  return apiFetch<AgentSchedule>(`/api/scheduler/agent-schedules/${scheduleId}`, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function deleteAgentSchedule(scheduleId: number): Promise<{ success: boolean; id: number }> {
+  return apiFetch<{ success: boolean; id: number }>(
+    `/api/scheduler/agent-schedules/${scheduleId}`,
+    { method: 'DELETE' },
+  );
+}
+
+export async function triggerAgentSchedule(scheduleId: number): Promise<{ success: boolean; job_id: string }> {
+  return apiFetch<{ success: boolean; job_id: string }>(
+    `/api/scheduler/agent-schedules/${scheduleId}/trigger`,
+    { method: 'POST' },
+  );
+}
+
+export async function getAgentRuns(limit = 20): Promise<{ runs: AgentRun[]; total: number }> {
+  return apiFetch<{ runs: AgentRun[]; total: number }>(`/api/agents/runs?limit=${limit}`);
+}
+
+// ---------------------------------------------------------------------------
+// Multi-model comparison
+// ---------------------------------------------------------------------------
+
+export async function runModelComparison(params: {
+  ticker: string;
+  providers: ComparisonProviderRequest[];
+}): Promise<ModelComparisonResponse> {
+  return apiFetch<ModelComparisonResponse>('/api/ai/compare', {
+    method: 'POST',
+    body: JSON.stringify(params),
+  });
+}
+
+export async function getModelComparisonHistory(
+  ticker: string,
+  limit = 10,
+): Promise<ModelComparisonHistoryResponse> {
+  return apiFetch<ModelComparisonHistoryResponse>(
+    `/api/ai/compare/history?ticker=${encodeURIComponent(ticker)}&limit=${limit}`,
   );
 }
 ```

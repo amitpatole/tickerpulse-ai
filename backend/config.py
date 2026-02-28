@@ -42,9 +42,11 @@ class Config:
     # -------------------------------------------------------------------------
     MARKET_TIMEZONE = os.getenv('MARKET_TIMEZONE', 'US/Eastern')
 
+    # US market hours
     US_MARKET_OPEN = '09:30'
     US_MARKET_CLOSE = '16:00'
 
+    # India market hours (IST / Asia/Kolkata)
     INDIA_MARKET_OPEN = '09:15'
     INDIA_MARKET_CLOSE = '15:30'
     INDIA_MARKET_TIMEZONE = 'Asia/Kolkata'
@@ -54,17 +56,18 @@ class Config:
     # -------------------------------------------------------------------------
     CHECK_INTERVAL = int(os.getenv('CHECK_INTERVAL', 300))  # seconds (5 min)
 
-    SCHEDULER_API_ENABLED = False
+    SCHEDULER_API_ENABLED = False  # Disabled -- we use our own scheduler_routes blueprint
     SCHEDULER_API_PREFIX = '/api/scheduler'
 
     # -------------------------------------------------------------------------
-    # AI Providers
+    # AI Providers (can also be configured via the Settings UI)
     # -------------------------------------------------------------------------
     ANTHROPIC_API_KEY = os.getenv('ANTHROPIC_API_KEY', '')
     OPENAI_API_KEY = os.getenv('OPENAI_API_KEY', '')
     GOOGLE_AI_KEY = os.getenv('GOOGLE_AI_KEY', '')
     XAI_API_KEY = os.getenv('XAI_API_KEY', '')
 
+    # Default AI model per provider (used when no model is specified in DB)
     DEFAULT_MODELS = {
         'anthropic': 'claude-sonnet-4-20250514',
         'openai': 'gpt-4o',
@@ -90,13 +93,13 @@ class Config:
     TWELVE_DATA_KEY = os.getenv('TWELVE_DATA_KEY', '')
 
     # -------------------------------------------------------------------------
-    # Reddit
+    # Reddit (optional, for PRAW social-media monitoring)
     # -------------------------------------------------------------------------
     REDDIT_CLIENT_ID = os.getenv('REDDIT_CLIENT_ID', '')
     REDDIT_CLIENT_SECRET = os.getenv('REDDIT_CLIENT_SECRET', '')
 
     # -------------------------------------------------------------------------
-    # GitHub
+    # GitHub (for repository analytics)
     # -------------------------------------------------------------------------
     GITHUB_TOKEN = os.getenv('GITHUB_TOKEN', '')
 
@@ -105,7 +108,7 @@ class Config:
     # -------------------------------------------------------------------------
     DEFAULT_AGENT_FRAMEWORK = os.getenv(
         'DEFAULT_AGENT_FRAMEWORK', 'crewai'
-    )
+    )  # 'crewai' or 'openclaw'
 
     # -------------------------------------------------------------------------
     # Cost management
@@ -143,9 +146,13 @@ class Config:
     LOG_FORMAT = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     LOG_MAX_BYTES = int(os.getenv('LOG_MAX_BYTES', 10_485_760))  # 10 MB
     LOG_BACKUP_COUNT = int(os.getenv('LOG_BACKUP_COUNT', 5))
+    # Emit structured JSON logs instead of plaintext (set LOG_FORMAT_JSON=true).
+    # Accepts LOG_JSON as a legacy alias so existing deployments keep working.
     LOG_FORMAT_JSON: bool = (
         os.getenv('LOG_FORMAT_JSON', os.getenv('LOG_JSON', 'false')).lower() == 'true'
     )
+    # Log the request body on POST/PUT requests (disabled by default — may
+    # contain sensitive data).
     LOG_REQUEST_BODY: bool = os.getenv('LOG_REQUEST_BODY', 'false').lower() == 'true'
 
     # -------------------------------------------------------------------------
@@ -154,20 +161,32 @@ class Config:
     SWAGGER_ENABLED: bool = os.getenv('SWAGGER_ENABLED', 'true').lower() == 'true'
 
     # -------------------------------------------------------------------------
-    # Price refresh
+    # Price refresh (real-time WebSocket updates)
     # -------------------------------------------------------------------------
+    # Default polling interval in seconds used when no DB override is stored.
+    # 0 means manual mode (auto-refresh disabled).
+    # The value is persisted to the settings table via PUT /api/settings/refresh-interval
+    # so users can change it at runtime without restarting the server.
     PRICE_REFRESH_INTERVAL_SECONDS: int = int(
         os.getenv('PRICE_REFRESH_INTERVAL_SECONDS', 30)
     )
 
+    # Canonical alias referenced by the settings endpoint and scheduler when
+    # computing the effective default.  Mirrors PRICE_REFRESH_INTERVAL_SECONDS.
     REFRESH_INTERVAL_DEFAULT_SEC: int = int(
         os.getenv('PRICE_REFRESH_INTERVAL_SECONDS', 30)
     )
 
+    # Maximum number of tickers a single WebSocket client may subscribe to.
+    # Protects against accidental (or malicious) subscription flooding.
     WS_MAX_SUBSCRIPTIONS_PER_CLIENT: int = int(
         os.getenv('WS_MAX_SUBSCRIPTIONS_PER_CLIENT', 50)
     )
 
+    # When True (default), the price_refresh job fans out a ``price_batch``
+    # WebSocket message to every subscribed client after each fetch cycle.
+    # Set WS_PRICE_BROADCAST=false to disable WS broadcasting without stopping
+    # the SSE price_update feed.
     WS_PRICE_BROADCAST: bool = os.getenv('WS_PRICE_BROADCAST', 'true').lower() == 'true'
 
     # Number of parallel worker threads for the price refresh job.

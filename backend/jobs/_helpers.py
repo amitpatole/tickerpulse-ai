@@ -1,4 +1,3 @@
-```python
 """
 Shared helpers for all scheduled jobs.
 Provides consistent logging, timing, DB persistence, and SSE notification.
@@ -8,11 +7,10 @@ import logging
 import sqlite3
 import time
 from contextlib import contextmanager
-from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Tuple
+from datetime import datetime
+from typing import Any, Dict, Optional
 
 from backend.config import Config
-from backend.database import pooled_session
 
 logger = logging.getLogger(__name__)
 
@@ -101,51 +99,9 @@ def get_job_history(job_id: Optional[str] = None, limit: int = 50) -> list:
         return []
 
 
-def save_performance_metrics(
-    source: str,
-    source_id: str,
-    metrics: List[Tuple[str, Any]],
-    tags: Optional[Dict[str, Any]] = None,
-) -> None:
-    """Batch-insert performance metrics into the performance_metrics table.
-
-    Errors are logged but not propagated so calling jobs continue unaffected.
-
-    Args:
-        source: Category of the metric emitter, e.g. ``'job'`` or ``'agent'``.
-        source_id: Identifier within the source, e.g. ``'price_refresh'``.
-        metrics: Sequence of ``(metric_name, value)`` pairs.
-        tags: Optional dict of key/value labels serialised to JSON.
-    """
-    try:
-        now_iso = datetime.now(timezone.utc).isoformat()
-        tags_json = json.dumps(tags) if tags is not None else None
-        rows = [
-            (source, source_id, name, float(value), tags_json, now_iso)
-            for name, value in metrics
-        ]
-        with pooled_session() as conn:
-            conn.executemany(
-                """
-                INSERT INTO performance_metrics
-                    (source, source_id, metric_name, metric_value, tags, recorded_at)
-                VALUES (?, ?, ?, ?, ?, ?)
-                """,
-                rows,
-            )
-    except Exception as exc:
-        logger.error(
-            "Failed to save performance_metrics for %s/%s: %s",
-            source, source_id, exc,
-        )
-
-
 @contextmanager
 def job_timer(job_id: str, job_name: str):
     """Context manager that times a job, logs results, saves history, and sends SSE.
-
-    Also emits ``duration_ms``, ``cost_usd``, and ``success`` metrics to the
-    ``performance_metrics`` table for time-series analysis.
 
     Usage::
 
@@ -186,25 +142,6 @@ def job_timer(job_id: str, job_name: str):
         logger.info("[JOB END] %s -- status=%s, duration=%dms",
                      job_id, ctx['status'], duration_ms)
 
-        # Emit fine-grained metrics to performance_metrics table
-        perf_tags: Dict[str, Any] = {
-            'job_name': job_name,
-            'status': ctx['status'],
-        }
-        if ctx['agent_name']:
-            perf_tags['agent_name'] = ctx['agent_name']
-
-        save_performance_metrics(
-            source='job',
-            source_id=job_id,
-            metrics=[
-                ('duration_ms', duration_ms),
-                ('cost_usd', ctx['cost']),
-                ('success', 1.0 if ctx['status'] == 'success' else 0.0),
-            ],
-            tags=perf_tags,
-        )
-
         # Notify connected UIs via SSE
         _send_sse('job_completed', {
             'job_id': job_id,
@@ -214,4 +151,3 @@ def job_timer(job_id: str, job_name: str):
             'duration_ms': duration_ms,
             'completed_at': datetime.utcnow().isoformat() + 'Z',
         })
-```
