@@ -12,13 +12,19 @@ import {
   Pencil,
   Volume2,
   VolumeX,
+  Play,
 } from 'lucide-react';
-import { getAlertSoundSettings, updateAlertSoundSettings } from '@/lib/api';
+import {
+  getAlertSoundSettings,
+  updateAlertSoundSettings,
+  updateAlertSoundType,
+} from '@/lib/api';
+import { playAlertSound } from '@/lib/alertSound';
 import { clsx } from 'clsx';
 import { useAlerts } from '@/hooks/useAlerts';
 import { timeAgo } from '@/lib/formatTime';
 import AlertFormModal from '@/components/alerts/AlertFormModal';
-import type { Alert } from '@/lib/types';
+import type { Alert, AlertSoundType } from '@/lib/types';
 
 type Tab = 'active' | 'history';
 
@@ -26,32 +32,12 @@ interface AlertsPanelProps {
   onClose: () => void;
 }
 
-/** Tiny sound badge shown inline on each active-alert row. */
-function SoundBadge({ soundType }: { soundType: string }) {
-  if (!soundType || soundType === 'default') return null;
-
-  if (soundType === 'silent') {
-    return (
-      <span
-        title="Sound: silent"
-        className="flex items-center gap-0.5 text-[10px] text-amber-400"
-      >
-        <VolumeX className="h-2.5 w-2.5" aria-hidden="true" />
-        silent
-      </span>
-    );
-  }
-
-  return (
-    <span
-      title={`Sound: ${soundType}`}
-      className="flex items-center gap-0.5 text-[10px] text-blue-400"
-    >
-      <Volume2 className="h-2.5 w-2.5" aria-hidden="true" />
-      {soundType}
-    </span>
-  );
-}
+const SOUND_OPTIONS: { value: AlertSoundType; label: string }[] = [
+  { value: 'default', label: 'Default' },
+  { value: 'chime', label: 'Chime' },
+  { value: 'alarm', label: 'Alarm' },
+  { value: 'silent', label: 'Silent' },
+];
 
 export default function AlertsPanel({ onClose }: AlertsPanelProps) {
   const [tab, setTab] = useState<Tab>('active');
@@ -60,12 +46,19 @@ export default function AlertsPanel({ onClose }: AlertsPanelProps) {
   const [actionError, setActionError] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [togglingId, setTogglingId] = useState<number | null>(null);
+  const [updatingSoundId, setUpdatingSoundId] = useState<number | null>(null);
   const [soundEnabled, setSoundEnabled] = useState<boolean | null>(null);
+  const [soundVolume, setSoundVolume] = useState(70);
+  const [globalSoundType, setGlobalSoundType] = useState<'chime' | 'alarm' | 'silent'>('chime');
   const [muteSaving, setMuteSaving] = useState(false);
 
   useEffect(() => {
     getAlertSoundSettings()
-      .then((s) => setSoundEnabled(s.enabled))
+      .then((s) => {
+        setSoundEnabled(s.enabled);
+        setSoundVolume(s.volume ?? 70);
+        setGlobalSoundType(s.sound_type);
+      })
       .catch(() => {/* non-critical: leave null to hide the button */});
   }, []);
 
@@ -149,6 +142,35 @@ export default function AlertsPanel({ onClose }: AlertsPanelProps) {
       }
     },
     [toggleAlert]
+  );
+
+  const handleAlertSoundChange = useCallback(
+    async (id: number, sound_type: AlertSoundType) => {
+      setUpdatingSoundId(id);
+      try {
+        await updateAlertSoundType(id, sound_type);
+        // Reflect the optimistic update via the hook's updateAlert
+        await updateAlert(id, { sound_type });
+      } catch (err) {
+        setActionError(
+          err instanceof Error ? err.message : 'Failed to update sound'
+        );
+      } finally {
+        setUpdatingSoundId(null);
+      }
+    },
+    [updateAlert]
+  );
+
+  const handlePreviewAlertSound = useCallback(
+    (soundType: AlertSoundType) => {
+      const resolved =
+        soundType === 'default' ? globalSoundType : soundType;
+      if (resolved !== 'silent') {
+        playAlertSound(resolved, soundVolume / 100);
+      }
+    },
+    [globalSoundType, soundVolume]
   );
 
   return (
@@ -295,7 +317,7 @@ export default function AlertsPanel({ onClose }: AlertsPanelProps) {
                     <li
                       key={alert.id}
                       className={clsx(
-                        'flex items-center gap-2 px-4 py-3 transition-colors hover:bg-slate-800/30',
+                        'flex items-start gap-2 px-4 py-3 transition-colors hover:bg-slate-800/30',
                         !alert.enabled && 'opacity-50'
                       )}
                     >
@@ -311,9 +333,42 @@ export default function AlertsPanel({ onClose }: AlertsPanelProps) {
                             {alert.message}
                           </span>
                         </div>
-                        <div className="mt-0.5 flex items-center gap-2 text-[11px] text-slate-500">
+                        <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-slate-500">
                           <span>Created {timeAgo(alert.created_at)}</span>
-                          <SoundBadge soundType={alert.sound_type} />
+                          {/* Inline sound type picker */}
+                          <div className="flex items-center gap-1">
+                            <select
+                              value={alert.sound_type ?? 'default'}
+                              onChange={(e) =>
+                                handleAlertSoundChange(
+                                  alert.id,
+                                  e.target.value as AlertSoundType
+                                )
+                              }
+                              disabled={updatingSoundId === alert.id}
+                              aria-label={`Sound for ${alert.ticker} alert`}
+                              className="rounded border border-slate-700 bg-slate-800/80 px-1 py-0 text-[11px] text-slate-300 focus:outline-none focus:ring-1 focus:ring-blue-500/30 disabled:opacity-50"
+                            >
+                              {SOUND_OPTIONS.map((opt) => (
+                                <option key={opt.value} value={opt.value}>
+                                  {opt.label}
+                                </option>
+                              ))}
+                            </select>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                handlePreviewAlertSound(
+                                  (alert.sound_type ?? 'default') as AlertSoundType
+                                )
+                              }
+                              disabled={alert.sound_type === 'silent'}
+                              aria-label={`Preview sound for ${alert.ticker} alert`}
+                              className="rounded p-0.5 text-slate-500 hover:text-slate-300 disabled:opacity-40"
+                            >
+                              <Play className="h-2.5 w-2.5" aria-hidden="true" />
+                            </button>
+                          </div>
                         </div>
                       </div>
 
