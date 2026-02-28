@@ -1,4 +1,3 @@
-```typescript
 /**
  * TickerPulse AI v3.0 - API Client
  * Typed fetch wrappers for all backend REST endpoints.
@@ -6,7 +5,6 @@
  */
 
 import { ApiError } from './types';
-import { reportError } from '@/hooks/useErrorReporter';
 import type {
   AlertSoundSettings,
   AlertSoundType,
@@ -31,56 +29,37 @@ import type {
   ScheduleTrigger,
   NextRunsResponse,
   ComparisonProviderRequest,
+  ComparisonTemplate,
   ModelComparisonResponse,
   ModelComparisonHistoryResponse,
+  ModelComparisonRun,
+  BulkPricesResponse,
+  HealthResponse,
 } from './types';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? '';
 
 const _RETRYABLE_STATUSES = new Set([429, 503]);
 const _MAX_RETRIES = 2;
-const _FETCH_TIMEOUT_MS = 15_000;
 
-function _onFinalFailure(error: ApiError, path: string, method: string): void {
-  reportError({
-    type: 'unhandled_exception',
-    message: error.message,
-    timestamp: new Date().toISOString(),
-    severity: error.status >= 500 ? 'error' : 'warning',
-    source: 'frontend',
-    context: { path, method, error_code: error.error_code, status: error.status },
-  });
+// ---------------------------------------------------------------------------
+// Global error reporter — wired by ApiErrorProvider on mount so apiFetch can
+// surface non-retryable (4xx) errors to the persistent error banner without
+// requiring React context access in this module.
+// ---------------------------------------------------------------------------
 
-  if (typeof window !== 'undefined') {
-    window.dispatchEvent(
-      new CustomEvent('tickerpulse:apifetch-error', { detail: error }),
-    );
-  }
+type ErrorReporter = (err: ApiError) => void;
+let _errorReporter: ErrorReporter | null = null;
+
+export function setGlobalErrorReporter(fn: ErrorReporter | null): void {
+  _errorReporter = fn;
 }
 
 async function apiFetch<T>(path: string, init?: RequestInit, _attempt = 0): Promise<T> {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), _FETCH_TIMEOUT_MS);
-
-  let res: Response;
-  try {
-    res = await fetch(`${API_BASE}${path}`, {
-      headers: { 'Content-Type': 'application/json', ...init?.headers },
-      ...init,
-      signal: controller.signal,
-    });
-  } catch (fetchErr) {
-    clearTimeout(timeoutId);
-    const isAbort = fetchErr instanceof DOMException && fetchErr.name === 'AbortError';
-    const message = isAbort ? 'Request timed out' : 'Network error';
-    const error_code = isAbort ? 'REQUEST_TIMEOUT' : 'NETWORK_ERROR';
-    const apiError = new ApiError(message, 0, error_code, {});
-    if (_attempt >= _MAX_RETRIES) {
-      _onFinalFailure(apiError, path, init?.method ?? 'GET');
-    }
-    throw apiError;
-  }
-  clearTimeout(timeoutId);
+  const res = await fetch(`${API_BASE}${path}`, {
+    headers: { 'Content-Type': 'application/json', ...init?.headers },
+    ...init,
+  });
 
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
@@ -101,13 +80,17 @@ async function apiFetch<T>(path: string, init?: RequestInit, _attempt = 0): Prom
 
     const retryAfterHeader = res.headers.get('Retry-After');
     const retry_after = retryAfterHeader ? parseInt(retryAfterHeader, 10) : body?.retry_after;
-    const apiError = new ApiError(message, res.status, error_code, { request_id, retry_after });
 
-    if (res.status >= 500 || _RETRYABLE_STATUSES.has(res.status)) {
-      _onFinalFailure(apiError, path, init?.method ?? 'GET');
+    const err = new ApiError(message, res.status, error_code, { request_id, retry_after });
+
+    // Surface non-retryable client errors (4xx, excluding 429/503) to the
+    // persistent error banner so users see actionable feedback.
+    const isClientError = res.status >= 400 && res.status < 500 && !_RETRYABLE_STATUSES.has(res.status);
+    if (isClientError && _errorReporter) {
+      _errorReporter(err);
     }
 
-    throw apiError;
+    throw err;
   }
 
   return res.json() as Promise<T>;
@@ -396,6 +379,7 @@ export async function getAgentRuns(limit = 20): Promise<{ runs: AgentRun[]; tota
 export async function runModelComparison(params: {
   ticker: string;
   providers: ComparisonProviderRequest[];
+  template?: ComparisonTemplate;
 }): Promise<ModelComparisonResponse> {
   return apiFetch<ModelComparisonResponse>('/api/ai/compare', {
     method: 'POST',
@@ -411,4 +395,30 @@ export async function getModelComparisonHistory(
     `/api/ai/compare/history?ticker=${encodeURIComponent(ticker)}&limit=${limit}`,
   );
 }
-```
+
+export async function fetchComparisonHistory(
+  limit = 20,
+): Promise<{ runs: ModelComparisonRun[] }> {
+  return apiFetch<{ runs: ModelComparisonRun[] }>(
+    `/api/ai/compare/history?limit=${limit}`,
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Bulk prices
+// ---------------------------------------------------------------------------
+
+export async function fetchBulkPrices(tickers: string[]): Promise<BulkPricesResponse> {
+  if (tickers.length === 0) return {};
+  return apiFetch<BulkPricesResponse>(
+    `/api/stocks/prices?tickers=${tickers.map(encodeURIComponent).join(',')}`,
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Health check
+// ---------------------------------------------------------------------------
+
+export async function fetchHealth(): Promise<HealthResponse> {
+  return apiFetch<HealthResponse>('/api/health');
+}

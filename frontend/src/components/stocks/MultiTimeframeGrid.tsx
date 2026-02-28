@@ -1,3 +1,4 @@
+```typescript
 'use client';
 
 import { useEffect, useRef, useState, useCallback } from 'react';
@@ -220,3 +221,4 @@ export default function MultiTimeframeGrid({
     </div>
   );
 }
+```

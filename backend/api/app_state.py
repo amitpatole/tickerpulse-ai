@@ -1,4 +1,3 @@
-```python
 """
 TickerPulse AI v3.0 — App State API
 
@@ -134,4 +133,3 @@ def patch_app_state():
         raise DatabaseError(f"Failed to save keys: {', '.join(failed_keys)}")
 
     return jsonify({"ok": True}), 200
-```

@@ -126,17 +126,11 @@ export default function ActivityPage() {
 
   return (
     <div className="min-h-screen bg-slate-950 text-white">
-      <Header />
+      <Header title="Activity" subtitle="Agent runs, job executions, and system events" />
       <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
 
         {/* ── Page header ───────────────────────────────────────────── */}
-        <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
-          <div>
-            <h1 className="text-2xl font-bold text-white">Activity</h1>
-            <p className="mt-1 text-sm text-slate-400">
-              Agent runs, job executions, and system events
-            </p>
-          </div>
+        <div className="mb-6 flex justify-end">
           <button
             onClick={feedResult.refetch}
             className="flex items-center gap-1.5 rounded-lg border border-slate-700/50 px-3 py-1.5 text-sm text-slate-400 transition-colors hover:text-white"

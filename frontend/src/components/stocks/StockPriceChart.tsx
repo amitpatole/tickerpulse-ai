@@ -1,3 +1,4 @@
+```typescript
 'use client';
 
 import { useState, useCallback, useEffect, useRef } from 'react';
@@ -11,8 +12,10 @@ import { getStockDetail, getCompareData } from '@/lib/api';
 import type { Timeframe, StockDetail, CompareResponse } from '@/lib/types';
 import PriceChart from '@/components/charts/PriceChart';
 import TimeframeToggle from './TimeframeToggle';
+import TimezoneToggle from './TimezoneToggle';
 import CompareInput from './CompareInput';
 import MultiTimeframeGrid from './MultiTimeframeGrid';
+import { useTimezoneMode } from '@/hooks/useTimezoneMode';
 
 const COMPARISON_PALETTE = ['#f59e0b', '#10b981', '#8b5cf6', '#ef4444'];
 const ALL_TIMEFRAMES: Timeframe[] = ['1D', '1W', '1M', '3M', '6M', '1Y', 'All'];
@@ -44,6 +47,7 @@ export default function StockPriceChart({ ticker }: StockPriceChartProps) {
   const router = useRouter();
 
   const { timeframe, setTimeframe } = useChartTimeframe();
+  const { mode: timezoneMode, setMode: setTimezoneMode } = useTimezoneMode();
   const { selected: selectedTimeframes, toggle, canSelect, canDeselect } = useChartTimeframes();
   const [viewMode, setViewMode] = useState<'chart' | 'multi'>('chart');
 
@@ -184,7 +188,10 @@ export default function StockPriceChart({ ticker }: StockPriceChartProps) {
         </div>
 
         {viewMode === 'chart' && (
-          <TimeframeToggle selected={timeframe} onChange={setTimeframe} />
+          <div className="flex items-center gap-2">
+            <TimeframeToggle selected={timeframe} onChange={setTimeframe} />
+            <TimezoneToggle mode={timezoneMode} onModeChange={setTimezoneMode} />
+          </div>
         )}
 
         {viewMode === 'multi' && (
@@ -287,3 +294,4 @@ export default function StockPriceChart({ ticker }: StockPriceChartProps) {
     </div>
   );
 }
+```

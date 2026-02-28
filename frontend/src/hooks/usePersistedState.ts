@@ -1,4 +1,3 @@
-```typescript
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
@@ -101,7 +100,15 @@ export interface UsePersistedStateResult {
   error: string | null;
 }
 
-export function usePersistedState(): UsePersistedStateResult {
+// Overload: no args → full result object
+export function usePersistedState(): UsePersistedStateResult;
+// Overload: key + default → [value, setter] tuple (useState-like)
+export function usePersistedState<T>(key: string, defaultValue: T): [T, (value: T) => void];
+
+export function usePersistedState<T = unknown>(
+  key?: string,
+  defaultValue?: T,
+): UsePersistedStateResult | [T, (value: T) => void] {
   const [localState, setLocalState] = useState<Record<string, unknown>>(
     _cache ?? {},
   );
@@ -150,18 +157,18 @@ export function usePersistedState(): UsePersistedStateResult {
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const setState = useCallback(
-    (key: string, value: unknown) => {
+    (k: string, value: unknown) => {
       // Optimistic local update — visible in the same render
-      setLocalState((prev) => ({ ...prev, [key]: value }));
+      setLocalState((prev) => ({ ...prev, [k]: value }));
       setError(null);
 
       // Keep module-level cache in sync so concurrent instances benefit
       if (_cache !== null) {
-        _cache[key] = value;
+        _cache[k] = value;
       }
 
       // Accumulate and debounce PATCH
-      pendingRef.current[key] = value;
+      pendingRef.current[k] = value;
       if (debounceRef.current) clearTimeout(debounceRef.current);
       debounceRef.current = setTimeout(() => {
         debounceRef.current = undefined;
@@ -185,12 +192,27 @@ export function usePersistedState(): UsePersistedStateResult {
   );
 
   const getState = useCallback(
-    <T = unknown>(key: string): T | undefined => {
-      return localState[key] as T | undefined;
+    <U = unknown>(k: string): U | undefined => {
+      return localState[k] as U | undefined;
     },
     [localState],
   );
 
+  // Stable single-key setter for the tuple overload — always created to keep
+  // hook call order consistent regardless of which overload is used.
+  const singleKeySetter = useCallback(
+    (value: T) => {
+      if (key !== undefined) {
+        setState(key, value);
+      }
+    },
+    [setState, key],
+  );
+
+  if (key !== undefined) {
+    const value = (localState[key] as T | undefined) ?? defaultValue!;
+    return [value, singleKeySetter];
+  }
+
   return { state: localState, setState, getState, isLoading, error };
 }
-```

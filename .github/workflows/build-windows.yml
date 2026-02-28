@@ -1,9 +1,9 @@
 name: Build Windows Installer
 
 on:
-  push:
-    tags:
-      - 'v*'
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
   workflow_dispatch:
     inputs:
       version:
@@ -15,13 +15,16 @@ permissions:
   contents: write
 
 jobs:
-  build-windows:
+  build-windows-pr:
     runs-on: windows-latest
     timeout-minutes: 45
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
 
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
@@ -121,13 +124,18 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # Derive the version from the git tag (e.g. refs/tags/v3.78.0 -> 3.78.0).
-          # This ensures the installer filename and electron-updater metadata always
-          # match the release tag, regardless of what package.json says.  Using
-          # --config.extraMetadata.version overrides the version for this build only.
+          # Derive the triggering ref.  For workflow_run triggers the tag name
+          # lives in head_branch (e.g. "v3.78.0"); for workflow_dispatch falls
+          # back to github.ref_name so manual runs can still publish.
+          $TriggeringRef = if ("${{ github.event_name }}" -eq "workflow_run") {
+            "${{ github.event.workflow_run.head_branch }}"
+          } else {
+            "${{ github.ref_name }}"
+          }
+
           $TagVersion = ""
-          if ("${{ github.ref }}".StartsWith("refs/tags/v")) {
-            $TagVersion = "${{ github.ref_name }}" -replace "^v", ""
+          if ($TriggeringRef -match '^v\d') {
+            $TagVersion = $TriggeringRef -replace "^v", ""
             Write-Host "Building version from tag: $TagVersion" -ForegroundColor Cyan
             # Patch package.json in-place so electron-updater embeds the correct version
             $PkgPath = "package.json"
@@ -136,7 +144,7 @@ jobs:
             $Pkg | ConvertTo-Json -Depth 10 | Set-Content $PkgPath
           }
 
-          if ("${{ github.ref }}".StartsWith("refs/tags/")) {
+          if ($TagVersion -ne "") {
             Write-Host "Tag build detected — publishing to GitHub Releases" -ForegroundColor Green
             npx electron-builder --win --config electron-builder.yml --publish always
           } else {

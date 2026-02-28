@@ -12,7 +12,7 @@ import logging
 from datetime import datetime, timezone
 
 from backend.database import get_pool, pooled_session
-from backend.jobs._helpers import job_timer
+from backend.jobs._helpers import flush_buffered_job_history, job_timer
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +35,12 @@ def _get_system_stats() -> tuple:
 def run_metrics_snapshot() -> None:
     """Capture system metrics and flush API latency data to the database."""
     with job_timer(JOB_ID, JOB_NAME) as ctx:
+        # Flush buffered job history before acquiring a pool connection so that
+        # the batch INSERT uses the same connection slot we're about to hold.
+        flushed = flush_buffered_job_history()
+        if flushed:
+            logger.debug("metrics_snapshot: flushed %d job history record(s)", flushed)
+
         now_iso = datetime.now(timezone.utc).isoformat()
 
         cpu_pct, mem_pct = _get_system_stats()
@@ -42,6 +48,14 @@ def run_metrics_snapshot() -> None:
         pool_stats = get_pool().stats()
         db_pool_active = pool_stats['in_use']
         db_pool_idle = pool_stats['available']
+
+        if pool_stats['in_use'] >= pool_stats['size']:
+            logger.warning(
+                "DB pool saturated: all %d connections in use. "
+                "Consider increasing DB_POOL_SIZE (currently %d).",
+                pool_stats['size'],
+                pool_stats['size'],
+            )
 
         # Flush in-memory latency buffer → api_request_log
         try:
@@ -56,7 +70,7 @@ def run_metrics_snapshot() -> None:
             conn.execute(
                 """
                 INSERT INTO perf_snapshots
-                    (cpu_pct, mem_pct, db_pool_active, db_pool_idle, recorded_at)
+                    (cpu_pct, mem_pct, db_pool_in_use, db_pool_idle, recorded_at)
                 VALUES (?, ?, ?, ?, ?)
                 """,
                 (cpu_pct, mem_pct, db_pool_active, db_pool_idle, now_iso),

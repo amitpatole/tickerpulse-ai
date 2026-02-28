@@ -1,4 +1,3 @@
-```python
 """
 TickerPulse AI v3.0 - State Manager
 Persistent UI state backed by the ui_state SQLite table.
@@ -8,7 +7,7 @@ import json
 import logging
 from typing import Any, Dict, Optional
 
-from backend.database import db_session
+from backend.database import pooled_session
 
 logger = logging.getLogger(__name__)
 
@@ -20,13 +19,10 @@ class StateManager:
     namespaced keys (e.g. ``'sidebar'``, ``'chart'``) are recommended.
     """
 
-    def __init__(self, db_path: Optional[str] = None) -> None:
-        self._db_path = db_path
-
     def get_state(self, key: str) -> Optional[Any]:
         """Return the stored value for *key*, or ``None`` if not found."""
         try:
-            with db_session(self._db_path) as conn:
+            with pooled_session() as conn:
                 row = conn.execute(
                     "SELECT value FROM ui_state WHERE key = ?", (key,)
                 ).fetchone()
@@ -43,7 +39,7 @@ class StateManager:
         except (TypeError, ValueError) as exc:
             raise RuntimeError(f"Failed to set state for key '{key}': {exc}") from exc
         try:
-            with db_session(self._db_path) as conn:
+            with pooled_session() as conn:
                 conn.execute(
                     """
                     INSERT INTO ui_state (key, value, updated_at)
@@ -60,7 +56,7 @@ class StateManager:
     def delete_state(self, key: str) -> bool:
         """Remove the entry for *key*.  Returns ``True`` if a row was deleted."""
         try:
-            with db_session(self._db_path) as conn:
+            with pooled_session() as conn:
                 cursor = conn.execute(
                     "DELETE FROM ui_state WHERE key = ?", (key,)
                 )
@@ -73,7 +69,7 @@ class StateManager:
     def get_all_state(self) -> Dict[str, Any]:
         """Return all stored state as a flat ``{key: value}`` dict."""
         try:
-            with db_session(self._db_path) as conn:
+            with pooled_session() as conn:
                 rows = conn.execute(
                     "SELECT key, value FROM ui_state ORDER BY updated_at DESC"
                 ).fetchall()
@@ -101,4 +97,3 @@ class StateManager:
             raise RuntimeError(
                 f"Failed to merge state for key '{key}': {exc}"
             ) from exc
-```

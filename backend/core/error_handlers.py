@@ -1,4 +1,3 @@
-```python
 """
 TickerPulse AI v3.0 - Typed API Error Hierarchy and Handler Decorator
 Provides a uniform exception-to-JSON-response pipeline for all API blueprints.
@@ -11,9 +10,13 @@ from functools import wraps
 
 from flask import g, jsonify
 
-from backend.api.error_codes import ErrorCode
-
 logger = logging.getLogger(__name__)
+
+
+def _get_error_code_value(code_name: str) -> str:
+    """Lazy-load ErrorCode to avoid circular imports."""
+    from backend.api.error_codes import ErrorCode
+    return getattr(ErrorCode, code_name).value
 
 
 class ApiError(Exception):
@@ -24,7 +27,7 @@ class ApiError(Exception):
     """
 
     status_code: int = 500
-    error_code: str = ErrorCode.INTERNAL_ERROR.value
+    error_code: str = 'INTERNAL_ERROR'
     retry_after: int | None = None
     retryable: bool = False
 
@@ -64,35 +67,35 @@ class ValidationError(ApiError):
     """Raised when input data fails validation (400)."""
 
     status_code = 400
-    error_code = ErrorCode.INVALID_INPUT.value
+    error_code = 'INVALID_INPUT'
 
 
 class NotFoundError(ApiError):
     """Raised when a requested resource does not exist (404)."""
 
     status_code = 404
-    error_code = ErrorCode.NOT_FOUND.value
+    error_code = 'NOT_FOUND'
 
 
 class ConflictError(ApiError):
     """Raised when a request conflicts with existing state (409)."""
 
     status_code = 409
-    error_code = ErrorCode.CONFLICT.value
+    error_code = 'CONFLICT'
 
 
 class DatabaseError(ApiError):
     """Raised when a database operation fails (500)."""
 
     status_code = 500
-    error_code = ErrorCode.DATABASE_ERROR.value
+    error_code = 'DATABASE_ERROR'
 
 
 class ServiceUnavailableError(ApiError):
     """Raised when an upstream data provider is unreachable (503)."""
 
     status_code = 503
-    error_code = ErrorCode.DATA_PROVIDER_UNAVAILABLE.value
+    error_code = 'DATA_PROVIDER_UNAVAILABLE'
     retryable = True
 
 
@@ -100,23 +103,37 @@ class UnauthorizedError(ApiError):
     """Raised when authentication is required but missing or invalid (401)."""
 
     status_code = 401
-    error_code = ErrorCode.UNAUTHORIZED.value
+    error_code = 'UNAUTHORIZED'
 
 
 class ForbiddenError(ApiError):
     """Raised when the authenticated user lacks permission for the action (403)."""
 
     status_code = 403
-    error_code = ErrorCode.FORBIDDEN.value
+    error_code = 'FORBIDDEN'
 
 
 class RateLimitError(ApiError):
     """Raised when the client has exceeded their request quota (429)."""
 
     status_code = 429
-    error_code = ErrorCode.RATE_LIMIT_EXCEEDED.value
+    error_code = 'RATE_LIMIT_EXCEEDED'
     retry_after = 60
     retryable = True
+
+
+class SchedulerJobNotFoundError(ApiError):
+    """Raised when a scheduler job_id does not exist in the registry (404)."""
+
+    status_code = 404
+    error_code = 'SCHEDULER_JOB_NOT_FOUND'
+
+
+class SchedulerOperationError(ApiError):
+    """Raised when APScheduler fails to execute a pause/resume/trigger/reschedule (500)."""
+
+    status_code = 500
+    error_code = 'SCHEDULER_OPERATION_ERROR'
 
 
 def _emit_to_error_log(
@@ -178,7 +195,7 @@ def handle_api_errors(fn):
             request_id = getattr(g, 'request_id', None)
             stack = traceback.format_exc()
             _emit_to_error_log(
-                error_code=ErrorCode.INTERNAL_ERROR.value,
+                error_code='INTERNAL_ERROR',
                 message=str(exc),
                 request_id=request_id,
                 stack=stack,
@@ -186,4 +203,3 @@ def handle_api_errors(fn):
             return ApiError(str(exc)).to_response()
 
     return wrapper
-```

@@ -1,21 +1,23 @@
+```typescript
 /**
  * Test MiniTimeframeToggle component: compact timeframe selector for multi-grid mode.
  *
  * Coverage:
  * - AC1: Component renders compact toggle with current selected timeframe
  * - AC2: onChange callback is invoked when timeframe selection changes
- * - AC3: Disabled state prevents selection changes
+ * - AC3: Clicking currently selected option still fires onChange
  */
 
 import React from 'react';
-import { render, screen, waitFor } from '@testing-library/react';
+import { vi } from 'vitest';
+import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import MiniTimeframeToggle from '../MiniTimeframeToggle';
 import type { Timeframe } from '@/lib/types';
 
-// Mock the parent TimeframeToggle component to keep tests focused
-jest.mock('../TimeframeToggle', () => {
-  return function DummyTimeframeToggle({
+// Mock TimeframeToggle so we can assert compact prop and interaction
+vi.mock('../TimeframeToggle', () => ({
+  default: function DummyTimeframeToggle({
     selected,
     onChange,
     compact,
@@ -54,8 +56,8 @@ jest.mock('../TimeframeToggle', () => {
         </div>
       </div>
     );
-  };
-});
+  },
+}));
 
 describe('MiniTimeframeToggle', () => {
   it('AC1: Renders compact toggle showing selected timeframe', () => {
@@ -63,7 +65,7 @@ describe('MiniTimeframeToggle', () => {
      * When MiniTimeframeToggle mounts with selected='1D',
      * it should render a compact toggle displaying '1D'
      */
-    const onChange = jest.fn();
+    const onChange = vi.fn();
 
     render(
       <MiniTimeframeToggle
@@ -76,8 +78,9 @@ describe('MiniTimeframeToggle', () => {
     const toggle = screen.getByTestId('timeframe-toggle');
     expect(toggle).toHaveAttribute('data-compact', 'true');
 
-    // Should display selected timeframe
-    expect(screen.getByText('1D')).toBeInTheDocument();
+    // Should display selected timeframe in button label
+    const button = screen.getByRole('button', { name: /Select timeframe, currently 1D/ });
+    expect(button).toHaveTextContent('1D');
   });
 
   it('AC2: Calls onChange when selecting a different timeframe', async () => {
@@ -85,7 +88,7 @@ describe('MiniTimeframeToggle', () => {
      * When user clicks a different timeframe option,
      * onChange should be called with the new timeframe
      */
-    const onChange = jest.fn();
+    const onChange = vi.fn();
     const user = userEvent.setup();
 
     render(
@@ -107,7 +110,7 @@ describe('MiniTimeframeToggle', () => {
      * When user rapidly clicks multiple timeframe options,
      * onChange should be called for each selection
      */
-    const onChange = jest.fn();
+    const onChange = vi.fn();
     const user = userEvent.setup();
 
     const { rerender } = render(
@@ -144,7 +147,7 @@ describe('MiniTimeframeToggle', () => {
      * The compact toggle should properly pass the selected prop
      * to TimeframeToggle component
      */
-    const onChange = jest.fn();
+    const onChange = vi.fn();
 
     const { rerender } = render(
       <MiniTimeframeToggle
@@ -153,7 +156,9 @@ describe('MiniTimeframeToggle', () => {
       />,
     );
 
-    expect(screen.getByText('1D')).toBeInTheDocument();
+    // Query by role to get the button (not the menu options)
+    let button = screen.getByRole('button', { name: /Select timeframe, currently 1D/ });
+    expect(button).toHaveTextContent('1D');
 
     // Update selected value
     rerender(
@@ -163,16 +168,17 @@ describe('MiniTimeframeToggle', () => {
       />,
     );
 
-    // Should now show 3M
-    expect(screen.getByText('3M')).toBeInTheDocument();
+    // Should now show 3M in the button
+    button = screen.getByRole('button', { name: /Select timeframe, currently 3M/ });
+    expect(button).toHaveTextContent('3M');
   });
 
-  it('AC3: Does not call onChange when clicking currently selected option', async () => {
+  it('AC3: Calls onChange when clicking currently selected option', async () => {
     /**
      * When user clicks the already-selected timeframe,
-     * onChange should still be called (component doesn't prevent it)
+     * onChange should still be called (parent handles deduplication)
      */
-    const onChange = jest.fn();
+    const onChange = vi.fn();
     const user = userEvent.setup();
 
     render(
@@ -186,7 +192,8 @@ describe('MiniTimeframeToggle', () => {
     const option1D = screen.getByTestId('option-1D');
     await user.click(option1D);
 
-    // onChange is called even if same value (parent handles deduplication if needed)
+    // onChange is called even if same value
     expect(onChange).toHaveBeenCalledWith('1D');
   });
 });
+```

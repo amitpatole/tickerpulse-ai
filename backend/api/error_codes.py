@@ -1,4 +1,3 @@
-```python
 """
 TickerPulse AI v3.0 - API Error Code Taxonomy
 Centralised enum + HTTP status mapping used across all API blueprints.
@@ -25,6 +24,10 @@ class ErrorCode(Enum):
     FORBIDDEN = 'FORBIDDEN'
     RATE_LIMIT_EXCEEDED = 'RATE_LIMIT_EXCEEDED'
 
+    # Scheduler errors
+    SCHEDULER_JOB_NOT_FOUND = 'SCHEDULER_JOB_NOT_FOUND'
+    SCHEDULER_OPERATION_ERROR = 'SCHEDULER_OPERATION_ERROR'
+
     # Server errors (5xx)
     INTERNAL_ERROR = 'INTERNAL_ERROR'
     DATA_PROVIDER_UNAVAILABLE = 'DATA_PROVIDER_UNAVAILABLE'
@@ -48,10 +51,11 @@ HTTP_STATUS: dict[ErrorCode, int] = {
     ErrorCode.UNAUTHORIZED: 401,
     ErrorCode.FORBIDDEN: 403,
     ErrorCode.RATE_LIMIT_EXCEEDED: 429,
+    ErrorCode.SCHEDULER_JOB_NOT_FOUND: 404,
+    ErrorCode.SCHEDULER_OPERATION_ERROR: 500,
     ErrorCode.INTERNAL_ERROR: 500,
     ErrorCode.DATABASE_ERROR: 500,
     ErrorCode.DATA_PROVIDER_UNAVAILABLE: 503,
     ErrorCode.PROVIDER_ERROR: 503,
     ErrorCode.SERVICE_UNAVAILABLE: 503,
 }
-```

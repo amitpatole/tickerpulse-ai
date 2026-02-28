@@ -1,7 +1,7 @@
 'use client';
 
-import React from 'react';
-import type { SystemMetricsResponse } from '@/lib/types';
+import React, { useMemo } from 'react';
+import type { SystemMetricsResponse, SystemMetricsSnapshot } from '@/lib/types';
 
 interface Props {
   data: SystemMetricsResponse | null;
@@ -37,6 +37,100 @@ function StatusBadge({ statusClass }: { statusClass: string }) {
     </span>
   );
 }
+
+// ---------------------------------------------------------------------------
+// Inline sparkline — pure SVG, no extra dependencies
+// ---------------------------------------------------------------------------
+
+interface SparklineProps {
+  snapshots: SystemMetricsSnapshot[];
+}
+
+function Sparkline({ snapshots }: SparklineProps) {
+  const { cpuPoints, memPoints, xLabels } = useMemo(() => {
+    if (snapshots.length < 2) return { cpuPoints: '', memPoints: '', xLabels: [] };
+
+    const W = 708;
+    const H = 80;
+    const PAD = { top: 8, right: 8, bottom: 24, left: 36 };
+    const CW = W - PAD.left - PAD.right;
+    const CH = H - PAD.top - PAD.bottom;
+
+    const xScale = (i: number) =>
+      snapshots.length > 1 ? (i / (snapshots.length - 1)) * CW : CW / 2;
+    const yScale = (v: number) => CH - (v / 100) * CH;
+
+    const pts = (field: 'cpu_pct' | 'mem_pct') =>
+      snapshots
+        .map((s, i) => `${xScale(i).toFixed(1)},${yScale(s[field]).toFixed(1)}`)
+        .join(' ');
+
+    // Show at most 6 x-axis labels
+    const step = Math.max(1, Math.ceil(snapshots.length / 6));
+    const xLabels = snapshots
+      .map((s, i) => ({ i, label: s.recorded_at.slice(11, 16) }))
+      .filter(({ i }) => i % step === 0 || i === snapshots.length - 1);
+
+    return { cpuPoints: pts('cpu_pct'), memPoints: pts('mem_pct'), xLabels, W, H, PAD, CW, CH, xScale, yScale };
+  }, [snapshots]);
+
+  if (!cpuPoints) {
+    return (
+      <div className="flex h-24 items-center justify-center text-xs text-slate-500">
+        Collecting snapshots — first data arrives after 5 min
+      </div>
+    );
+  }
+
+  const W = 708;
+  const H = 80;
+  const PAD = { top: 8, right: 8, bottom: 24, left: 36 };
+  const CW = W - PAD.left - PAD.right;
+  const CH = H - PAD.top - PAD.bottom;
+  const xScale = (i: number) =>
+    snapshots.length > 1 ? (i / (snapshots.length - 1)) * CW : CW / 2;
+  const yScale = (v: number) => CH - (v / 100) * CH;
+
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ height: 88 }} aria-label="CPU and memory sparkline">
+      <g transform={`translate(${PAD.left},${PAD.top})`}>
+        {/* Y-axis ticks at 0, 50, 100 */}
+        {[0, 50, 100].map((v) => (
+          <g key={v}>
+            <line x1={0} y1={yScale(v).toFixed(1)} x2={CW} y2={yScale(v).toFixed(1)} stroke="#1e293b" strokeWidth={1} />
+            <text x={-6} y={yScale(v)} dominantBaseline="middle" textAnchor="end" fill="#64748b" fontSize={9}>
+              {v}%
+            </text>
+          </g>
+        ))}
+
+        {/* Memory line — violet */}
+        <polyline points={memPoints} fill="none" stroke="#8b5cf6" strokeWidth={1.5} strokeOpacity={0.7} />
+
+        {/* CPU line — blue */}
+        <polyline points={cpuPoints} fill="none" stroke="#3b82f6" strokeWidth={2} />
+
+        {/* X-axis labels */}
+        {xLabels.map(({ i, label }) => (
+          <text
+            key={i}
+            x={xScale(i).toFixed(1)}
+            y={CH + 16}
+            textAnchor="middle"
+            fill="#64748b"
+            fontSize={9}
+          >
+            {label}
+          </text>
+        ))}
+      </g>
+    </svg>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Main component
+// ---------------------------------------------------------------------------
 
 export default React.memo(function SystemPanel({ data, loading, error }: Props) {
   if (loading) {
@@ -91,7 +185,7 @@ export default React.memo(function SystemPanel({ data, loading, error }: Props) 
         <div className="rounded-xl border border-slate-700/50 bg-slate-800/40 p-4">
           <p className="text-xs font-medium text-slate-400">DB Active</p>
           <p className="mt-1 text-2xl font-bold text-white">
-            {latest != null ? latest.db_pool_active : '—'}
+            {latest != null ? latest.db_pool_in_use : '—'}
           </p>
           <p className="mt-1 text-[10px] text-slate-500">pool connections</p>
         </div>
@@ -104,6 +198,24 @@ export default React.memo(function SystemPanel({ data, loading, error }: Props) 
           <p className="mt-1 text-[10px] text-slate-500">pool connections</p>
         </div>
 
+      </div>
+
+      {/* ── CPU / Memory history sparkline ───────────────────────────── */}
+      <div className="rounded-xl border border-slate-700/50 bg-slate-800/40 p-4">
+        <div className="mb-3 flex items-center justify-between">
+          <h3 className="text-sm font-medium text-slate-400">CPU &amp; Memory History</h3>
+          <div className="flex gap-3">
+            <div className="flex items-center gap-1.5">
+              <div className="h-px w-4 bg-blue-500" style={{ height: 2 }} />
+              <span className="text-[10px] text-slate-400">CPU</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <div className="h-px w-4 bg-violet-500" style={{ height: 2 }} />
+              <span className="text-[10px] text-slate-400">Memory</span>
+            </div>
+          </div>
+        </div>
+        <Sparkline snapshots={data.snapshots} />
       </div>
 
       {/* ── Endpoint latency table ───────────────────────────────────── */}

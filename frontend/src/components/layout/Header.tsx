@@ -7,6 +7,7 @@ import { useKeyboardShortcutsContext } from '@/components/layout/KeyboardShortcu
 import { useSidebarState } from '@/components/layout/SidebarStateProvider';
 import { useApiErrorContext } from '@/lib/apiErrorContext';
 import { getErrorCopy } from '@/hooks/useApiError';
+import HealthStatusPill from '@/components/health/HealthStatusPill';
 
 interface HeaderProps {
   title: string;
@@ -85,7 +86,10 @@ export default function Header({ title, subtitle }: HeaderProps) {
             )}
           </button>
 
-          {/* Connection Status */}
+          {/* Health status pill */}
+          <HealthStatusPill />
+
+          {/* SSE Connection Status */}
           <div
             className={clsx(
               'flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium',

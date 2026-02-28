@@ -16,6 +16,7 @@ import {
   Zap,
   X,
   Layers,
+  BarChart3,
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { useSidebarState } from './SidebarStateProvider';
@@ -26,6 +27,7 @@ const NAV_ITEMS = [
   { href: '/research',  label: 'Research',  icon: FileSearch      },
   { href: '/compare',   label: 'Compare',   icon: Layers          },
   { href: '/activity',  label: 'Activity',  icon: History         },
+  { href: '/metrics',   label: 'Metrics',   icon: BarChart3       },
   { href: '/scheduler', label: 'Scheduler', icon: Calendar        },
   { href: '/settings',  label: 'Settings',  icon: Settings        },
 ];

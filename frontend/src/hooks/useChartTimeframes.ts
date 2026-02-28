@@ -1,3 +1,4 @@
+```typescript
 'use client';
 
 import { useCallback } from 'react';
@@ -65,3 +66,4 @@ export function useChartTimeframes(): UseChartTimeframesResult {
 
   return { selected, toggle, canDeselect, canSelect, isLoading };
 }
+```

@@ -11,6 +11,7 @@ import SystemPanel from '@/components/metrics/SystemPanel';
 import PeriodSelector from '@/components/metrics/PeriodSelector';
 import { useApi } from '@/hooks/useApi';
 import { usePersistedState } from '@/hooks/usePersistedState';
+import { useMetricsPeriod } from '@/hooks/useMetricsPeriod';
 import {
   getMetricsSummary,
   getAgentMetrics,
@@ -46,7 +47,7 @@ const METRICS: { id: MetricId; label: string }[] = [
 // ---------------------------------------------------------------------------
 
 export default function MetricsPage() {
-  const [days, setDays]             = usePersistedState('metrics_period_days', 30);
+  const { days, setDays }           = useMetricsPeriod();
   const [tab, setTab]               = usePersistedState<TabId>('metrics_active_tab', 'overview');
   const [metric, setMetric]         = useState<MetricId>('cost');
   const [refreshKey, setRefreshKey] = useState(0);

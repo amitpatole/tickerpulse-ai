@@ -11,13 +11,19 @@ are mapped to their canonical registry names via AGENT_ID_MAP so the UI
 contract is preserved without breaking existing bookmarks or API consumers.
 """
 
-import sqlite3
 import logging
 from datetime import datetime, timedelta
 
 from flask import Blueprint, current_app, jsonify, request
 
-from backend.config import Config
+from backend.core.error_handlers import (
+    ApiError,
+    NotFoundError,
+    ServiceUnavailableError,
+    ValidationError,
+    handle_api_errors,
+)
+from backend.database import pooled_session
 
 logger = logging.getLogger(__name__)
 
@@ -191,38 +197,36 @@ def list_agents():
         enabled_bool = enabled_filter.lower() == 'true'
         agents = [a for a in agents if a['enabled'] == enabled_bool]
 
-    # Enrich each agent with live run stats from DB
+    # Enrich each agent with live run stats from DB (intentional degradation on error)
     try:
-        conn = sqlite3.connect(Config.DB_PATH)
-        conn.row_factory = sqlite3.Row
-        for agent in agents:
-            real_name = AGENT_ID_MAP.get(agent['name'], agent['name'])
-            row = conn.execute(
-                'SELECT * FROM agent_runs WHERE agent_name = ? ORDER BY started_at DESC LIMIT 1',
-                (real_name,)
-            ).fetchone()
-            if row:
-                agent['last_run'] = {
-                    'id': row['id'],
-                    'agent_name': row['agent_name'],
-                    'status': row['status'],
-                    'started_at': row['started_at'],
-                    'completed_at': row['completed_at'],
-                    'duration_ms': row['duration_ms'] or 0,
-                    'tokens_used': (row['tokens_input'] or 0) + (row['tokens_output'] or 0),
-                    'estimated_cost': row['estimated_cost'] or 0,
-                }
-            count = conn.execute(
-                'SELECT COUNT(*) FROM agent_runs WHERE agent_name = ?',
-                (real_name,)
-            ).fetchone()[0]
-            agent['total_runs'] = count
-            total_cost = conn.execute(
-                'SELECT COALESCE(SUM(estimated_cost), 0) FROM agent_runs WHERE agent_name = ?',
-                (real_name,)
-            ).fetchone()[0]
-            agent['total_cost'] = round(total_cost, 4)
-        conn.close()
+        with pooled_session() as conn:
+            for agent in agents:
+                real_name = AGENT_ID_MAP.get(agent['name'], agent['name'])
+                row = conn.execute(
+                    'SELECT * FROM agent_runs WHERE agent_name = ? ORDER BY started_at DESC LIMIT 1',
+                    (real_name,)
+                ).fetchone()
+                if row:
+                    agent['last_run'] = {
+                        'id': row['id'],
+                        'agent_name': row['agent_name'],
+                        'status': row['status'],
+                        'started_at': row['started_at'],
+                        'completed_at': row['completed_at'],
+                        'duration_ms': row['duration_ms'] or 0,
+                        'tokens_used': (row['tokens_input'] or 0) + (row['tokens_output'] or 0),
+                        'estimated_cost': row['estimated_cost'] or 0,
+                    }
+                count = conn.execute(
+                    'SELECT COUNT(*) FROM agent_runs WHERE agent_name = ?',
+                    (real_name,)
+                ).fetchone()[0]
+                agent['total_runs'] = count
+                total_cost = conn.execute(
+                    'SELECT COALESCE(SUM(estimated_cost), 0) FROM agent_runs WHERE agent_name = ?',
+                    (real_name,)
+                ).fetchone()[0]
+                agent['total_cost'] = round(total_cost, 4)
     except Exception as e:
         logger.error("Failed to enrich agents with run data: %s", e)
 
@@ -230,6 +234,7 @@ def list_agents():
 
 
 @agents_bp.route('/agents/<name>', methods=['GET'])
+@handle_api_errors
 def get_agent_detail(name):
     """Get detailed information about a specific agent including run history.
 
@@ -245,27 +250,25 @@ def get_agent_detail(name):
     """
     registry = _get_registry()
     if registry is None:
-        return jsonify({'error': 'Agent registry not initialised'}), 503
+        raise ServiceUnavailableError('Agent registry not initialised')
 
     real_name = AGENT_ID_MAP.get(name)
     if real_name is None:
-        return jsonify({'error': f'Agent not found: {name}'}), 404
+        raise NotFoundError(f'Agent not found: {name}')
 
     agent_obj = registry.get(real_name)
     if agent_obj is None:
-        return jsonify({'error': f'Agent not found: {name}'}), 404
+        raise NotFoundError(f'Agent not found: {name}')
 
     detail = _format_agent(name, agent_obj)
 
-    # Recent runs from DB (keyed by real agent name)
+    # Recent runs from DB (intentional degradation on error)
     try:
-        conn = sqlite3.connect(Config.DB_PATH)
-        conn.row_factory = sqlite3.Row
-        rows = conn.execute(
-            'SELECT * FROM agent_runs WHERE agent_name = ? ORDER BY started_at DESC LIMIT 10',
-            (real_name,)
-        ).fetchall()
-        conn.close()
+        with pooled_session() as conn:
+            rows = conn.execute(
+                'SELECT * FROM agent_runs WHERE agent_name = ? ORDER BY started_at DESC LIMIT 10',
+                (real_name,)
+            ).fetchall()
         detail['recent_runs'] = [{
             'id': r['id'],
             'status': r['status'],
@@ -292,6 +295,7 @@ def get_agent_detail(name):
 
 
 @agents_bp.route('/agents/<name>/run', methods=['POST'])
+@handle_api_errors
 def trigger_agent_run(name):
     """Manually trigger an agent run.
 
@@ -314,23 +318,24 @@ def trigger_agent_run(name):
         400: Agent is disabled.
         503: Registry not initialised.
     """
+    from backend.config import Config
+
     registry = _get_registry()
     if registry is None:
-        return jsonify({'error': 'Agent registry not initialised'}), 503
+        raise ServiceUnavailableError('Agent registry not initialised')
 
     real_name = AGENT_ID_MAP.get(name)
     if real_name is None:
-        return jsonify({'error': f'Agent not found: {name}'}), 404
+        raise NotFoundError(f'Agent not found: {name}')
 
     agent_obj = registry.get(real_name)
     if agent_obj is None:
-        return jsonify({'error': f'Agent not found: {name}'}), 404
+        raise NotFoundError(f'Agent not found: {name}')
 
     if not agent_obj.config.enabled:
-        return jsonify({
-            'success': False,
-            'error': f'Agent "{name}" is currently disabled. Enable it in settings first.'
-        }), 400
+        raise ValidationError(
+            f'Agent "{name}" is currently disabled. Enable it in settings first.'
+        )
 
     data = request.get_json(silent=True) or {}
     params = data.get('params', {})
@@ -384,7 +389,7 @@ def trigger_agent_run(name):
     # result in a single operation — exactly one row written to agent_runs.
     result, run_id = registry.run_agent(real_name, params)
     if result is None:
-        return jsonify({'error': f'Agent {real_name} execution failed internally'}), 500
+        raise ApiError(f'Agent {real_name} execution failed internally')
     success = result.status == 'success'
 
     logger.info(
@@ -414,6 +419,7 @@ def trigger_agent_run(name):
 
 
 @agents_bp.route('/agents/runs', methods=['GET'])
+@handle_api_errors
 def list_recent_runs():
     """List recent agent runs across all agents.
 
@@ -431,9 +437,9 @@ def list_recent_runs():
     try:
         limit = int(raw_limit)
     except ValueError:
-        return jsonify({'error': 'limit must be a positive integer'}), 400
+        raise ValidationError('limit must be a positive integer')
     if limit <= 0:
-        return jsonify({'error': 'limit must be a positive integer'}), 400
+        raise ValidationError('limit must be a positive integer')
     limit = min(limit, 200)
 
     agent_filter = request.args.get('agent')
@@ -441,14 +447,11 @@ def list_recent_runs():
     _VALID_STATUSES = {'running', 'success', 'error'}
     status_filter = request.args.get('status')
     if status_filter and status_filter not in _VALID_STATUSES:
-        return jsonify({
-            'error': f"Invalid status. Must be one of: {', '.join(sorted(_VALID_STATUSES))}"
-        }), 400
+        raise ValidationError(
+            f"Invalid status. Must be one of: {', '.join(sorted(_VALID_STATUSES))}"
+        )
 
-    try:
-        conn = sqlite3.connect(Config.DB_PATH)
-        conn.row_factory = sqlite3.Row
-
+    with pooled_session() as conn:
         query = 'SELECT * FROM agent_runs WHERE 1=1'
         params = []
 
@@ -465,23 +468,19 @@ def list_recent_runs():
         params.append(limit)
 
         rows = conn.execute(query, params).fetchall()
-        conn.close()
 
-        runs = [{
-            'id': r['id'],
-            'agent_name': r['agent_name'],
-            'status': r['status'],
-            'output': r['output_data'],
-            'duration_ms': r['duration_ms'] or 0,
-            'tokens_used': (r['tokens_input'] or 0) + (r['tokens_output'] or 0),
-            'estimated_cost': r['estimated_cost'] or 0,
-            'started_at': r['started_at'],
-            'completed_at': r['completed_at'],
-            'framework': r['framework'],
-        } for r in rows]
-    except Exception as e:
-        logger.error("Failed to query agent runs: %s", e)
-        runs = []
+    runs = [{
+        'id': r['id'],
+        'agent_name': r['agent_name'],
+        'status': r['status'],
+        'output': r['output_data'],
+        'duration_ms': r['duration_ms'] or 0,
+        'tokens_used': (r['tokens_input'] or 0) + (r['tokens_output'] or 0),
+        'estimated_cost': r['estimated_cost'] or 0,
+        'started_at': r['started_at'],
+        'completed_at': r['completed_at'],
+        'framework': r['framework'],
+    } for r in rows]
 
     return jsonify({
         'runs': runs,
@@ -495,6 +494,7 @@ def list_recent_runs():
 
 
 @agents_bp.route('/agents/costs', methods=['GET'])
+@handle_api_errors
 def get_cost_summary():
     """Get cost summary for agent runs (AI API usage).
 
@@ -511,9 +511,9 @@ def get_cost_summary():
     valid_periods = ['daily', 'weekly', 'monthly']
 
     if period not in valid_periods:
-        return jsonify({
-            'error': f'Invalid period: {period}. Must be one of: {", ".join(valid_periods)}'
-        }), 400
+        raise ValidationError(
+            f'Invalid period: {period}. Must be one of: {", ".join(valid_periods)}'
+        )
 
     period_days = {'daily': 1, 'weekly': 7, 'monthly': 30}[period]
     range_labels = {'daily': 'Last 24 hours', 'weekly': 'Last 7 days', 'monthly': 'Last 30 days'}

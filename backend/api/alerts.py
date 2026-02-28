@@ -9,6 +9,11 @@ import re
 from flask import Blueprint, jsonify, request
 
 from backend.core.alert_manager import create_alert, get_alerts, delete_alert, toggle_alert, update_alert_sound_type
+from backend.core.error_handlers import (
+    NotFoundError,
+    ValidationError,
+    handle_api_errors,
+)
 from backend.core.settings_manager import get_setting, set_setting
 from backend.database import db_session
 
@@ -43,6 +48,7 @@ def list_alerts():
 
 
 @alerts_bp.route('/alerts', methods=['POST'])
+@handle_api_errors
 def create_alert_endpoint():
     """Create a new price alert.
 
@@ -64,29 +70,29 @@ def create_alert_endpoint():
 
     # Validate required fields
     if not ticker:
-        return jsonify({'error': 'Missing required field: ticker'}), 400
+        raise ValidationError('Missing required field: ticker', error_code='MISSING_FIELD')
     if not _TICKER_RE.match(ticker):
-        return jsonify({'error': 'ticker must be 1–5 uppercase letters'}), 400
+        raise ValidationError('ticker must be 1–5 uppercase letters')
     if condition_type not in _VALID_CONDITION_TYPES:
-        return jsonify({
-            'error': f"Invalid condition_type. Must be one of: {', '.join(sorted(_VALID_CONDITION_TYPES))}"
-        }), 400
+        raise ValidationError(
+            f"Invalid condition_type. Must be one of: {', '.join(sorted(_VALID_CONDITION_TYPES))}"
+        )
 
     try:
         threshold = float(threshold_raw)
     except (TypeError, ValueError):
-        return jsonify({'error': 'threshold must be a valid number'}), 400
+        raise ValidationError('threshold must be a valid number')
 
     if not (0 < threshold <= _THRESHOLD_MAX):
-        return jsonify({'error': f'threshold must be > 0 and ≤ {_THRESHOLD_MAX}'}), 400
+        raise ValidationError(f'threshold must be > 0 and ≤ {_THRESHOLD_MAX}')
 
     if condition_type == 'pct_change' and threshold > 100:
-        return jsonify({'error': 'threshold for pct_change must be ≤ 100'}), 400
+        raise ValidationError('threshold for pct_change must be ≤ 100')
 
     if sound_type not in _VALID_SOUND_TYPES:
-        return jsonify({
-            'error': f"Invalid sound_type. Must be one of: {', '.join(sorted(_VALID_SOUND_TYPES))}"
-        }), 400
+        raise ValidationError(
+            f"Invalid sound_type. Must be one of: {', '.join(sorted(_VALID_SOUND_TYPES))}"
+        )
 
     # Verify the ticker exists in the stocks table
     with db_session() as conn:
@@ -94,15 +100,16 @@ def create_alert_endpoint():
             'SELECT ticker FROM stocks WHERE ticker = ? AND active = 1', (ticker,)
         ).fetchone()
     if row is None:
-        return jsonify({
-            'error': f"Ticker '{ticker}' is not in the monitored stocks list. Add it first."
-        }), 400
+        raise ValidationError(
+            f"Ticker '{ticker}' is not in the monitored stocks list. Add it first."
+        )
 
     alert = create_alert(ticker, condition_type, threshold, sound_type)
     return jsonify(alert), 201
 
 
 @alerts_bp.route('/alerts/<int:alert_id>', methods=['DELETE'])
+@handle_api_errors
 def delete_alert_endpoint(alert_id: int):
     """Delete a price alert by ID.
 
@@ -111,11 +118,12 @@ def delete_alert_endpoint(alert_id: int):
     """
     deleted = delete_alert(alert_id)
     if not deleted:
-        return jsonify({'error': f'Alert {alert_id} not found'}), 404
+        raise NotFoundError(f'Alert {alert_id} not found', error_code='ALERT_NOT_FOUND')
     return jsonify({'success': True, 'id': alert_id})
 
 
 @alerts_bp.route('/alerts/<int:alert_id>/toggle', methods=['PUT'])
+@handle_api_errors
 def toggle_alert_endpoint(alert_id: int):
     """Toggle the enabled state of a price alert.
 
@@ -124,11 +132,12 @@ def toggle_alert_endpoint(alert_id: int):
     """
     updated = toggle_alert(alert_id)
     if updated is None:
-        return jsonify({'error': f'Alert {alert_id} not found'}), 404
+        raise NotFoundError(f'Alert {alert_id} not found', error_code='ALERT_NOT_FOUND')
     return jsonify(updated)
 
 
 @alerts_bp.route('/alerts/<int:alert_id>/sound', methods=['PUT'])
+@handle_api_errors
 def update_alert_sound_endpoint(alert_id: int):
     """Update the per-alert sound type.
 
@@ -142,15 +151,15 @@ def update_alert_sound_endpoint(alert_id: int):
     sound_type = data.get('sound_type')
 
     if sound_type is None:
-        return jsonify({'error': 'Missing required field: sound_type'}), 400
+        raise ValidationError('Missing required field: sound_type', error_code='MISSING_FIELD')
     if sound_type not in _VALID_SOUND_TYPES:
-        return jsonify({
-            'error': f"Invalid sound_type. Must be one of: {', '.join(sorted(_VALID_SOUND_TYPES))}"
-        }), 400
+        raise ValidationError(
+            f"Invalid sound_type. Must be one of: {', '.join(sorted(_VALID_SOUND_TYPES))}"
+        )
 
     updated = update_alert_sound_type(alert_id, sound_type)
     if updated is None:
-        return jsonify({'error': f'Alert {alert_id} not found'}), 404
+        raise NotFoundError(f'Alert {alert_id} not found', error_code='ALERT_NOT_FOUND')
     return jsonify({'id': alert_id, 'sound_type': sound_type})
 
 
@@ -174,6 +183,7 @@ def get_sound_settings():
 
 
 @alerts_bp.route('/alerts/sound-settings', methods=['PUT'])
+@handle_api_errors
 def update_sound_settings():
     """Update alert sound settings (partial update supported).
 
@@ -190,17 +200,17 @@ def update_sound_settings():
 
     if 'sound_type' in data:
         if data['sound_type'] not in _VALID_SOUND_TYPES:
-            return jsonify({
-                'error': f"Invalid sound_type. Must be one of: {', '.join(sorted(_VALID_SOUND_TYPES))}"
-            }), 400
+            raise ValidationError(
+                f"Invalid sound_type. Must be one of: {', '.join(sorted(_VALID_SOUND_TYPES))}"
+            )
 
     if 'volume' in data:
         try:
             volume = int(data['volume'])
         except (TypeError, ValueError):
-            return jsonify({'error': 'volume must be an integer'}), 400
+            raise ValidationError('volume must be an integer')
         if not (0 <= volume <= 100):
-            return jsonify({'error': 'volume must be between 0 and 100'}), 400
+            raise ValidationError('volume must be between 0 and 100')
 
     if 'enabled' in data:
         set_setting('alert_sound_enabled', 'true' if data['enabled'] else 'false')

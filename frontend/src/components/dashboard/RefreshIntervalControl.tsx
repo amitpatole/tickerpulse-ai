@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { clsx } from 'clsx';
 import { getRefreshInterval, setRefreshInterval } from '@/lib/api';
+import { useRefreshInterval } from '@/hooks/useRefreshInterval';
 
 const INTERVAL_OPTIONS = [
   { value: 15, label: '15s' },
@@ -20,32 +21,47 @@ function isKnownInterval(v: number): v is IntervalValue {
 }
 
 export default function RefreshIntervalControl() {
-  const [interval, setIntervalValue] = useState<number | null>(null);
+  const { seconds: persistedSeconds, setSeconds } = useRefreshInterval();
+
+  // Initialise from the module-level cache if it's already warm (e.g. because
+  // SidebarStateProvider loaded it earlier), so the selector renders immediately
+  // without waiting for either the persisted-state fetch or the API call.
+  const [interval, setIntervalValue] = useState<number | null>(() => persistedSeconds ?? null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    // Fetch the authoritative value from the backend scheduler.
+    // On success, also update the persisted-state cache so the next page load
+    // starts with the correct value immediately.
     getRefreshInterval()
-      .then(({ interval: v }) => setIntervalValue(v))
-      .catch(() => setIntervalValue(60));
-  }, []);
+      .then(({ interval: v }) => {
+        setIntervalValue(v);
+        setSeconds(v);
+      })
+      .catch(() => setIntervalValue((prev) => prev ?? 60));
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleChange = useCallback(
     async (newInterval: number) => {
       const previous = interval;
       setIntervalValue(newInterval);
+      setSeconds(newInterval);
       setError(null);
       setSaving(true);
       try {
         await setRefreshInterval(newInterval);
       } catch {
         setIntervalValue(previous);
+        if (previous !== null) {
+          setSeconds(previous);
+        }
         setError('Save failed');
       } finally {
         setSaving(false);
       }
     },
-    [interval]
+    [interval, setSeconds]
   );
 
   const isStreaming = interval !== null && interval > 0;

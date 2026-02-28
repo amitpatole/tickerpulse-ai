@@ -1,3 +1,4 @@
+```typescript
 /**
  * Test MultiTimeframeGrid component: multi-timeframe chart grid rendering.
  *
@@ -10,6 +11,7 @@
  */
 
 import React from 'react';
+import { vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import MultiTimeframeGrid from '../MultiTimeframeGrid';
@@ -17,11 +19,9 @@ import * as apiModule from '@/lib/api';
 import type { Timeframe, Candle } from '@/lib/types';
 
 // Mock the API
-jest.mock('@/lib/api');
+vi.mock('@/lib/api');
 
-const mockGetStockCandles = apiModule.getStockCandles as jest.MockedFunction<
-  typeof apiModule.getStockCandles
->;
+const mockGetStockCandles = vi.mocked(apiModule.getStockCandles);
 
 // Sample valid candles
 const mockCandles: Candle[] = [
@@ -32,7 +32,7 @@ const mockCandles: Candle[] = [
 
 describe('MultiTimeframeGrid', () => {
   beforeEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   it('AC1: Renders cells for all provided timeframes', async () => {
@@ -44,7 +44,7 @@ describe('MultiTimeframeGrid', () => {
     mockGetStockCandles.mockResolvedValue(mockCandles);
 
     const timeframes: Timeframe[] = ['1D', '1W', '1M'];
-    const onSelect = jest.fn();
+    const onSelect = vi.fn();
 
     render(
       <MultiTimeframeGrid
@@ -74,7 +74,7 @@ describe('MultiTimeframeGrid', () => {
     );
 
     const timeframes: Timeframe[] = ['1D', '1W'];
-    const onSelect = jest.fn();
+    const onSelect = vi.fn();
 
     const { container } = render(
       <MultiTimeframeGrid
@@ -95,14 +95,18 @@ describe('MultiTimeframeGrid', () => {
      * that cell should display the error message
      */
     const errorMsg = 'Failed to load candles';
-    mockGetStockCandles.mockRejectedValue(new Error(errorMsg));
+    // Mock: 1D fails, 1W succeeds — so individual error shows for 1D
+    mockGetStockCandles.mockImplementation(async (ticker, timeframe) => {
+      if (timeframe === '1D') throw new Error(errorMsg);
+      return mockCandles;
+    });
 
-    const timeframes: Timeframe[] = ['1D'];
-    const onSelect = jest.fn();
+    const timeframes: Timeframe[] = ['1D', '1W'];
+    const onSelect = vi.fn();
 
     render(
       <MultiTimeframeGrid
-        ticker="INVALID_TICKER"
+        ticker="AAPL"
         timeframes={timeframes}
         onTimeframeSelect={onSelect}
       />,
@@ -121,7 +125,7 @@ describe('MultiTimeframeGrid', () => {
     mockGetStockCandles.mockResolvedValue(mockCandles);
 
     const timeframes: Timeframe[] = ['1D', '1W'];
-    const onSelect = jest.fn();
+    const onSelect = vi.fn();
 
     const user = userEvent.setup();
     render(
@@ -155,7 +159,7 @@ describe('MultiTimeframeGrid', () => {
     );
 
     const timeframes: Timeframe[] = ['1D'];
-    const onSelect = jest.fn();
+    const onSelect = vi.fn();
 
     render(
       <MultiTimeframeGrid
@@ -177,7 +181,7 @@ describe('MultiTimeframeGrid', () => {
     mockGetStockCandles.mockRejectedValue(new Error('API error'));
 
     const timeframes: Timeframe[] = ['1D', '1W', '1M'];
-    const onSelect = jest.fn();
+    const onSelect = vi.fn();
 
     render(
       <MultiTimeframeGrid
@@ -206,7 +210,7 @@ describe('MultiTimeframeGrid', () => {
     mockGetStockCandles.mockResolvedValue(candles);
 
     const timeframes: Timeframe[] = ['1W'];
-    const onSelect = jest.fn();
+    const onSelect = vi.fn();
 
     render(
       <MultiTimeframeGrid
@@ -233,9 +237,9 @@ describe('MultiTimeframeGrid', () => {
     mockGetStockCandles.mockResolvedValue(candles);
 
     const timeframes: Timeframe[] = ['1M'];
-    const onSelect = jest.fn();
+    const onSelect = vi.fn();
 
-    const { container } = render(
+    render(
       <MultiTimeframeGrid
         ticker="AAPL"
         timeframes={timeframes}
@@ -258,7 +262,7 @@ describe('MultiTimeframeGrid', () => {
     mockGetStockCandles.mockResolvedValue(mockCandles);
 
     const timeframes: Timeframe[] = ['1D'];
-    const onSelect = jest.fn();
+    const onSelect = vi.fn();
 
     const { rerender } = render(
       <MultiTimeframeGrid
@@ -272,7 +276,7 @@ describe('MultiTimeframeGrid', () => {
       expect(mockGetStockCandles).toHaveBeenCalledWith('AAPL', '1D');
     });
 
-    jest.clearAllMocks();
+    vi.clearAllMocks();
     mockGetStockCandles.mockResolvedValue(mockCandles);
 
     // Change ticker
@@ -289,3 +293,4 @@ describe('MultiTimeframeGrid', () => {
     });
   });
 });
+```

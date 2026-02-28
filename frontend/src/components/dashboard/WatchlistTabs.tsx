@@ -9,6 +9,7 @@ import {
   deleteWatchlistGroup,
 } from '@/lib/api';
 import type { Watchlist } from '@/lib/types';
+import { useWatchlistTab } from '@/hooks/useWatchlistTab';
 
 interface WatchlistTabsProps {
   activeId: number;
@@ -33,6 +34,9 @@ export default function WatchlistTabs({
   const newInputRef = useRef<HTMLInputElement>(null);
   const editInputRef = useRef<HTMLInputElement>(null);
 
+  const { tabId: persistedTabId, setTabId, isLoading: persistedLoading } = useWatchlistTab();
+  const restoredRef = useRef(false);
+
   async function load() {
     try {
       const data = await listWatchlists();
@@ -55,6 +59,17 @@ export default function WatchlistTabs({
     if (editingId !== null) editInputRef.current?.focus();
   }, [editingId]);
 
+  // Restore persisted active tab once both groups and persisted state are ready.
+  // restoredRef guards against re-running if deps change after the first run.
+  useEffect(() => {
+    if (loading || persistedLoading || restoredRef.current || groups.length === 0) return;
+    restoredRef.current = true;
+    if (persistedTabId !== undefined && groups.some((g) => g.id === persistedTabId)) {
+      onSelect(persistedTabId);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, persistedLoading, groups.length]);
+
   async function handleCreate() {
     const name = newName.trim();
     if (!name) return;
@@ -67,6 +82,7 @@ export default function WatchlistTabs({
       setNewName('');
       setCreatingNew(false);
       onSelect(created.id);
+      setTabId(created.id);
       onGroupsChanged?.(next);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create watchlist');
@@ -109,6 +125,7 @@ export default function WatchlistTabs({
       setGroups(next);
       if (activeId === id && next.length > 0) {
         onSelect(next[0].id);
+        setTabId(next[0].id);
       }
       onGroupsChanged?.(next);
     } catch (err) {
@@ -186,7 +203,10 @@ export default function WatchlistTabs({
                   <button
                     role="tab"
                     aria-selected={isActive}
-                    onClick={() => onSelect(group.id)}
+                    onClick={() => {
+                      onSelect(group.id);
+                      setTabId(group.id);
+                    }}
                     className="flex items-center gap-1.5"
                   >
                     <span>{group.name}</span>

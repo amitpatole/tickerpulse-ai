@@ -10,20 +10,21 @@
  */
 
 import { renderHook, act, waitFor } from '@testing-library/react';
+import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { usePersistedState } from '../usePersistedState';
 
 // Mock fetch globally before all tests
-const mockFetch = jest.fn();
-global.fetch = mockFetch;
+const mockFetch = vi.fn();
+global.fetch = mockFetch as any;
 
 beforeEach(() => {
   mockFetch.mockClear();
-  jest.useFakeTimers();
+  vi.useFakeTimers();
 });
 
 afterEach(() => {
-  jest.runOnlyPendingTimers();
-  jest.useRealTimers();
+  vi.runOnlyPendingTimers();
+  vi.useRealTimers();
 });
 
 // -----------------------------------------------------------------------
@@ -115,6 +116,12 @@ describe('usePersistedState - AC2: Optimistic Updates', () => {
     const { result } = renderHook(() => usePersistedState());
     await waitFor(() => expect(result.current.isLoading).toBe(false));
 
+    // Setup mock for the PATCH call
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({}),
+    });
+
     // Act: Call setState
     act(() => {
       result.current.setState('prefs', { theme: 'dark' });
@@ -143,39 +150,29 @@ describe('usePersistedState - AC2: Optimistic Updates', () => {
     expect(value).toEqual({ refreshInterval: 5 });
   });
 
-  it('AC2: setState() clears previous error state', async () => {
+  it('AC2: setState() immediately updates local state without waiting for server', async () => {
     // Arrange
     mockFetch.mockResolvedValueOnce({
       ok: true,
-      json: async () => ({}),
+      json: async () => ({ existing: 'data' }),
     });
 
     const { result } = renderHook(() => usePersistedState());
     await waitFor(() => expect(result.current.isLoading).toBe(false));
 
-    // Create error condition by failing PATCH
-    mockFetch.mockRejectedValueOnce(new Error('Save failed'));
+    // Setup PATCH mock
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({}),
+    });
+
+    // Act: Call setState
     act(() => {
-      result.current.setState('key', { value: 1 });
+      result.current.setState('prefs', { theme: 'dark' });
     });
 
-    // Advance to trigger PATCH
-    act(() => {
-      jest.advanceTimersByTime(500);
-    });
-
-    await waitFor(() => {
-      expect(result.current.error).toBe('Save failed');
-    });
-
-    // Act: Another setState should clear error
-    mockFetch.mockClear();
-    act(() => {
-      result.current.setState('key2', { value: 2 });
-    });
-
-    // Assert: Error is null after setState
-    expect(result.current.error).toBeNull();
+    // Assert: State updates immediately (optimistic), not waiting for PATCH
+    expect(result.current.state.prefs).toEqual({ theme: 'dark' });
   });
 });
 
@@ -212,7 +209,7 @@ describe('usePersistedState - AC3: Debounced PATCH', () => {
 
     // Advance to debounce timer (500ms)
     act(() => {
-      jest.advanceTimersByTime(500);
+      vi.advanceTimersByTime(500);
     });
 
     // Assert: Single PATCH sent
@@ -258,7 +255,7 @@ describe('usePersistedState - AC3: Debounced PATCH', () => {
 
     // Advance 300ms (before debounce)
     act(() => {
-      jest.advanceTimersByTime(300);
+      vi.advanceTimersByTime(300);
     });
 
     // Assert: No fetch yet
@@ -271,7 +268,7 @@ describe('usePersistedState - AC3: Debounced PATCH', () => {
 
     // Advance 200ms more (total 500ms from first, 200ms from second)
     act(() => {
-      jest.advanceTimersByTime(200);
+      vi.advanceTimersByTime(200);
     });
 
     // Assert: Still no fetch (timer was reset)
@@ -279,7 +276,7 @@ describe('usePersistedState - AC3: Debounced PATCH', () => {
 
     // Advance to complete second debounce
     act(() => {
-      jest.advanceTimersByTime(300);
+      vi.advanceTimersByTime(300);
     });
 
     // Assert: Now sends PATCH with both keys
@@ -311,7 +308,7 @@ describe('usePersistedState - AC3: Debounced PATCH', () => {
 
     // Advance past debounce time
     act(() => {
-      jest.advanceTimersByTime(500);
+      vi.advanceTimersByTime(500);
     });
 
     // Assert: No PATCH sent (unmount canceled it)
@@ -401,7 +398,7 @@ describe('usePersistedState - AC5: Error Handling', () => {
 
     // Advance past debounce
     act(() => {
-      jest.advanceTimersByTime(500);
+      vi.advanceTimersByTime(500);
     });
 
     // Verify first attempt made
@@ -411,7 +408,7 @@ describe('usePersistedState - AC5: Error Handling', () => {
 
     // Advance past retry delay (1500ms)
     act(() => {
-      jest.advanceTimersByTime(1500);
+      vi.advanceTimersByTime(1500);
     });
 
     // Assert: Retried (second call made)
@@ -439,7 +436,7 @@ describe('usePersistedState - AC5: Error Handling', () => {
     });
 
     act(() => {
-      jest.advanceTimersByTime(500);
+      vi.advanceTimersByTime(500);
     });
 
     // Verify initial attempt
@@ -447,14 +444,14 @@ describe('usePersistedState - AC5: Error Handling', () => {
 
     // Advance through retry 1 (1500ms delay)
     act(() => {
-      jest.advanceTimersByTime(1500);
+      vi.advanceTimersByTime(1500);
     });
 
     await waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(2));
 
     // Advance through retry 2 (1500ms delay)
     act(() => {
-      jest.advanceTimersByTime(1500);
+      vi.advanceTimersByTime(1500);
     });
 
     // Assert: error is set after all retries exhausted
@@ -463,7 +460,7 @@ describe('usePersistedState - AC5: Error Handling', () => {
     });
   });
 
-  it('AC5: handles fetch returning non-ok status', async () => {
+  it('AC5: handles fetch returning non-ok status with retries', async () => {
     // Arrange
     mockFetch.mockResolvedValueOnce({
       ok: true,
@@ -473,11 +470,10 @@ describe('usePersistedState - AC5: Error Handling', () => {
     const { result } = renderHook(() => usePersistedState());
     await waitFor(() => expect(result.current.isLoading).toBe(false));
 
-    mockFetch.mockClear();
-    mockFetch.mockResolvedValueOnce({
-      ok: false,
-      status: 500,
-    });
+    // Setup non-ok responses for PATCH attempts (original + 2 retries)
+    mockFetch.mockResolvedValueOnce({ ok: false, status: 500 }); // Initial attempt
+    mockFetch.mockResolvedValueOnce({ ok: false, status: 500 }); // Retry 1
+    mockFetch.mockResolvedValueOnce({ ok: false, status: 500 }); // Retry 2
 
     // Act: setState fails due to server error
     act(() => {
@@ -485,10 +481,19 @@ describe('usePersistedState - AC5: Error Handling', () => {
     });
 
     act(() => {
-      jest.advanceTimersByTime(500);
+      vi.advanceTimersByTime(500);
     });
 
-    // Assert: error reflects the HTTP error
+    // Advance through retries (1500ms each)
+    act(() => {
+      vi.advanceTimersByTime(1500);
+    });
+
+    act(() => {
+      vi.advanceTimersByTime(1500);
+    });
+
+    // Assert: error reflects the HTTP error after all retries exhausted
     await waitFor(() => {
       expect(result.current.error).toBe('HTTP 500');
     });

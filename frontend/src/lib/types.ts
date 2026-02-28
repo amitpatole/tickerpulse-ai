@@ -255,7 +255,8 @@ export interface SystemMetricsSnapshot {
   recorded_at: string;
   cpu_pct: number;
   mem_pct: number;
-  db_pool_active: number;
+  /** Connections currently checked out from the pool (API key: db_pool_in_use) */
+  db_pool_in_use: number;
   db_pool_idle: number;
 }
 
@@ -606,6 +607,7 @@ export interface ModelComparisonMarketContext {
 export interface ModelComparisonResponse {
   run_id: string;
   ticker: string;
+  template: ComparisonTemplate;
   market_context: ModelComparisonMarketContext;
   results: ComparisonResult[];
 }
@@ -621,3 +623,77 @@ export interface ModelComparisonHistoryResponse {
   ticker: string;
   runs: ModelComparisonRun[];
 }
+
+// ---------------------------------------------------------------------------
+// Health check types
+// ---------------------------------------------------------------------------
+
+export interface HealthServiceDb {
+  status: string;
+  latency_ms: number | null;
+  wal_mode: string | null;
+  pool: Record<string, unknown> | null;
+  file_size_mb?: number | null;
+  table_counts?: Record<string, number> | null;
+}
+
+export interface HealthServiceScheduler {
+  status: string;
+  running: boolean | null;
+  job_count: number | null;
+  timezone: string | null;
+}
+
+export interface HealthCheck {
+  status: string;
+  [key: string]: unknown;
+}
+
+export interface HealthResponse {
+  status: 'ok' | 'degraded';
+  version: string;
+  timestamp: string;
+  /** Flat backwards-compatible status fields */
+  db: string;
+  db_pool: string;
+  scheduler: string;
+  ai_provider: string;
+  error_log_count_1h: number;
+  checks: {
+    db: HealthCheck;
+    db_pool: HealthCheck & { pool_size: number | null; available: number | null };
+    scheduler: HealthCheck & { running: boolean | null; job_count: number | null; timezone: string | null };
+    ai_provider: HealthCheck & { provider: string | null };
+    ws_manager: HealthCheck & { client_count: number | null };
+    errors: { count_1h: number };
+  };
+  services: {
+    db: HealthServiceDb;
+    scheduler: HealthServiceScheduler;
+    agent_registry: HealthCheck & { agent_count: number | null };
+    data_providers: HealthCheck & { configured: boolean; providers: unknown[] };
+    data_freshness: {
+      prices_updated_at: string | null;
+      prices_age_min: number | null;
+      earnings_updated_at: string | null;
+      stale: boolean;
+    };
+  };
+  metrics: {
+    error_log_count_1h: number;
+    sse_client_count: number;
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Bulk prices types
+// ---------------------------------------------------------------------------
+
+export interface BulkPriceItem {
+  price: number;
+  change: number | null;
+  change_pct: number | null;
+  ts: string | null;
+}
+
+export type BulkPricesResponse = Record<string, BulkPriceItem>;

@@ -669,7 +669,7 @@ _NEW_TABLES_SQL = [
         id               INTEGER PRIMARY KEY AUTOINCREMENT,
         cpu_pct          REAL    NOT NULL,
         mem_pct          REAL    NOT NULL,
-        db_pool_active   INTEGER NOT NULL,
+        db_pool_in_use   INTEGER NOT NULL,
         db_pool_idle     INTEGER NOT NULL,
         recorded_at      TEXT    NOT NULL DEFAULT (datetime('now'))
     )
@@ -748,7 +748,8 @@ _NEW_TABLES_SQL = [
         id         TEXT PRIMARY KEY,
         ticker     TEXT NOT NULL,
         providers  TEXT NOT NULL DEFAULT '[]',
-        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        template   TEXT NOT NULL DEFAULT 'custom'
     )
     """,
     """
@@ -762,7 +763,8 @@ _NEW_TABLES_SQL = [
         confidence  INTEGER,
         summary     TEXT,
         duration_ms INTEGER,
-        error       TEXT
+        error       TEXT,
+        tokens_used INTEGER
     )
     """,
 ]
@@ -773,6 +775,7 @@ _INDEXES_SQL = [
     "CREATE INDEX IF NOT EXISTS idx_agent_runs_started     ON agent_runs (started_at)",
     "CREATE INDEX IF NOT EXISTS idx_job_history_job_id     ON job_history (job_id)",
     "CREATE INDEX IF NOT EXISTS idx_job_history_executed   ON job_history (executed_at)",
+    "CREATE INDEX IF NOT EXISTS idx_job_history_job_id_executed ON job_history (job_id, executed_at DESC)",
     "CREATE INDEX IF NOT EXISTS idx_cost_tracking_date     ON cost_tracking (date)",
     "CREATE INDEX IF NOT EXISTS idx_cost_tracking_agent    ON cost_tracking (agent_name)",
     "CREATE INDEX IF NOT EXISTS idx_ai_ratings_ticker       ON ai_ratings (ticker)",
@@ -814,7 +817,17 @@ _INDEXES_SQL = [
     # Covering index for /api/metrics/agents hot path: WHERE started_at >= ? GROUP BY agent_name
     "CREATE INDEX IF NOT EXISTS idx_agent_runs_agent_started    ON agent_runs (agent_name, started_at DESC)",
     "CREATE INDEX IF NOT EXISTS idx_ai_comparison_runs_ticker   ON ai_comparison_runs (ticker, created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_ai_comparison_runs_created  ON ai_comparison_runs (created_at DESC)",
     "CREATE INDEX IF NOT EXISTS idx_ai_comparison_results_run   ON ai_comparison_results (run_id)",
+    # Composite index for source-filtered performance_metrics queries (v3.3)
+    "CREATE INDEX IF NOT EXISTS idx_perf_metrics_source_time    ON performance_metrics (source, recorded_at DESC)",
+    # Covering index for /api/metrics/timeseries?metric=duration (v3.4)
+    # Eliminates full table scan when fetching (day, agent_name, duration_ms) for
+    # p95 computation: status + started_at filter rows, agent_name+duration_ms are
+    # read directly from the index leaf pages with no table lookup.
+    "CREATE INDEX IF NOT EXISTS idx_agent_runs_duration_cov     ON agent_runs (status, started_at DESC, agent_name, duration_ms)",
+    # Covering index for date-range + optional agent_name predicate pushdown (v3.5)
+    "CREATE INDEX IF NOT EXISTS idx_agent_runs_date_agent       ON agent_runs (started_at, agent_name)",
 ]
 
 
@@ -1054,6 +1067,33 @@ def _migrate_comparison_results(cursor) -> None:
         logger.info("Migration applied: %s", sql)
 
 
+def _migrate_ai_comparison_tables(cursor) -> None:
+    """Add tokens_used to ai_comparison_results and template to ai_comparison_runs (schema v3.7)."""
+    cols_results = {row[1] for row in cursor.execute("PRAGMA table_info(ai_comparison_results)").fetchall()}
+    if cols_results and 'tokens_used' not in cols_results:
+        cursor.execute("ALTER TABLE ai_comparison_results ADD COLUMN tokens_used INTEGER")
+        logger.info("Migration applied: added tokens_used to ai_comparison_results")
+
+    cols_runs = {row[1] for row in cursor.execute("PRAGMA table_info(ai_comparison_runs)").fetchall()}
+    if cols_runs and 'template' not in cols_runs:
+        cursor.execute(
+            "ALTER TABLE ai_comparison_runs ADD COLUMN template TEXT NOT NULL DEFAULT 'custom'"
+        )
+        logger.info("Migration applied: added template to ai_comparison_runs")
+
+
+def _migrate_perf_snapshots(cursor) -> None:
+    """Rename db_pool_active → db_pool_in_use in perf_snapshots (schema v3.6)."""
+    cols = {row[1] for row in cursor.execute("PRAGMA table_info(perf_snapshots)").fetchall()}
+    if not cols:
+        return  # Table doesn't exist yet; CREATE TABLE handles it
+    if 'db_pool_active' in cols and 'db_pool_in_use' not in cols:
+        cursor.execute(
+            "ALTER TABLE perf_snapshots RENAME COLUMN db_pool_active TO db_pool_in_use"
+        )
+        logger.info("Migration applied: renamed db_pool_active → db_pool_in_use in perf_snapshots")
+
+
 def init_all_tables(db_path: str | None = None) -> None:
     """Create every table (existing + new v3.0) and apply indexes.
 
@@ -1084,6 +1124,7 @@ def init_all_tables(db_path: str | None = None) -> None:
             _migrate_comparison_runs(cursor)
             _migrate_comparison_results(cursor)
             _migrate_agent_schedules(cursor)
+            _migrate_ai_comparison_tables(cursor)
 
             for sql in _NEW_TABLES_SQL:
                 cursor.execute(sql)

@@ -14,6 +14,7 @@ from backend.jobs.regime_check import run_regime_check
 from backend.jobs.download_tracker import run_download_tracker
 from backend.jobs.price_refresh import run_price_refresh
 from backend.jobs.metrics_snapshot import run_metrics_snapshot
+from backend.jobs._helpers import flush_buffered_job_history
 from backend.config import Config
 
 
@@ -155,6 +156,20 @@ def register_all_jobs(scheduler_manager) -> None:
         minutes=5,
     )
 
+    # ---- Flush Job History Buffer: Every 60 seconds ----
+    scheduler_manager.register_job(
+        job_id='flush_job_history',
+        func=flush_buffered_job_history,
+        trigger='interval',
+        name='Flush Job History Buffer',
+        description=(
+            'Drains the in-memory job history buffer and batch-inserts '
+            'accumulated records to the database. Runs every 60 seconds to '
+            'minimise per-job-run connection churn while keeping history fresh.'
+        ),
+        seconds=60,
+    )
+
 
 __all__ = [
     'register_all_jobs',
@@ -167,4 +182,5 @@ __all__ = [
     'run_download_tracker',
     'run_price_refresh',
     'run_metrics_snapshot',
+    'flush_buffered_job_history',
 ]

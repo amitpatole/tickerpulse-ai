@@ -2,7 +2,7 @@
 TickerPulse AI v3.0 - AI Multi-Model Comparison API
 
 POST /api/ai/compare         — synchronous fan-out to multiple AI providers
-GET  /api/ai/compare/history — recent comparison runs for a ticker
+GET  /api/ai/compare/history — recent comparison runs (ticker optional for global view)
 """
 
 import json
@@ -29,7 +29,10 @@ _PROVIDER_TIMEOUT = 30   # seconds per individual provider call
 _FANOUT_TIMEOUT = 35     # overall executor timeout (slightly above per-provider)
 _DEFAULT_MAX_TOKENS = 600
 
-_ANALYSIS_PROMPT_TEMPLATE = """\
+_VALID_TEMPLATES = frozenset({'custom', 'bull_bear_thesis', 'risk_summary', 'price_target'})
+
+_PROMPT_TEMPLATES = {
+    'custom': """\
 You are a financial analyst. Analyze {ticker} stock and provide a structured investment assessment.
 
 Market Context:
@@ -46,7 +49,71 @@ Rules:
 - rating must be exactly "BUY", "HOLD", or "SELL"
 - score: integer 0-100 representing overall investment attractiveness
 - confidence: integer 0-100 representing your confidence in this assessment
-- summary: 2-3 plain-text sentences, no markdown formatting"""
+- summary: 2-3 plain-text sentences, no markdown formatting""",
+
+    'bull_bear_thesis': """\
+You are a financial analyst specializing in directional investment theses. Analyze {ticker} stock.
+
+Market Context:
+- Current Price: ${price}
+- RSI (14-period): {rsi}
+- News Sentiment: {sentiment} (scale: -1.0 very negative to +1.0 very positive)
+- Current AI Rating: {rating}
+
+Evaluate the strongest bull and bear arguments for {ticker}. Determine which thesis is more \
+compelling given current market conditions and fundamentals.
+
+Respond with ONLY a JSON object in this exact format (no other text, no markdown):
+{{"rating": "BUY", "score": 75, "confidence": 80, "summary": "2-3 sentence directional thesis here."}}
+
+Rules:
+- rating: "BUY" (bull thesis prevails), "HOLD" (balanced), or "SELL" (bear thesis prevails)
+- score: integer 0-100 representing overall investment attractiveness
+- confidence: integer 0-100 representing your confidence in the directional call
+- summary: 2-3 plain-text sentences stating the prevailing thesis, no markdown""",
+
+    'risk_summary': """\
+You are a risk analyst. Evaluate key risks for {ticker} stock.
+
+Market Context:
+- Current Price: ${price}
+- RSI (14-period): {rsi}
+- News Sentiment: {sentiment} (scale: -1.0 very negative to +1.0 very positive)
+- Current AI Rating: {rating}
+
+Identify and assess the most significant risk factors for {ticker}: regulatory, competitive, \
+macroeconomic, and execution risks. Consider how these risks affect the investment outlook.
+
+Respond with ONLY a JSON object in this exact format (no other text, no markdown):
+{{"rating": "BUY", "score": 75, "confidence": 80, "summary": "2-3 sentence risk assessment here."}}
+
+Rules:
+- rating: "BUY" (risks manageable), "HOLD" (moderate risks), or "SELL" (risks are severe)
+- score: integer 0-100 representing overall attractiveness after accounting for risks
+- confidence: integer 0-100 representing your confidence in the risk assessment
+- summary: 2-3 plain-text sentences naming key risks and their net impact, no markdown""",
+
+    'price_target': """\
+You are a valuation analyst. Estimate a 12-month price target for {ticker} stock.
+
+Market Context:
+- Current Price: ${price}
+- RSI (14-period): {rsi}
+- News Sentiment: {sentiment} (scale: -1.0 very negative to +1.0 very positive)
+- Current AI Rating: {rating}
+
+Apply multiple valuation approaches (P/E, DCF, EV/EBITDA, comparable analysis) appropriate \
+for {ticker}. Derive a consensus 12-month price target range.
+
+Respond with ONLY a JSON object in this exact format (no other text, no markdown):
+{{"rating": "BUY", "score": 75, "confidence": 80, "summary": "2-3 sentence price target analysis here."}}
+
+Rules:
+- rating: "BUY" (target implies >10% upside), "HOLD" (-10% to +10%), or "SELL" (<-10% downside)
+- score: integer 0-100 representing valuation attractiveness at current price
+- confidence: integer 0-100 representing your confidence in the price target estimate
+- summary: 2-3 plain-text sentences stating target range, key drivers, upside/downside, no markdown""",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -79,9 +146,10 @@ def _get_market_context(ticker: str) -> dict:
     return ctx
 
 
-def _build_prompt(ticker: str, ctx: dict) -> str:
+def _build_prompt(ticker: str, ctx: dict, template: str = 'custom') -> str:
+    tpl = _PROMPT_TEMPLATES.get(template, _PROMPT_TEMPLATES['custom'])
     price_str = f"{ctx['price']:.2f}" if ctx['price'] else 'N/A'
-    return _ANALYSIS_PROMPT_TEMPLATE.format(
+    return tpl.format(
         ticker=ticker,
         price=price_str,
         rsi=f"{ctx['rsi']:.1f}",
@@ -193,7 +261,7 @@ def _call_one_provider(cfg: dict, prompt: str) -> dict:
                 'duration_ms': 0,
             }
 
-        text = provider.generate_analysis(prompt, max_tokens=_DEFAULT_MAX_TOKENS)
+        text, tokens_used = provider.generate_analysis(prompt, max_tokens=_DEFAULT_MAX_TOKENS)
         duration_ms = int((time.monotonic() - start) * 1000)
 
         if text.startswith('Error:'):
@@ -220,6 +288,7 @@ def _call_one_provider(cfg: dict, prompt: str) -> dict:
             'score': parsed['score'],
             'confidence': parsed['confidence'],
             'summary': parsed['summary'],
+            'tokens_used': tokens_used,
             'duration_ms': duration_ms,
         }
 
@@ -238,22 +307,29 @@ def _call_one_provider(cfg: dict, prompt: str) -> dict:
 # DB persistence
 # ---------------------------------------------------------------------------
 
-def _persist_run(run_id: str, ticker: str, providers: list, results: list) -> None:
+def _persist_run(
+    run_id: str,
+    ticker: str,
+    providers: list,
+    results: list,
+    template: str,
+) -> None:
     """Save run and results to DB. Called in a daemon thread; errors are logged only."""
     try:
         created_at = datetime.utcnow().isoformat() + 'Z'
         with db_session() as conn:
             conn.execute(
-                "INSERT OR IGNORE INTO ai_comparison_runs (id, ticker, providers, created_at) "
-                "VALUES (?, ?, ?, ?)",
-                (run_id, ticker, json.dumps(providers), created_at),
+                "INSERT OR IGNORE INTO ai_comparison_runs "
+                "(id, ticker, providers, created_at, template) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (run_id, ticker, json.dumps(providers), created_at, template),
             )
             for r in results:
                 conn.execute(
                     "INSERT INTO ai_comparison_results "
                     "(run_id, provider, model, rating, score, confidence, "
-                    " summary, duration_ms, error) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    " summary, duration_ms, error, tokens_used) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         run_id,
                         r.get('provider'),
@@ -264,6 +340,7 @@ def _persist_run(run_id: str, ticker: str, providers: list, results: list) -> No
                         r.get('summary'),
                         r.get('duration_ms'),
                         r.get('error'),
+                        r.get('tokens_used'),
                     ),
                 )
     except Exception as exc:
@@ -281,10 +358,13 @@ def run_comparison():
     Body (JSON):
         ticker    (str, required)        — stock ticker symbol
         providers (list[obj], required)  — each must have "provider" key; "model" is optional
+        template  (str, optional)        — one of: custom, bull_bear_thesis, risk_summary,
+                                           price_target (defaults to "custom")
 
     Returns 200 with:
-        run_id, ticker, market_context {price, rsi, sentiment_score},
-        results [{provider, model, rating?, score?, confidence?, summary?, duration_ms, error?}]
+        run_id, ticker, template, market_context {price, rsi, sentiment_score},
+        results [{provider, model, rating?, score?, confidence?, summary?,
+                  tokens_used?, duration_ms, error?}]
     """
     body = request.get_json(silent=True) or {}
 
@@ -301,8 +381,12 @@ def run_comparison():
         if not isinstance(p, dict) or not p.get('provider'):
             return jsonify({'error': 'each provider entry must have a "provider" field'}), 400
 
+    template = (body.get('template') or 'custom').strip()
+    if template not in _VALID_TEMPLATES:
+        template = 'custom'
+
     ctx = _get_market_context(ticker)
-    prompt = _build_prompt(ticker, ctx)
+    prompt = _build_prompt(ticker, ctx, template)
     run_id = str(uuid.uuid4())
 
     results: list[dict] = []
@@ -337,13 +421,14 @@ def run_comparison():
 
     threading.Thread(
         target=_persist_run,
-        args=(run_id, ticker, providers, results),
+        args=(run_id, ticker, providers, results, template),
         daemon=True,
     ).start()
 
     return jsonify({
         'run_id': run_id,
         'ticker': ticker,
+        'template': template,
         'market_context': {
             'price': ctx['price'],
             'rsi': ctx['rsi'],
@@ -355,35 +440,40 @@ def run_comparison():
 
 @ai_compare_bp.route('/compare/history', methods=['GET'])
 def comparison_history():
-    """Return recent comparison runs for a ticker.
+    """Return recent comparison runs.
 
     Query params:
-        ticker (str, required)
-        limit  (int, optional, default 10, max 50)
+        ticker (str, optional) — filter by ticker; omit for global history
+        limit  (int, optional, default 20, max 100)
     """
-    ticker = (request.args.get('ticker') or '').strip().upper()
-    if not ticker:
-        return jsonify({'error': 'ticker is required'}), 400
+    ticker = (request.args.get('ticker') or '').strip().upper() or None
 
     try:
-        limit = int(request.args.get('limit', 10))
+        limit = int(request.args.get('limit', 20))
     except (ValueError, TypeError):
         return jsonify({'error': 'limit must be an integer'}), 400
-    limit = max(1, min(limit, 50))
+    limit = max(1, min(limit, 100))
 
     try:
         with db_session() as conn:
-            run_rows = conn.execute(
-                "SELECT id, ticker, created_at FROM ai_comparison_runs "
-                "WHERE ticker = ? ORDER BY created_at DESC LIMIT ?",
-                (ticker, limit),
-            ).fetchall()
+            if ticker:
+                run_rows = conn.execute(
+                    "SELECT id, ticker, created_at FROM ai_comparison_runs "
+                    "WHERE ticker = ? ORDER BY created_at DESC LIMIT ?",
+                    (ticker, limit),
+                ).fetchall()
+            else:
+                run_rows = conn.execute(
+                    "SELECT id, ticker, created_at FROM ai_comparison_runs "
+                    "ORDER BY created_at DESC LIMIT ?",
+                    (limit,),
+                ).fetchall()
 
             runs = []
             for run in run_rows:
                 result_rows = conn.execute(
                     "SELECT provider, model, rating, score, confidence, summary, "
-                    "duration_ms, error "
+                    "duration_ms, error, tokens_used "
                     "FROM ai_comparison_results WHERE run_id = ? ORDER BY id",
                     (run['id'],),
                 ).fetchall()
@@ -397,4 +487,7 @@ def comparison_history():
         logger.error("comparison_history: %s", exc)
         return jsonify({'error': 'Failed to fetch history'}), 500
 
-    return jsonify({'ticker': ticker, 'runs': runs})
+    response: dict = {'runs': runs}
+    if ticker:
+        response['ticker'] = ticker
+    return jsonify(response)

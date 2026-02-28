@@ -16,7 +16,7 @@ from backend.core.error_handlers import (
     ValidationError,
     handle_api_errors,
 )
-from backend.database import db_session
+from backend.database import db_session, pooled_session
 
 logger = logging.getLogger(__name__)
 
@@ -98,6 +98,57 @@ def remove_stock_endpoint(ticker):
     """
     success = remove_stock(ticker)
     return jsonify({'success': success})
+
+
+@stocks_bp.route('/stocks/prices', methods=['GET'])
+@handle_api_errors
+def get_bulk_prices():
+    """Return current prices for multiple tickers in one database query.
+
+    Query Parameters:
+        tickers (str): Comma-separated list of ticker symbols (e.g. 'AAPL,MSFT,NVDA').
+
+    Returns:
+        JSON object keyed by ticker, each containing price, change, change_pct, ts.
+        Tickers not found in the database are silently omitted.
+        Returns 400 if tickers param is missing or empty.
+
+    Example response:
+        {
+          "AAPL": {"price": 189.23, "change": 1.12, "change_pct": 0.60, "ts": "2026-02-28T14:00:00"},
+          "MSFT": {"price": 415.10, "change": -0.50, "change_pct": -0.12, "ts": "2026-02-28T14:00:00"}
+        }
+    """
+    tickers_param = request.args.get('tickers', '').strip()
+    if not tickers_param:
+        raise ValidationError(
+            'Missing required parameter: tickers', error_code='MISSING_FIELD'
+        )
+
+    tickers = [t.strip().upper() for t in tickers_param.split(',') if t.strip()]
+    if not tickers:
+        raise ValidationError('No valid tickers provided', error_code='INVALID_INPUT')
+
+    placeholders = ','.join('?' * len(tickers))
+    with pooled_session() as conn:
+        rows = conn.execute(
+            f'SELECT ticker, current_price, price_change, price_change_pct, updated_at'
+            f' FROM ai_ratings WHERE ticker IN ({placeholders})',
+            tickers,
+        ).fetchall()
+
+    result = {}
+    for row in rows:
+        if row['current_price'] is None:
+            continue
+        result[row['ticker']] = {
+            'price': row['current_price'],
+            'change': row['price_change'],
+            'change_pct': row['price_change_pct'],
+            'ts': row['updated_at'],
+        }
+
+    return jsonify(result)
 
 
 _TIMEFRAME_MAP = {

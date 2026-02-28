@@ -17,9 +17,9 @@ permissions:
 
 jobs:
   # ── Backend: lint + test ────────────────────────────────────────────────────
-  backend-ci:
-    name: Backend CI (Python 3.12)
+  backend-test:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     steps:
       - name: Checkout code
@@ -44,7 +44,7 @@ jobs:
             --cov=backend \
             --cov-report=xml:coverage-backend.xml \
             --cov-report=term-missing \
-            --cov-fail-under=70 \
+            --cov-fail-under=80 \
             --timeout=30 \
             -v
         env:
@@ -60,9 +60,9 @@ jobs:
           retention-days: 7
 
   # ── Frontend: lint + test + build ──────────────────────────────────────────
-  frontend-ci:
-    name: Frontend CI (Node 24)
+  frontend-test:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
 
     steps:
       - name: Checkout code
@@ -100,9 +100,8 @@ jobs:
 
   # ── Docker build validation ─────────────────────────────────────────────────
   build-check:
-    name: Docker Build Check
     runs-on: ubuntu-latest
-    needs: [backend-ci, frontend-ci]
+    needs: [backend-test, frontend-test]
 
     steps:
       - name: Checkout code

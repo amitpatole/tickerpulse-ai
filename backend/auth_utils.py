@@ -9,7 +9,7 @@ from functools import wraps
 from flask import jsonify
 from flask_login import LoginManager, UserMixin, current_user
 
-from backend.database import get_db_connection
+from backend.database import pooled_session
 
 logger = logging.getLogger(__name__)
 
@@ -30,14 +30,11 @@ class User(UserMixin):
     @staticmethod
     def get_by_id(user_id: int) -> 'User | None':
         """Load a user from the database by primary key."""
-        conn = get_db_connection()
-        try:
+        with pooled_session() as conn:
             row = conn.execute(
                 'SELECT id, email, name FROM users WHERE id = ?',
                 (user_id,),
             ).fetchone()
-        finally:
-            conn.close()
         if row is None:
             return None
         return User(row['id'], row['email'], row['name'])
@@ -45,8 +42,7 @@ class User(UserMixin):
     @staticmethod
     def upsert(google_id: str, email: str, name: str | None) -> 'User':
         """Insert or update a user by Google ID; return the User instance."""
-        conn = get_db_connection()
-        try:
+        with pooled_session() as conn:
             conn.execute(
                 """INSERT INTO users (google_id, email, name)
                    VALUES (?, ?, ?)
@@ -55,14 +51,11 @@ class User(UserMixin):
                        name  = excluded.name""",
                 (google_id, email, name),
             )
-            conn.commit()
             row = conn.execute(
                 'SELECT id, email, name FROM users WHERE google_id = ?',
                 (google_id,),
             ).fetchone()
-            return User(row['id'], row['email'], row['name'])
-        finally:
-            conn.close()
+        return User(row['id'], row['email'], row['name'])
 
 
 @login_manager.user_loader

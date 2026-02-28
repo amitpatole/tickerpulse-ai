@@ -1,3 +1,4 @@
+```typescript
 /**
  * Test useChartTimeframes hook: multi-timeframe selection with persistence.
  *
@@ -9,20 +10,19 @@
  */
 
 import { renderHook, act } from '@testing-library/react';
+import { vi } from 'vitest';
 import { useChartTimeframes } from '../useChartTimeframes';
 import * as persistedStateModule from '../usePersistedState';
 import type { Timeframe } from '@/lib/types';
 
 // Mock usePersistedState
-jest.mock('../usePersistedState');
+vi.mock('../usePersistedState');
 
-const mockUsePersistedState = persistedStateModule.usePersistedState as jest.MockedFunction<
-  typeof persistedStateModule.usePersistedState
->;
+const mockUsePersistedState = vi.mocked(persistedStateModule.usePersistedState);
 
 describe('useChartTimeframes', () => {
   beforeEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   it('AC1: Returns default 4 timeframes on first load', () => {
@@ -31,10 +31,10 @@ describe('useChartTimeframes', () => {
      * should return ['1D', '1W', '1M', '3M']
      */
     mockUsePersistedState.mockReturnValue({
-      getState: jest.fn().mockReturnValue(null),
-      setState: jest.fn(),
+      getState: vi.fn().mockReturnValue(null),
+      setState: vi.fn(),
       isLoading: false,
-    });
+    } as any);
 
     const { result } = renderHook(() => useChartTimeframes());
 
@@ -47,17 +47,17 @@ describe('useChartTimeframes', () => {
      * When user selects a 4th timeframe (3 currently selected),
      * toggle should add it
      */
-    const mockGetState = jest.fn((key: string) => {
+    const mockGetState = vi.fn((key: string) => {
       if (key === 'vo_chart_multi_timeframes') return { timeframes: ['1D', '1W', '1M'] };
       return null;
     });
-    const mockSetState = jest.fn();
+    const mockSetState = vi.fn();
 
     mockUsePersistedState.mockReturnValue({
       getState: mockGetState,
       setState: mockSetState,
       isLoading: false,
-    });
+    } as any);
 
     const { result } = renderHook(() => useChartTimeframes());
 
@@ -75,17 +75,17 @@ describe('useChartTimeframes', () => {
      * When user deselects a timeframe (3 currently selected),
      * toggle should remove it
      */
-    const mockGetState = jest.fn((key: string) => {
+    const mockGetState = vi.fn((key: string) => {
       if (key === 'vo_chart_multi_timeframes') return { timeframes: ['1D', '1W', '1M'] };
       return null;
     });
-    const mockSetState = jest.fn();
+    const mockSetState = vi.fn();
 
     mockUsePersistedState.mockReturnValue({
       getState: mockGetState,
       setState: mockSetState,
       isLoading: false,
-    });
+    } as any);
 
     const { result } = renderHook(() => useChartTimeframes());
 
@@ -103,18 +103,18 @@ describe('useChartTimeframes', () => {
      * When user tries to add a 5th timeframe (already at max 4),
      * toggle should be no-op
      */
-    const mockGetState = jest.fn((key: string) => {
+    const mockGetState = vi.fn((key: string) => {
       if (key === 'vo_chart_multi_timeframes')
         return { timeframes: ['1D', '1W', '1M', '3M'] };
       return null;
     });
-    const mockSetState = jest.fn();
+    const mockSetState = vi.fn();
 
     mockUsePersistedState.mockReturnValue({
       getState: mockGetState,
       setState: mockSetState,
       isLoading: false,
-    });
+    } as any);
 
     const { result } = renderHook(() => useChartTimeframes());
 
@@ -131,17 +131,17 @@ describe('useChartTimeframes', () => {
      * When user tries to remove to below min 2 timeframes,
      * toggle should be no-op
      */
-    const mockGetState = jest.fn((key: string) => {
+    const mockGetState = vi.fn((key: string) => {
       if (key === 'vo_chart_multi_timeframes') return { timeframes: ['1D', '1W'] };
       return null;
     });
-    const mockSetState = jest.fn();
+    const mockSetState = vi.fn();
 
     mockUsePersistedState.mockReturnValue({
       getState: mockGetState,
       setState: mockSetState,
       isLoading: false,
-    });
+    } as any);
 
     const { result } = renderHook(() => useChartTimeframes());
 
@@ -159,13 +159,13 @@ describe('useChartTimeframes', () => {
      * even for selected timeframes
      */
     mockUsePersistedState.mockReturnValue({
-      getState: jest.fn((key: string) => {
+      getState: vi.fn((key: string) => {
         if (key === 'vo_chart_multi_timeframes') return { timeframes: ['1D', '1W'] };
         return null;
       }),
-      setState: jest.fn(),
+      setState: vi.fn(),
       isLoading: false,
-    });
+    } as any);
 
     const { result } = renderHook(() => useChartTimeframes());
 
@@ -179,14 +179,14 @@ describe('useChartTimeframes', () => {
      * for selected timeframes
      */
     mockUsePersistedState.mockReturnValue({
-      getState: jest.fn((key: string) => {
+      getState: vi.fn((key: string) => {
         if (key === 'vo_chart_multi_timeframes')
           return { timeframes: ['1D', '1W', '1M'] };
         return null;
       }),
-      setState: jest.fn(),
+      setState: vi.fn(),
       isLoading: false,
-    });
+    } as any);
 
     const { result } = renderHook(() => useChartTimeframes());
 
@@ -199,14 +199,14 @@ describe('useChartTimeframes', () => {
      * When selected.length === 4 (max), canSelect should return false
      */
     mockUsePersistedState.mockReturnValue({
-      getState: jest.fn((key: string) => {
+      getState: vi.fn((key: string) => {
         if (key === 'vo_chart_multi_timeframes')
           return { timeframes: ['1D', '1W', '1M', '3M'] };
         return null;
       }),
-      setState: jest.fn(),
+      setState: vi.fn(),
       isLoading: false,
-    });
+    } as any);
 
     const { result } = renderHook(() => useChartTimeframes());
 
@@ -219,13 +219,13 @@ describe('useChartTimeframes', () => {
      * for unselected timeframes
      */
     mockUsePersistedState.mockReturnValue({
-      getState: jest.fn((key: string) => {
+      getState: vi.fn((key: string) => {
         if (key === 'vo_chart_multi_timeframes') return { timeframes: ['1D', '1W'] };
         return null;
       }),
-      setState: jest.fn(),
+      setState: vi.fn(),
       isLoading: false,
-    });
+    } as any);
 
     const { result } = renderHook(() => useChartTimeframes());
 
@@ -239,10 +239,10 @@ describe('useChartTimeframes', () => {
      * should return default 4 timeframes
      */
     mockUsePersistedState.mockReturnValue({
-      getState: jest.fn().mockReturnValue({ timeframes: [] }),
-      setState: jest.fn(),
+      getState: vi.fn().mockReturnValue({ timeframes: [] }),
+      setState: vi.fn(),
       isLoading: false,
-    });
+    } as any);
 
     const { result } = renderHook(() => useChartTimeframes());
 
@@ -255,10 +255,10 @@ describe('useChartTimeframes', () => {
      * should return default 4 timeframes
      */
     mockUsePersistedState.mockReturnValue({
-      getState: jest.fn().mockReturnValue({ timeframes: 'invalid' }),
-      setState: jest.fn(),
+      getState: vi.fn().mockReturnValue({ timeframes: 'invalid' }),
+      setState: vi.fn(),
       isLoading: false,
-    });
+    } as any);
 
     const { result } = renderHook(() => useChartTimeframes());
 
@@ -270,13 +270,14 @@ describe('useChartTimeframes', () => {
      * The isLoading flag should reflect the loading state of persistence
      */
     mockUsePersistedState.mockReturnValue({
-      getState: jest.fn().mockReturnValue({ timeframes: ['1D', '1W'] }),
-      setState: jest.fn(),
+      getState: vi.fn().mockReturnValue({ timeframes: ['1D', '1W'] }),
+      setState: vi.fn(),
       isLoading: true,
-    });
+    } as any);
 
     const { result } = renderHook(() => useChartTimeframes());
 
     expect(result.current.isLoading).toBe(true);
   });
 });
+```

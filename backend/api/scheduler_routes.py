@@ -6,11 +6,28 @@ and rescheduling jobs, as well as viewing job execution history.
 
 Blueprint prefix: /api/scheduler
 """
+import json
 import logging
+from datetime import datetime, timezone
+
 from flask import Blueprint, jsonify, request
 
+from backend.database import pooled_session
 from backend.jobs._helpers import get_job_history
-from backend.api.validators.scheduler_validators import validate_job_id, validate_trigger_args
+from backend.api.validators.scheduler_validators import (
+    validate_job_id,
+    validate_trigger_args,
+    validate_schedule_body,
+)
+from backend.core.error_handlers import (
+    ConflictError,
+    DatabaseError,
+    ValidationError,
+    SchedulerJobNotFoundError,
+    SchedulerOperationError,
+    ServiceUnavailableError,
+    handle_api_errors,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +45,7 @@ def _get_scheduler_manager():
 # -----------------------------------------------------------------------
 
 @scheduler_bp.route('/jobs', methods=['GET'])
+@handle_api_errors
 def list_jobs():
     """List all registered jobs with their current status.
     ---
@@ -57,6 +75,7 @@ def list_jobs():
 
 
 @scheduler_bp.route('/jobs/<job_id>', methods=['GET'])
+@handle_api_errors
 def get_job(job_id):
     """Get detailed information about a specific scheduled job.
     ---
@@ -86,12 +105,12 @@ def get_job(job_id):
     """
     ok, err = validate_job_id(job_id)
     if not ok:
-        return jsonify({'success': False, 'error': err}), 400
+        raise ValidationError(err)
 
     sm = _get_scheduler_manager()
     job = sm.get_job(job_id)
     if not job:
-        return jsonify({'error': f'Job not found: {job_id}'}), 404
+        raise SchedulerJobNotFoundError(f"Job not found: {job_id}")
 
     # Attach recent execution history and scheduler timezone
     job['recent_history'] = get_job_history(job_id=job_id, limit=10)
@@ -104,6 +123,7 @@ def get_job(job_id):
 # -----------------------------------------------------------------------
 
 @scheduler_bp.route('/jobs/<job_id>/pause', methods=['POST'])
+@handle_api_errors
 def pause_job(job_id):
     """Pause a scheduled job.
     ---
@@ -123,22 +143,29 @@ def pause_job(job_id):
         schema:
           $ref: '#/definitions/SuccessResponse'
       400:
-        description: Invalid job_id or pause failed.
+        description: Invalid job_id format.
+        schema:
+          $ref: '#/definitions/Error'
+      404:
+        description: Job not found.
+        schema:
+          $ref: '#/definitions/Error'
+      500:
+        description: APScheduler operation failed.
         schema:
           $ref: '#/definitions/Error'
     """
     ok, err = validate_job_id(job_id)
     if not ok:
-        return jsonify({'success': False, 'error': err}), 400
+        raise ValidationError(err)
 
     sm = _get_scheduler_manager()
-    success = sm.pause_job(job_id)
-    if success:
-        return jsonify({'success': True, 'job_id': job_id, 'status': 'paused'})
-    return jsonify({'success': False, 'error': f'Failed to pause job: {job_id}'}), 400
+    sm.pause_job(job_id)
+    return jsonify({'success': True, 'job_id': job_id, 'status': 'paused'})
 
 
 @scheduler_bp.route('/jobs/<job_id>/resume', methods=['POST'])
+@handle_api_errors
 def resume_job(job_id):
     """Resume a paused scheduled job.
     ---
@@ -158,22 +185,29 @@ def resume_job(job_id):
         schema:
           $ref: '#/definitions/SuccessResponse'
       400:
-        description: Invalid job_id or resume failed.
+        description: Invalid job_id format.
+        schema:
+          $ref: '#/definitions/Error'
+      404:
+        description: Job not found.
+        schema:
+          $ref: '#/definitions/Error'
+      500:
+        description: APScheduler operation failed.
         schema:
           $ref: '#/definitions/Error'
     """
     ok, err = validate_job_id(job_id)
     if not ok:
-        return jsonify({'success': False, 'error': err}), 400
+        raise ValidationError(err)
 
     sm = _get_scheduler_manager()
-    success = sm.resume_job(job_id)
-    if success:
-        return jsonify({'success': True, 'job_id': job_id, 'status': 'resumed'})
-    return jsonify({'success': False, 'error': f'Failed to resume job: {job_id}'}), 400
+    sm.resume_job(job_id)
+    return jsonify({'success': True, 'job_id': job_id, 'status': 'resumed'})
 
 
 @scheduler_bp.route('/jobs/<job_id>/trigger', methods=['POST'])
+@handle_api_errors
 def trigger_job(job_id):
     """Trigger immediate execution of a scheduled job.
     ---
@@ -193,26 +227,33 @@ def trigger_job(job_id):
         schema:
           $ref: '#/definitions/SuccessResponse'
       400:
-        description: Invalid job_id or trigger failed.
+        description: Invalid job_id format.
+        schema:
+          $ref: '#/definitions/Error'
+      404:
+        description: Job not found.
+        schema:
+          $ref: '#/definitions/Error'
+      500:
+        description: APScheduler operation failed.
         schema:
           $ref: '#/definitions/Error'
     """
     ok, err = validate_job_id(job_id)
     if not ok:
-        return jsonify({'success': False, 'error': err}), 400
+        raise ValidationError(err)
 
     sm = _get_scheduler_manager()
-    success = sm.trigger_job(job_id)
-    if success:
-        return jsonify({
-            'success': True,
-            'job_id': job_id,
-            'message': f'Job {job_id} triggered for immediate execution.',
-        })
-    return jsonify({'success': False, 'error': f'Failed to trigger job: {job_id}'}), 400
+    sm.trigger_job(job_id)
+    return jsonify({
+        'success': True,
+        'job_id': job_id,
+        'message': f'Job {job_id} triggered for immediate execution.',
+    })
 
 
 @scheduler_bp.route('/jobs/<job_id>/schedule', methods=['PUT'])
+@handle_api_errors
 def update_schedule(job_id):
     """Update a job's schedule trigger.
     ---
@@ -262,39 +303,41 @@ def update_schedule(job_id):
         description: Invalid job_id, missing trigger, or invalid trigger arguments.
         schema:
           $ref: '#/definitions/Error'
+      404:
+        description: Job not found.
+        schema:
+          $ref: '#/definitions/Error'
+      500:
+        description: APScheduler operation failed.
+        schema:
+          $ref: '#/definitions/Error'
     """
     ok, err = validate_job_id(job_id)
     if not ok:
-        return jsonify({'success': False, 'error': err}), 400
+        raise ValidationError(err)
 
     data = request.get_json(silent=True)
     if not data or not isinstance(data, dict) or 'trigger' not in data:
-        return jsonify({
-            'success': False,
-            'error': 'Request body must include "trigger" (cron or interval).',
-        }), 400
+        raise ValidationError('Request body must include "trigger" (cron or interval).')
 
     trigger = data.pop('trigger')
     valid_triggers = ('cron', 'interval', 'date')
     if trigger not in valid_triggers:
-        return jsonify({
-            'success': False,
-            'error': f'Invalid trigger type: {trigger}. Must be one of: {", ".join(valid_triggers)}',
-        }), 400
+        raise ValidationError(
+            f'Invalid trigger type: {trigger}. Must be one of: {", ".join(valid_triggers)}'
+        )
 
     ok, err = validate_trigger_args(trigger, data)
     if not ok:
-        return jsonify({'success': False, 'error': err}), 400
+        raise ValidationError(err)
 
     sm = _get_scheduler_manager()
-    success = sm.update_job_schedule(job_id, trigger, **data)
-    if success:
-        return jsonify({
-            'success': True,
-            'job_id': job_id,
-            'message': f'Schedule updated to trigger={trigger} with args={data}.',
-        })
-    return jsonify({'success': False, 'error': f'Failed to update schedule for: {job_id}'}), 400
+    sm.update_job_schedule(job_id, trigger, **data)
+    return jsonify({
+        'success': True,
+        'job_id': job_id,
+        'message': f'Schedule updated to trigger={trigger} with args={data}.',
+    })
 
 
 # -----------------------------------------------------------------------
@@ -302,6 +345,7 @@ def update_schedule(job_id):
 # -----------------------------------------------------------------------
 
 @scheduler_bp.route('/history', methods=['GET'])
+@handle_api_errors
 def job_execution_history():
     """Get job execution history.
     ---
@@ -368,7 +412,7 @@ def job_execution_history():
     try:
         limit = min(int(raw_limit), 200)
     except (ValueError, TypeError):
-        return jsonify({'success': False, 'error': 'Invalid limit: must be an integer.'}), 400
+        raise ValidationError('Invalid limit: must be an integer.')
 
     history = get_job_history(job_id=job_id, limit=limit)
     return jsonify({
@@ -379,3 +423,352 @@ def job_execution_history():
             'limit': limit,
         },
     })
+
+
+# -----------------------------------------------------------------------
+# Known agents
+# -----------------------------------------------------------------------
+
+@scheduler_bp.route('/agents', methods=['GET'])
+@handle_api_errors
+def list_known_agents():
+    """Return the list of agent job IDs available for custom scheduling.
+    ---
+    tags:
+      - Scheduler
+    summary: List schedulable agents
+    responses:
+      200:
+        description: Known agents that can be used in custom schedules.
+    """
+    sm = _get_scheduler_manager()
+    jobs = sm.get_all_jobs()
+    agents = [
+        {
+            'job_id': j.get('id', j.get('job_id', '')),
+            'name': j.get('name', ''),
+            'description': j.get('description', ''),
+        }
+        for j in jobs
+    ]
+    return jsonify({'agents': agents, 'total': len(agents)})
+
+
+# -----------------------------------------------------------------------
+# Agent schedule CRUD
+# -----------------------------------------------------------------------
+
+def _row_to_schedule(row) -> dict:
+    """Convert an ``agent_schedules`` sqlite3.Row to a JSON-serialisable dict."""
+    d = dict(row)
+    try:
+        d['trigger_args'] = json.loads(d.get('trigger_args') or '{}')
+    except (ValueError, TypeError):
+        d['trigger_args'] = {}
+    d['enabled'] = bool(d.get('enabled', 1))
+    return d
+
+
+@scheduler_bp.route('/agent-schedules', methods=['GET'])
+@handle_api_errors
+def list_agent_schedules():
+    """List all custom agent schedules.
+    ---
+    tags:
+      - Scheduler
+    summary: List custom agent schedules
+    responses:
+      200:
+        description: All saved custom agent schedules.
+      500:
+        description: Database error.
+    """
+    try:
+        with pooled_session() as conn:
+            rows = conn.execute(
+                "SELECT id, job_id, label, description, trigger, trigger_args, "
+                "enabled, created_at, updated_at "
+                "FROM agent_schedules ORDER BY created_at DESC"
+            ).fetchall()
+        schedules = [_row_to_schedule(r) for r in rows]
+        return jsonify({'schedules': schedules, 'total': len(schedules)})
+    except Exception as exc:
+        logger.error("Failed to list agent schedules: %s", exc)
+        raise DatabaseError("Database error.") from exc
+
+
+@scheduler_bp.route('/agent-schedules', methods=['POST'])
+@handle_api_errors
+def create_agent_schedule():
+    """Create a new custom agent schedule.
+    ---
+    tags:
+      - Scheduler
+    summary: Create agent schedule
+    consumes:
+      - application/json
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required: [job_id, label, trigger, trigger_args]
+          properties:
+            job_id:
+              type: string
+            label:
+              type: string
+            description:
+              type: string
+            trigger:
+              type: string
+              enum: [cron, interval]
+            trigger_args:
+              type: object
+            enabled:
+              type: boolean
+    responses:
+      201:
+        description: Schedule created.
+      400:
+        description: Validation error.
+      500:
+        description: Database error.
+    """
+    data = request.get_json(silent=True) or {}
+    ok, err = validate_schedule_body(data, require_all=True)
+    if not ok:
+        raise ValidationError(err)
+
+    enabled = bool(data.get('enabled', True))
+    trigger_args_json = json.dumps(data['trigger_args'])
+    now = datetime.now(timezone.utc).isoformat()
+
+    try:
+        with pooled_session() as conn:
+            existing = conn.execute(
+                "SELECT id FROM agent_schedules WHERE job_id = ?", (data['job_id'],)
+            ).fetchone()
+            if existing:
+                raise ConflictError(
+                    f"A schedule for job_id '{data['job_id']}' already exists."
+                )
+
+            cursor = conn.execute(
+                "INSERT INTO agent_schedules "
+                "(job_id, label, description, trigger, trigger_args, enabled, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    data['job_id'],
+                    data['label'].strip(),
+                    data.get('description') or None,
+                    data['trigger'],
+                    trigger_args_json,
+                    1 if enabled else 0,
+                    now,
+                    now,
+                ),
+            )
+            schedule_id = cursor.lastrowid
+            row = conn.execute(
+                "SELECT id, job_id, label, description, trigger, trigger_args, "
+                "enabled, created_at, updated_at FROM agent_schedules WHERE id = ?",
+                (schedule_id,),
+            ).fetchone()
+
+        schedule = _row_to_schedule(row)
+
+        sm = _get_scheduler_manager()
+        if sm.get_job(data['job_id']):
+            sm.update_job_schedule(data['job_id'], data['trigger'], **data['trigger_args'])
+
+        return jsonify(schedule), 201
+    except ConflictError:
+        raise
+    except Exception as exc:
+        logger.error("Failed to create agent schedule: %s", exc)
+        raise DatabaseError("Database error.") from exc
+
+
+@scheduler_bp.route('/agent-schedules/<int:schedule_id>', methods=['PUT'])
+@handle_api_errors
+def update_agent_schedule(schedule_id: int):
+    """Update an existing custom agent schedule.
+    ---
+    tags:
+      - Scheduler
+    summary: Update agent schedule
+    parameters:
+      - name: schedule_id
+        in: path
+        type: integer
+        required: true
+    responses:
+      200:
+        description: Schedule updated.
+      400:
+        description: Validation error.
+      404:
+        description: Schedule not found.
+      500:
+        description: Database error.
+    """
+    data = request.get_json(silent=True) or {}
+    ok, err = validate_schedule_body(data, require_all=False)
+    if not ok:
+        raise ValidationError(err)
+
+    try:
+        with pooled_session() as conn:
+            row = conn.execute(
+                "SELECT id, job_id, label, description, trigger, trigger_args, enabled "
+                "FROM agent_schedules WHERE id = ?",
+                (schedule_id,),
+            ).fetchone()
+            if not row:
+                raise SchedulerJobNotFoundError(f"Schedule {schedule_id} not found.")
+
+            existing = _row_to_schedule(row)
+
+            # Merge incoming fields onto the existing record
+            new_job_id = data.get('job_id', existing['job_id'])
+            new_label = data.get('label', existing['label'])
+            if isinstance(new_label, str):
+                new_label = new_label.strip()
+            new_description = data.get('description', existing['description'])
+            new_trigger = data.get('trigger', existing['trigger'])
+            new_trigger_args = data.get('trigger_args', existing['trigger_args'])
+            new_enabled = data.get('enabled', existing['enabled'])
+            now = datetime.now(timezone.utc).isoformat()
+
+            conn.execute(
+                "UPDATE agent_schedules SET job_id=?, label=?, description=?, "
+                "trigger=?, trigger_args=?, enabled=?, updated_at=? WHERE id=?",
+                (
+                    new_job_id,
+                    new_label,
+                    new_description,
+                    new_trigger,
+                    json.dumps(new_trigger_args),
+                    1 if new_enabled else 0,
+                    now,
+                    schedule_id,
+                ),
+            )
+            updated_row = conn.execute(
+                "SELECT id, job_id, label, description, trigger, trigger_args, "
+                "enabled, created_at, updated_at FROM agent_schedules WHERE id = ?",
+                (schedule_id,),
+            ).fetchone()
+
+        schedule = _row_to_schedule(updated_row)
+
+        sm = _get_scheduler_manager()
+        sm.register_custom_schedule(
+            schedule_id=schedule_id,
+            job_id=new_job_id,
+            label=new_label,
+            trigger=new_trigger,
+            trigger_args=new_trigger_args,
+            enabled=bool(new_enabled),
+        )
+
+        return jsonify(schedule)
+    except (SchedulerJobNotFoundError, ValidationError):
+        raise
+    except Exception as exc:
+        logger.error("Failed to update agent schedule %d: %s", schedule_id, exc)
+        raise DatabaseError("Database error.") from exc
+
+
+@scheduler_bp.route('/agent-schedules/<int:schedule_id>', methods=['DELETE'])
+@handle_api_errors
+def delete_agent_schedule(schedule_id: int):
+    """Delete a custom agent schedule.
+    ---
+    tags:
+      - Scheduler
+    summary: Delete agent schedule
+    parameters:
+      - name: schedule_id
+        in: path
+        type: integer
+        required: true
+    responses:
+      200:
+        description: Schedule deleted.
+      404:
+        description: Schedule not found.
+      500:
+        description: Database error.
+    """
+    try:
+        with pooled_session() as conn:
+            row = conn.execute(
+                "SELECT id FROM agent_schedules WHERE id = ?", (schedule_id,)
+            ).fetchone()
+            if not row:
+                raise SchedulerJobNotFoundError(f"Schedule {schedule_id} not found.")
+            conn.execute("DELETE FROM agent_schedules WHERE id = ?", (schedule_id,))
+
+        sm = _get_scheduler_manager()
+        sm.remove_custom_schedule(schedule_id)
+
+        return jsonify({'success': True, 'id': schedule_id})
+    except SchedulerJobNotFoundError:
+        raise
+    except Exception as exc:
+        logger.error("Failed to delete agent schedule %d: %s", schedule_id, exc)
+        raise DatabaseError("Database error.") from exc
+
+
+@scheduler_bp.route('/agent-schedules/<int:schedule_id>/trigger', methods=['POST'])
+@handle_api_errors
+def trigger_agent_schedule(schedule_id: int):
+    """Trigger immediate execution of a custom agent schedule.
+    ---
+    tags:
+      - Scheduler
+    summary: Trigger custom agent schedule immediately
+    parameters:
+      - name: schedule_id
+        in: path
+        type: integer
+        required: true
+    responses:
+      200:
+        description: Schedule triggered.
+      404:
+        description: Schedule not found.
+      503:
+        description: Scheduler is not running.
+      500:
+        description: APScheduler operation failed.
+    """
+    try:
+        with pooled_session() as conn:
+            row = conn.execute(
+                "SELECT id, job_id, label FROM agent_schedules WHERE id = ?",
+                (schedule_id,),
+            ).fetchone()
+            if not row:
+                raise SchedulerJobNotFoundError(f"Schedule {schedule_id} not found.")
+            job_id = row['job_id']
+            label = row['label']
+    except (SchedulerJobNotFoundError, ValidationError):
+        raise
+    except Exception as exc:
+        logger.error("Failed to fetch agent schedule %d: %s", schedule_id, exc)
+        raise DatabaseError("Database error.") from exc
+
+    sm = _get_scheduler_manager()
+
+    if not sm.scheduler:
+        raise ServiceUnavailableError("Scheduler is not running.")
+
+    ok = sm.trigger_job(job_id)
+    if not ok:
+        return jsonify({'success': False, 'job_id': job_id, 'schedule_id': schedule_id}), 400
+
+    return jsonify({'success': True, 'job_id': job_id, 'schedule_id': schedule_id})

@@ -4,6 +4,7 @@ Provides consistent logging, timing, DB persistence, and SSE notification.
 """
 import json
 import logging
+import threading
 import time
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -13,6 +14,16 @@ from backend.config import Config
 from backend.database import pooled_session
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# In-memory job history buffer
+# ---------------------------------------------------------------------------
+# save_job_history() appends records here; flush_buffered_job_history() drains
+# them in a single batch INSERT every time the metrics_snapshot job fires.
+# This cuts per-job-run connection churn to zero while preserving all history.
+
+_JOB_HISTORY_BUFFER: List[Dict[str, Any]] = []
+_BUFFER_LOCK = threading.Lock()
 
 
 def _get_agent_registry():
@@ -50,31 +61,35 @@ def _get_watchlist() -> list:
 def save_job_history(job_id: str, job_name: str, status: str,
                      result_summary: str, agent_name: Optional[str],
                      duration_ms: int, cost: float = 0.0) -> None:
-    """Persist a job execution record to the job_history table."""
-    try:
-        with pooled_session() as conn:
-            conn.execute(
-                """INSERT INTO job_history
-                   (job_id, job_name, status, result_summary, agent_name,
-                    duration_ms, cost, executed_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                (
-                    job_id,
-                    job_name,
-                    status,
-                    (result_summary or '')[:5000],  # cap length
-                    agent_name,
-                    duration_ms,
-                    cost,
-                    datetime.utcnow().isoformat(),
-                ),
-            )
-    except Exception as exc:
-        logger.error("Failed to save job_history for %s: %s", job_id, exc)
+    """Buffer a job execution record for batch insertion.
+
+    Records are held in memory and flushed to the database by
+    ``flush_buffered_job_history()``, which is called on a schedule from the
+    metrics_snapshot job.  This eliminates per-job-run connection churn.
+    """
+    record: Dict[str, Any] = {
+        'job_id': job_id,
+        'job_name': job_name,
+        'status': status,
+        'result_summary': (result_summary or '')[:5000],
+        'agent_name': agent_name,
+        'duration_ms': duration_ms,
+        'cost': cost,
+        'executed_at': datetime.utcnow().isoformat(),
+    }
+    with _BUFFER_LOCK:
+        _JOB_HISTORY_BUFFER.append(record)
 
 
 def get_job_history(job_id: Optional[str] = None, limit: int = 50) -> list:
-    """Retrieve recent job execution history from the database."""
+    """Retrieve recent job execution history from the database.
+
+    Raises
+    ------
+    DatabaseError
+        When the underlying DB query fails.  Callers in API request context
+        are expected to let this propagate to ``@handle_api_errors``.
+    """
     try:
         with pooled_session() as conn:
             if job_id:
@@ -90,7 +105,73 @@ def get_job_history(job_id: Optional[str] = None, limit: int = 50) -> list:
         return [dict(r) for r in rows]
     except Exception as exc:
         logger.error("Failed to get job_history: %s", exc)
-        return []
+        from backend.core.error_handlers import DatabaseError
+        raise DatabaseError("Failed to retrieve job history.") from exc
+
+
+def flush_job_history_buffer(records: List[Dict[str, Any]]) -> None:
+    """Batch-insert multiple job history records using a single pooled connection.
+
+    Acquires exactly one connection for N records instead of one per record,
+    avoiding per-record connection churn when flushing accumulated buffers.
+
+    Parameters
+    ----------
+    records:
+        Sequence of dicts with keys matching ``job_history`` columns:
+        ``job_id``, ``job_name``, ``status``, ``result_summary``,
+        ``agent_name``, ``duration_ms``, ``cost``, ``executed_at``.
+        Missing optional keys default to sensible values.
+    """
+    if not records:
+        return
+    rows = [
+        (
+            r['job_id'],
+            r['job_name'],
+            r['status'],
+            (r.get('result_summary') or '')[:5000],
+            r.get('agent_name'),
+            r['duration_ms'],
+            r.get('cost', 0.0),
+            r.get('executed_at', datetime.utcnow().isoformat()),
+        )
+        for r in records
+    ]
+    try:
+        with pooled_session() as conn:
+            conn.executemany(
+                """INSERT INTO job_history
+                   (job_id, job_name, status, result_summary, agent_name,
+                    duration_ms, cost, executed_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                rows,
+            )
+    except Exception as exc:
+        logger.error(
+            "Failed to flush job_history buffer (%d records): %s", len(records), exc
+        )
+
+
+def flush_buffered_job_history() -> int:
+    """Drain the in-memory buffer and batch-insert all pending records.
+
+    Intended to be called on a schedule (e.g. from the metrics_snapshot job)
+    rather than after every individual job run.  Thread-safe: the buffer is
+    swapped out under the lock so new records can accumulate immediately while
+    the batch INSERT is in progress.
+
+    Returns the number of records flushed.
+    """
+    with _BUFFER_LOCK:
+        if not _JOB_HISTORY_BUFFER:
+            return 0
+        records = _JOB_HISTORY_BUFFER.copy()
+        _JOB_HISTORY_BUFFER.clear()
+
+    flush_job_history_buffer(records)
+    logger.debug("flush_buffered_job_history: wrote %d record(s) to DB", len(records))
+    return len(records)
 
 
 def save_performance_metrics(

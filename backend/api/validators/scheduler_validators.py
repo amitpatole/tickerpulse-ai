@@ -166,6 +166,66 @@ def validate_date_args(args: dict):
     return True, None
 
 
+def validate_schedule_body(data: dict, require_all: bool = True):
+    """Validate POST/PUT body for agent-schedule endpoints.
+
+    Parameters
+    ----------
+    data : dict
+        Parsed JSON request body.
+    require_all : bool
+        When True (POST), ``job_id``, ``label``, ``trigger``, and
+        ``trigger_args`` are all required.  When False (PUT), only present
+        fields are validated.
+
+    Returns
+    -------
+    tuple[bool, str | None]
+        ``(True, None)`` on success, ``(False, error_message)`` on failure.
+    """
+    if not isinstance(data, dict):
+        return False, "Request body must be a JSON object."
+
+    required = {'job_id', 'label', 'trigger', 'trigger_args'} if require_all else set()
+    missing = required - data.keys()
+    if missing:
+        return False, f"Missing required field(s): {', '.join(sorted(missing))}."
+
+    if 'job_id' in data:
+        ok, err = validate_job_id(str(data['job_id']))
+        if not ok:
+            return False, err
+
+    if 'label' in data:
+        label = data['label']
+        if not isinstance(label, str) or not label.strip():
+            return False, "label must be a non-empty string."
+        if len(label) > 100:
+            return False, "label must be 100 characters or fewer."
+
+    if 'trigger' in data:
+        trigger = data['trigger']
+        valid_triggers = ('cron', 'interval')
+        if trigger not in valid_triggers:
+            return False, (
+                f"Invalid trigger type: '{trigger}'. "
+                f"Must be one of: {', '.join(valid_triggers)}."
+            )
+        trigger_args = data.get('trigger_args', {})
+        if not isinstance(trigger_args, dict):
+            return False, "trigger_args must be an object."
+        ok, err = validate_trigger_args(trigger, trigger_args)
+        if not ok:
+            return False, err
+
+    if not require_all:
+        _known = {'job_id', 'label', 'description', 'trigger', 'trigger_args', 'enabled'}
+        if not (set(data.keys()) & _known):
+            return False, "No valid fields to update."
+
+    return True, None
+
+
 def validate_trigger_args(trigger: str, args: dict):
     """Dispatch to the appropriate per-trigger validator.
 

@@ -16,7 +16,7 @@ from flask import Blueprint, current_app, jsonify
 
 from backend.config import Config
 from backend.core.error_handlers import handle_api_errors
-from backend.database import db_session, _get_pool
+from backend.database import db_session, _get_pool, get_pool
 
 logger = logging.getLogger(__name__)
 
@@ -96,34 +96,28 @@ def _check_db_depth() -> Dict[str, Any]:
 
 
 def _check_scheduler(app) -> Dict[str, Any]:
-    """Probe the APScheduler instance attached to the Flask app."""
+    """Probe the scheduler via SchedulerManager.get_status()."""
     try:
-        if not hasattr(app, 'scheduler'):
-            return {'status': 'not_configured', 'running': False}
+        import sys
+        sm_mod = sys.modules.get('backend.scheduler')
+        if sm_mod is None:
+            return {'status': 'not_configured', 'running': False, 'job_count': None, 'timezone': None}
 
-        scheduler = app.scheduler
-        running = bool(getattr(scheduler, 'running', False))
-        status = 'ok' if running else 'stopped'
+        manager = getattr(sm_mod, 'scheduler_manager', None)
+        if manager is None:
+            return {'status': 'not_configured', 'running': False, 'job_count': None, 'timezone': None}
 
-        job_count = None
-        try:
-            import sys
-            sm_mod = sys.modules.get('backend.scheduler')
-            if sm_mod is not None:
-                manager = getattr(sm_mod, 'scheduler_manager', None)
-                if manager is not None:
-                    job_count = len(manager._job_registry)
-        except Exception:
-            pass
-
-        result: Dict[str, Any] = {'status': status, 'running': running}
-        if job_count is not None:
-            result['job_count'] = job_count
-        return result
-
+        info = manager.get_status()
+        status = 'ok' if info['running'] else 'error'
+        return {
+            'status': status,
+            'running': info['running'],
+            'job_count': info['job_count'],
+            'timezone': info['timezone'],
+        }
     except Exception as exc:
         logger.warning('_check_scheduler: %s', exc)
-        return {'status': 'error', 'running': None, 'error': str(exc)}
+        return {'status': 'error', 'running': None, 'job_count': None, 'timezone': None, 'error': str(exc)}
 
 
 def _check_agent_registry(app) -> Dict[str, Any]:
@@ -257,22 +251,74 @@ def _get_sse_client_count() -> int:
         return -1
 
 
+def _check_db_pool() -> Dict[str, Any]:
+    """Probe the connection pool by acquiring a connection and reading stats."""
+    try:
+        pool = get_pool()
+        with pool.acquire():
+            pass
+        stats = pool.stats()
+        return {
+            'status': 'ok',
+            'pool_size': stats.get('size'),
+            'available': stats.get('available'),
+        }
+    except Exception as exc:
+        logger.warning('_check_db_pool: %s', exc)
+        return {'status': 'error', 'error': str(exc), 'pool_size': None, 'available': None}
+
+
+def _check_ws_manager(app) -> Dict[str, Any]:
+    """Probe the WebSocket manager registered in Flask extensions."""
+    try:
+        ws_manager = app.extensions.get('ws_manager')
+        if ws_manager is None:
+            return {'status': 'not_configured', 'client_count': None}
+        client_count = getattr(ws_manager, 'client_count', None)
+        return {'status': 'ok', 'client_count': client_count}
+    except Exception as exc:
+        logger.warning('_check_ws_manager: %s', exc)
+        return {'status': 'error', 'client_count': None, 'error': str(exc)}
+
+
+def _check_ai_provider() -> Dict[str, Any]:
+    """Check which AI provider API key is configured (first non-empty wins)."""
+    try:
+        candidates: Dict[str, str] = {
+            'anthropic': Config.ANTHROPIC_API_KEY,
+            'openai': Config.OPENAI_API_KEY,
+            'google': Config.GOOGLE_AI_KEY,
+            'xai': Config.XAI_API_KEY,
+        }
+        for name, key in candidates.items():
+            if key:
+                return {'status': 'ok', 'provider': name}
+        return {'status': 'unconfigured', 'provider': None}
+    except Exception as exc:
+        logger.warning('_check_ai_provider: %s', exc)
+        return {'status': 'error', 'provider': None, 'error': str(exc)}
+
+
 def _derive_overall_status(
     db_status: str,
     scheduler_status: str,
     stale: bool = False,
+    ws_status: str = 'not_configured',
 ) -> str:
     """Derive overall health from subsystem statuses.
 
     Returns 'degraded' when the DB is not ok, the scheduler has errored or
-    stopped, or prices are stale.  'not_configured' and unknown scheduler
-    values are treated as ok.
+    stopped, prices are stale, or the WebSocket manager has errored.
+    'not_configured' and unknown values are treated as ok.
+    AI-provider status is informational only and never degrades overall health.
     """
     if db_status != 'ok':
         return 'degraded'
     if scheduler_status in ('error', 'stopped'):
         return 'degraded'
     if stale:
+        return 'degraded'
+    if ws_status == 'error':
         return 'degraded'
     return 'ok'
 
@@ -316,18 +362,27 @@ def health_check():
 
     db_info = _check_db()
     db_depth = _check_db_depth()
+    db_pool_info = _check_db_pool()
     scheduler_info = _check_scheduler(app)
     agent_info = _check_agent_registry(app)
     data_provider_info = _check_data_provider_detail(app)
     freshness_info = _check_data_freshness()
+    ws_info = _check_ws_manager(app)
     error_log_count = _get_error_log_count_1h()
     sse_count = _get_sse_client_count()
+
+    try:
+        ai_provider_info = _check_ai_provider()
+    except Exception as exc:
+        logger.warning('health_check: ai_provider probe failed: %s', exc)
+        ai_provider_info = {'status': 'error', 'provider': None}
 
     stale = freshness_info.get('stale', False)
     overall = _derive_overall_status(
         db_info['status'],
         scheduler_info['status'],
         stale=stale,
+        ws_status=ws_info['status'],
     )
 
     # Merge DB connectivity and depth stats into a single services.db dict;
@@ -341,6 +396,32 @@ def health_check():
         'status': overall,
         'version': _VERSION,
         'timestamp': datetime.utcnow().isoformat() + 'Z',
+        # Flat backwards-compatible fields
+        'db': db_info['status'],
+        'db_pool': db_pool_info['status'],
+        'scheduler': scheduler_info['status'],
+        'ai_provider': ai_provider_info['status'],
+        'error_log_count_1h': error_log_count,
+        # Structured checks map
+        'checks': {
+            'db': {
+                'status': db_info['status'],
+                'pool': db_info.get('pool'),
+            },
+            'db_pool': db_pool_info,
+            'scheduler': {
+                'status': scheduler_info['status'],
+                'running': scheduler_info.get('running'),
+                'job_count': scheduler_info.get('job_count'),
+                'timezone': scheduler_info.get('timezone'),
+            },
+            'ai_provider': ai_provider_info,
+            'ws_manager': ws_info,
+            'errors': {
+                'count_1h': error_log_count,
+            },
+        },
+        # Rich services dict (unchanged for existing consumers)
         'services': {
             'db': db_combined,
             'scheduler': scheduler_info,
@@ -370,3 +451,18 @@ def health_ready():
         'db': db_info['status'],
         'ts': datetime.utcnow().isoformat() + 'Z',
     }), (200 if ready else 503)
+
+
+@health_bp.route('/health/live', methods=['GET'])
+@handle_api_errors
+def health_live():
+    """Liveness probe — always returns HTTP 200 while the process is running.
+
+    Unlike ``/health/ready``, this probe performs no I/O and never returns
+    a non-2xx status.  Use it for container liveness checks to detect
+    hung processes rather than dependency failures.
+    """
+    return jsonify({
+        'alive': True,
+        'ts': datetime.utcnow().isoformat() + 'Z',
+    })
