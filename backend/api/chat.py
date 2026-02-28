@@ -9,6 +9,12 @@ import logging
 from backend.core.ai_analytics import StockAnalytics
 from backend.core.ai_providers import AIProviderFactory
 from backend.core.settings_manager import get_active_ai_provider
+from backend.database import db_session
+from backend.core.error_handlers import (
+    handle_api_errors,
+    ValidationError,
+    ServiceUnavailableError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -16,6 +22,7 @@ chat_bp = Blueprint('chat', __name__, url_prefix='/api')
 
 
 @chat_bp.route('/chat/ask', methods=['POST'])
+@handle_api_errors
 def ask_chat_endpoint():
     """Chat with AI about a specific stock.
 
@@ -40,36 +47,44 @@ def ask_chat_endpoint():
 
     Errors:
         400: Missing ticker/question or no AI provider configured.
-        500: AI provider initialization failure or generation error.
+        503: AI provider initialization failure or generation error.
     """
-    data = request.json
+    data = request.get_json(silent=True) or {}
     ticker = (data.get('ticker') or '').strip()
     question = (data.get('question') or '').strip()
     thinking_level = data.get('thinking_level', 'balanced')
 
     if not ticker or not question:
-        return jsonify({'success': False, 'error': 'Missing ticker or question'}), 400
+        raise ValidationError(
+            'Missing ticker or question',
+            error_code='MISSING_FIELD',
+            field_errors=[
+                *([{'field': 'ticker', 'message': 'Ticker is required'}] if not ticker else []),
+                *([{'field': 'question', 'message': 'Question is required'}] if not question else []),
+            ],
+        )
 
-    try:
-        # Get active AI provider
-        provider_config = get_active_ai_provider()
-        if not provider_config:
-            return jsonify({'success': False, 'error': 'No AI provider configured'}), 400
+    provider_config = get_active_ai_provider()
+    if not provider_config:
+        raise ValidationError(
+            'No AI provider configured. Add an API key in Settings.',
+            error_code='MISSING_FIELD',
+        )
 
-        # Get current stock analysis for context
-        analytics = StockAnalytics()
-        rating = analytics.calculate_ai_rating(ticker)
+    # Get current stock analysis for context
+    analytics = StockAnalytics()
+    rating = analytics.calculate_ai_rating(ticker)
 
-        # Define thinking level instructions
-        thinking_instructions = {
-            'quick': 'Provide a brief, direct answer (1-2 sentences) to the question.',
-            'balanced': 'Provide a concise but comprehensive answer (2-4 sentences) that balances depth with clarity.',
-            'deep': 'Provide a thorough, detailed analysis (4-6 sentences) that explores multiple perspectives and implications.'
-        }
-        thinking_instruction = thinking_instructions.get(thinking_level, thinking_instructions['balanced'])
+    # Define thinking level instructions
+    thinking_instructions = {
+        'quick': 'Provide a brief, direct answer (1-2 sentences) to the question.',
+        'balanced': 'Provide a concise but comprehensive answer (2-4 sentences) that balances depth with clarity.',
+        'deep': 'Provide a thorough, detailed analysis (4-6 sentences) that explores multiple perspectives and implications.'
+    }
+    thinking_instruction = thinking_instructions.get(thinking_level, thinking_instructions['balanced'])
 
-        # Build context-aware prompt
-        context = f"""You are a helpful stock analysis assistant. The user is asking about {ticker}.
+    # Build context-aware prompt
+    context = f"""You are a helpful stock analysis assistant. The user is asking about {ticker}.
 
 Current Stock Analysis:
 - Rating: {rating.get('rating', 'N/A')}
@@ -85,38 +100,46 @@ User Question: {question}
 RESPONSE STYLE: {thinking_instruction}
 Focus on being informative and actionable."""
 
-        # Create AI provider instance
-        provider = AIProviderFactory.create_provider(
-            provider_config['provider_name'],
-            provider_config['api_key'],
-            provider_config['model']
-        )
+    # Create AI provider instance
+    provider = AIProviderFactory.create_provider(
+        provider_config['provider_name'],
+        provider_config['api_key'],
+        provider_config['model']
+    )
 
-        if not provider:
-            return jsonify({'success': False, 'error': 'Failed to initialize AI provider'}), 500
+    if not provider:
+        raise ServiceUnavailableError('Failed to initialize AI provider')
 
-        # Get AI response
-        try:
-            ai_answer = provider.generate_analysis(context, max_tokens=500)
-            logger.info(f"Chat response generated for {ticker}: {len(ai_answer)} characters")
+    # Get AI response
+    ai_answer = provider.generate_analysis(context, max_tokens=500)
+    logger.info("Chat response generated for %s: %d characters", ticker, len(ai_answer or ''))
 
-            if ai_answer and not ai_answer.startswith('Error:'):
-                return jsonify({
-                    'success': True,
-                    'answer': ai_answer,
-                    'ai_powered': True,
-                    'ticker': ticker
-                })
-            else:
-                error_msg = ai_answer if ai_answer else 'Failed to generate response'
-                return jsonify({
-                    'success': False,
-                    'error': error_msg
-                }), 500
-        except Exception as e:
-            logger.exception(f"Error calling AI provider: {e}")
-            return jsonify({'success': False, 'error': 'AI provider error'}), 500
+    if not ai_answer or ai_answer.startswith('Error:'):
+        raise ServiceUnavailableError(ai_answer or 'Failed to generate response')
 
-    except Exception as e:
-        logger.exception(f"Error in chat endpoint: {e}")
-        return jsonify({'success': False, 'error': 'An internal error occurred'}), 500
+    return jsonify({
+        'success': True,
+        'answer': ai_answer,
+        'ai_powered': True,
+        'ticker': ticker
+    })
+
+
+@chat_bp.route('/chat/health', methods=['GET'])
+@handle_api_errors
+def chat_health_endpoint():
+    """Health check for the chat subsystem.
+
+    Verifies DB connectivity by querying the chat_sessions table.
+
+    Returns:
+        200 JSON {"status": "ok", "sessions_count": <int>} when healthy.
+        503 JSON {"status": "error", "error": <str>} on DB failure.
+    """
+    try:
+        with db_session() as conn:
+            row = conn.execute("SELECT COUNT(*) AS cnt FROM chat_sessions").fetchone()
+        return jsonify({'status': 'ok', 'sessions_count': row['cnt']})
+    except Exception as exc:
+        logger.warning("chat health check failed: %s", exc)
+        raise ServiceUnavailableError(f'Chat subsystem unavailable: {exc}')

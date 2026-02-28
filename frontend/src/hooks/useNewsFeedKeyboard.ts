@@ -1,3 +1,4 @@
+```typescript
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
@@ -95,3 +96,4 @@ export function useNewsFeedKeyboard(
 
   return { focusedIndex, itemRefs, handleKeyDown, activatePanel, releasePanel };
 }
+```

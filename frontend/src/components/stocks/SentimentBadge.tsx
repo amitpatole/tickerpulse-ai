@@ -4,10 +4,12 @@ import { useCallback } from 'react';
 import { clsx } from 'clsx';
 import { useApi } from '@/hooks/useApi';
 import { getStockSentiment } from '@/lib/api';
-import type { SentimentData } from '@/lib/types';
+import { formatDate } from '@/lib/formatTime';
+import type { SentimentData, TimezoneMode } from '@/lib/types';
 
 interface SentimentBadgeProps {
   ticker: string;
+  tz?: TimezoneMode;
 }
 
 const LABEL_CLASSES: Record<SentimentData['label'], string> = {
@@ -34,7 +36,7 @@ function buildSourceLine(sources: { news: number; reddit: number }): string {
   return parts.join(' · ');
 }
 
-export default function SentimentBadge({ ticker }: SentimentBadgeProps) {
+export default function SentimentBadge({ ticker, tz = 'local' }: SentimentBadgeProps) {
   const fetcher = useCallback(() => getStockSentiment(ticker), [ticker]);
   const { data, loading } = useApi(fetcher, [ticker]);
 
@@ -58,14 +60,16 @@ export default function SentimentBadge({ ticker }: SentimentBadgeProps) {
     `${data.signal_count} signals`,
     `News: ${data.sources.news}, Reddit: ${data.sources.reddit}`,
     `Score: ${formatScore(data.score)}`,
-    `Updated: ${new Date(data.updated_at).toLocaleString()}`,
+    `Updated: ${formatDate(data.updated_at, tz)}`,
     stale ? 'Data may be stale' : '',
   ]
     .filter(Boolean)
     .join('\n');
 
   return (
-    <div className="flex items-center gap-2" title={tooltip}>
+    // suppressHydrationWarning: tooltip contains a local-timezone date string;
+    // SSR (UTC) and browser (user TZ) may produce different values (VO-786).
+    <div className="flex items-center gap-2" title={tooltip} suppressHydrationWarning>
       <span
         className={clsx(
           'inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-semibold',

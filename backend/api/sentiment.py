@@ -8,6 +8,7 @@ import logging
 from flask import Blueprint, jsonify
 
 from backend.core.sentiment_service import get_sentiment, invalidate_ticker
+from backend.core.error_handlers import handle_api_errors
 
 logger = logging.getLogger(__name__)
 
@@ -15,6 +16,7 @@ sentiment_bp = Blueprint('sentiment', __name__, url_prefix='/api')
 
 
 @sentiment_bp.route('/stocks/<ticker>/sentiment', methods=['GET'])
+@handle_api_errors
 def get_stock_sentiment(ticker: str):
     """Return aggregated social/news sentiment for *ticker*.
 
@@ -46,5 +48,6 @@ def get_stock_sentiment(ticker: str):
             'label': 'neutral',
             'score': None,
             'signal_count': 0,
-            'sources': {'news': 0, 'reddit': 0},
+            'sources': {'news': 0, 'reddit': 0, 'stocktwits': 0},
+            'trend': 'flat',
         }), 200
