@@ -3,19 +3,14 @@
 import { useState, useEffect, useRef } from 'react';
 import { X } from 'lucide-react';
 import { clsx } from 'clsx';
+import SoundTypePicker from './SoundTypePicker';
+import { ApiError } from '@/lib/api';
 import type { Alert, AlertCondition } from '@/lib/types';
 
 const CONDITION_OPTIONS: { value: AlertCondition; label: string; hint: string }[] = [
   { value: 'price_above', label: 'Price above', hint: 'Fires when price rises above the threshold' },
   { value: 'price_below', label: 'Price below', hint: 'Fires when price falls below the threshold' },
   { value: 'pct_change', label: '% Change ±', hint: 'Fires when |price change| reaches threshold %' },
-];
-
-const SOUND_OPTIONS: { value: string; label: string }[] = [
-  { value: 'default', label: 'Default' },
-  { value: 'chime', label: 'Chime' },
-  { value: 'alarm', label: 'Alarm' },
-  { value: 'silent', label: 'Silent' },
 ];
 
 interface AlertFormModalProps {
@@ -291,18 +286,11 @@ export default function AlertFormModal({
             <label htmlFor="alert-sound" className="mb-1 block text-xs font-medium text-slate-300">
               Alert Sound
             </label>
-            <select
+            <SoundTypePicker
               id="alert-sound"
               value={form.sound_type}
-              onChange={(e) => setField('sound_type', e.target.value)}
-              className="w-full rounded border border-slate-600 bg-slate-800 px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-500/30"
-            >
-              {SOUND_OPTIONS.map((opt) => (
-                <option key={opt.value} value={opt.value}>
-                  {opt.label}
-                </option>
-              ))}
-            </select>
+              onChange={(v) => setField('sound_type', v)}
+            />
           </div>
 
           {/* Actions */}

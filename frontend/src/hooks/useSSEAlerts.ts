@@ -1,4 +1,3 @@
-```typescript
 'use client';
 
 // ============================================================
@@ -132,4 +131,3 @@ export function useSSEAlerts(): UseSSEAlertsReturn {
 
   return { recentAlerts, connected };
 }
-```
