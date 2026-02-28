@@ -14,6 +14,7 @@ from backend.jobs.weekly_review import run_weekly_review
 from backend.jobs.regime_check import run_regime_check
 from backend.jobs.download_tracker import run_download_tracker
 from backend.jobs.price_refresh import run_price_refresh
+from backend.jobs.metrics_snapshot import run_metrics_snapshot
 from backend.config import Config
 
 
@@ -141,6 +142,20 @@ def register_all_jobs(scheduler_manager) -> None:
         seconds=Config.PRICE_REFRESH_INTERVAL_SECONDS,
     )
 
+    # ---- Metrics Snapshot: Every 5 minutes ----
+    scheduler_manager.register_job(
+        job_id='metrics_snapshot',
+        func=run_metrics_snapshot,
+        trigger='interval',
+        name='Metrics Snapshot',
+        description=(
+            'Captures system health (CPU, memory, DB pool) and flushes '
+            'in-memory API latency aggregates to api_request_log. '
+            'Prunes perf_snapshots older than 90 days.'
+        ),
+        minutes=5,
+    )
+
 
 __all__ = [
     'register_all_jobs',
@@ -152,5 +167,6 @@ __all__ = [
     'run_regime_check',
     'run_download_tracker',
     'run_price_refresh',
+    'run_metrics_snapshot',
 ]
 ```
