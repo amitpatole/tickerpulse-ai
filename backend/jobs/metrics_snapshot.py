@@ -6,6 +6,7 @@ Runs every 5 minutes to:
   1. Capture a system health snapshot (CPU %, memory %, DB pool utilisation).
   2. Flush the in-memory API latency buffer to api_request_log.
   3. Prune perf_snapshots rows older than 90 days.
+  4. Prune ui_state rows not updated in the last 90 days.
 """
 
 import logging
@@ -94,6 +95,11 @@ def run_metrics_snapshot() -> None:
                     LIMIT -1 OFFSET 10000
                 )
                 """
+            )
+
+            # Prune stale ui_state entries not updated in the last 90 days
+            conn.execute(
+                "DELETE FROM ui_state WHERE updated_at < datetime('now', '-90 days')"
             )
 
         ctx['result_summary'] = (
