@@ -1,9 +1,10 @@
 'use client';
 
-import { Bell, Wifi, WifiOff, Search } from 'lucide-react';
+import { Wifi, WifiOff, Search } from 'lucide-react';
 import { clsx } from 'clsx';
 import { useSSE } from '@/hooks/useSSE';
 import { useKeyboardShortcutsContext } from '@/components/layout/KeyboardShortcutsProvider';
+import AlertBell from '@/components/alerts/AlertBell';
 
 interface HeaderProps {
   title: string;
@@ -11,8 +12,7 @@ interface HeaderProps {
 }
 
 export default function Header({ title, subtitle }: HeaderProps) {
-  const { connected, recentAlerts } = useSSE();
-  const unreadAlerts = recentAlerts.length;
+  const { connected } = useSSE();
 
   return (
     <header className="flex h-16 items-center justify-between border-b border-slate-700/50 bg-slate-900/50 px-6 backdrop-blur-sm">
@@ -31,15 +31,8 @@ export default function Header({ title, subtitle }: HeaderProps) {
           </kbd>
         </div>
 
-        {/* Alerts */}
-        <button className="relative rounded-lg p-2 text-slate-400 hover:bg-slate-800 hover:text-white transition-colors">
-          <Bell className="h-5 w-5" />
-          {unreadAlerts > 0 && (
-            <span className="absolute -right-0.5 -top-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-[10px] font-bold text-white">
-              {unreadAlerts > 9 ? '9+' : unreadAlerts}
-            </span>
-          )}
-        </button>
+        {/* Alerts bell with unread badge */}
+        <AlertBell />
 
         {/* Connection Status */}
         <div
