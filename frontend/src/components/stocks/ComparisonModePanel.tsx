@@ -1,18 +1,13 @@
+```tsx
 'use client';
 
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { X, Search, GitCompare } from 'lucide-react';
 import { searchStocks } from '@/lib/api';
-import type { StockSearchResult } from '@/lib/types';
+import type { ComparisonTicker, StockSearchResult } from '@/lib/types';
 
 const COMPARISON_PALETTE = ['#f59e0b', '#10b981', '#ef4444', '#8b5cf6'];
 const MAX_COMPARISONS = 4;
-
-interface ComparisonTicker {
-  ticker: string;
-  name: string;
-  error: string | null;
-}
 
 interface ComparisonModePanelProps {
   primaryTicker: string;
@@ -48,7 +43,6 @@ export default function ComparisonModePanel({
     setSearching(true);
     try {
       const res = await searchStocks(q);
-      // Filter out primary and already-added tickers
       const existing = new Set([primaryTicker, ...comparisonTickers.map((c) => c.ticker)]);
       setResults(res.filter((r) => !existing.has(r.ticker.toUpperCase())).slice(0, 6));
       setDropdownOpen(true);
@@ -67,7 +61,6 @@ export default function ComparisonModePanel({
     };
   }, [query, doSearch]);
 
-  // Close dropdown on outside click
   useEffect(() => {
     function handleClick(e: MouseEvent) {
       if (
@@ -120,25 +113,22 @@ export default function ComparisonModePanel({
       {/* Search + pills when enabled */}
       {enabled && (
         <div className="space-y-2">
-          {/* Pills */}
           {comparisonTickers.length > 0 && (
             <div className="flex flex-wrap gap-2">
               {comparisonTickers.map((ct, idx) => {
                 const color = COMPARISON_PALETTE[idx % COMPARISON_PALETTE.length];
                 return (
                   <div key={ct.ticker} className="flex flex-col gap-0.5">
-                    <div
-                      className="flex items-center gap-1.5 rounded-full border border-slate-700 bg-slate-800 px-3 py-1"
-                    >
+                    <div className="flex items-center gap-1.5 rounded-full border border-slate-700 bg-slate-800 px-3 py-1">
                       <span
-                        className="inline-block h-2 w-2 rounded-full flex-shrink-0"
+                        className="inline-block h-2 w-2 flex-shrink-0 rounded-full"
                         style={{ backgroundColor: color }}
                       />
                       <span className="text-xs font-semibold text-white">{ct.ticker}</span>
                       <button
                         onClick={() => onRemove(ct.ticker)}
                         aria-label={`Remove ${ct.ticker}`}
-                        className="ml-0.5 text-slate-500 hover:text-white transition-colors"
+                        className="ml-0.5 text-slate-500 transition-colors hover:text-white"
                       >
                         <X className="h-3 w-3" />
                       </button>
@@ -152,7 +142,6 @@ export default function ComparisonModePanel({
             </div>
           )}
 
-          {/* Search input */}
           {canAdd && (
             <div className="relative">
               <div className="flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 focus-within:border-blue-500/50 focus-within:ring-1 focus-within:ring-blue-500/30">
@@ -173,7 +162,6 @@ export default function ComparisonModePanel({
                 )}
               </div>
 
-              {/* Autocomplete dropdown */}
               {dropdownOpen && results.length > 0 && (
                 <div
                   ref={dropdownRef}
@@ -190,7 +178,9 @@ export default function ComparisonModePanel({
                     >
                       <div>
                         <span className="font-semibold text-white">{r.ticker}</span>
-                        <span className="ml-2 text-slate-400 truncate max-w-[160px] inline-block align-bottom">{r.name}</span>
+                        <span className="ml-2 inline-block max-w-[160px] truncate align-bottom text-slate-400">
+                          {r.name}
+                        </span>
                       </div>
                       <span className="text-[10px] text-slate-500">{r.exchange}</span>
                     </button>
@@ -204,3 +194,4 @@ export default function ComparisonModePanel({
     </div>
   );
 }
+```

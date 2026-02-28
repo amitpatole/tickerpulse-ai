@@ -1,30 +1,51 @@
-FROM python:3.12-slim
+# ── Stage 1: Build — install Python dependencies ───────────────────────────
+FROM python:3.12-slim AS builder
 
 WORKDIR /app
 
-# Install system dependencies
+# Build deps for native extensions (lxml, etc.)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl \
+    gcc \
+    libxml2-dev \
+    libxslt-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements and install Python dependencies
-COPY backend/requirements.txt /app/backend/requirements.txt
-RUN pip install --no-cache-dir -r backend/requirements.txt
+COPY backend/requirements.txt .
+RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
 
-# Copy backend code
-COPY backend/ /app/backend/
+# ── Stage 2: Runtime image ──────────────────────────────────────────────────
+FROM python:3.12-slim AS runner
 
-# Copy core project files
-COPY templates/ /app/templates/
+WORKDIR /app
 
-# Create data and logs directories
-RUN mkdir -p /app/data /app/data/logs
+# Runtime shared libraries required by lxml
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libxml2 \
+    libxslt1.1 \
+    && rm -rf /var/lib/apt/lists/*
 
-# Set environment
-ENV PYTHONPATH=/app
-ENV DB_PATH=/app/data/stock_news.db
-ENV LOG_DIR=/app/data/logs
+COPY --from=builder /install /usr/local
+COPY backend/ ./backend/
+
+RUN useradd -m appuser \
+    && mkdir -p /data \
+    && chown -R appuser:appuser /app /data
+
+USER appuser
+
+ENV PYTHONPATH=/app \
+    FLASK_APP=backend.app:create_app \
+    FLASK_PORT=5000 \
+    FLASK_DEBUG=false \
+    DB_PATH=/data/stock_news.db
 
 EXPOSE 5000
 
-CMD ["python", "-m", "backend.app"]
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+  CMD python -c \
+    "import urllib.request; urllib.request.urlopen('http://localhost:5000/api/health')" \
+    || exit 1
+
+CMD ["python", "-m", "flask", "run", \
+     "--host=0.0.0.0", "--port=5000", \
+     "--without-debugger", "--no-reload"]

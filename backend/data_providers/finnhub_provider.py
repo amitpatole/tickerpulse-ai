@@ -9,7 +9,7 @@ API key required -- get a free key at https://finnhub.io/register
 
 import logging
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional
 
 import requests
@@ -94,7 +94,7 @@ class FinnhubProvider(DataProvider):
         try:
             resp = self.session.get(url, params=params, timeout=10)
             self._request_count += 1
-            self._last_request_time = datetime.now()
+            self._last_request_time = datetime.now(timezone.utc)
             self._track_request()
             if resp.status_code == 200:
                 return resp.json()
@@ -133,7 +133,8 @@ class FinnhubProvider(DataProvider):
             high=high,
             low=low,
             volume=0,  # Finnhub /quote does not include volume
-            timestamp=datetime.fromtimestamp(ts),
+            # Finnhub 't' is a Unix timestamp in UTC seconds
+            timestamp=datetime.fromtimestamp(ts, tz=timezone.utc),
             currency='USD',
             change=round(change, 4),
             change_percent=round(change_pct, 4),

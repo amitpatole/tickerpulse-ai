@@ -1,3 +1,4 @@
+```python
 """
 StockPulse AI v3.0 - Download Tracker Agent
 Monitors GitHub repository traffic (clones/downloads) via GitHub API.
@@ -14,7 +15,7 @@ import requests
 
 from backend.agents.base import AgentConfig, AgentResult, BaseAgent
 from backend.config import Config
-from backend.database import get_db_connection
+from backend.database import batch_insert, pooled_session
 
 logger = logging.getLogger(__name__)
 
@@ -162,26 +163,38 @@ class DownloadTrackerAgent(BaseAgent):
             return None
 
     def _store_download_stats(
-        self, 
-        clone_data: Dict, 
-        repo_owner: str, 
-        repo_name: str
+        self,
+        clone_data: Dict[str, Any],
+        repo_owner: str,
+        repo_name: str,
     ) -> int:
-        """Store download statistics in the database.
-        
+        """Store download statistics in the database using pooled connection.
+
+        Aggregate totals are written as a single INSERT; daily breakdowns are
+        batched with a single ``executemany`` call instead of N individual
+        INSERT OR REPLACE statements.
+
         Returns:
-            Number of data points stored
+            Number of daily data points stored.
         """
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        stored_count = 0
-        
-        try:
-            # Store aggregate stats
-            total_uniques = clone_data.get("uniques", 0)
-            total_count = clone_data.get("count", 0)
-            
-            cursor.execute(
+        now = datetime.utcnow()
+        total_uniques: int = clone_data.get("uniques", 0)
+        total_count: int = clone_data.get("count", 0)
+
+        daily_rows: List[Dict[str, Any]] = [
+            {
+                "repo_owner": repo_owner,
+                "repo_name": repo_name,
+                "date": day.get("timestamp", "")[:10],  # YYYY-MM-DD
+                "clones": day.get("count", 0),
+                "unique_clones": day.get("uniques", 0),
+            }
+            for day in clone_data.get("clones", [])
+            if day.get("timestamp")
+        ]
+
+        with pooled_session() as conn:
+            conn.execute(
                 """
                 INSERT INTO download_stats (
                     repo_owner, repo_name, total_clones, unique_clones,
@@ -193,43 +206,17 @@ class DownloadTrackerAgent(BaseAgent):
                     repo_name,
                     total_count,
                     total_uniques,
-                    (datetime.utcnow() - timedelta(days=14)).isoformat(),
-                    datetime.utcnow().isoformat(),
-                    datetime.utcnow().isoformat(),
-                )
+                    (now - timedelta(days=14)).isoformat(),
+                    now.isoformat(),
+                    now.isoformat(),
+                ),
             )
-            
-            # Store daily breakdown
-            for day_data in clone_data.get("clones", []):
-                timestamp = day_data.get("timestamp", "")
-                count = day_data.get("count", 0)
-                uniques = day_data.get("uniques", 0)
-                
-                # Use INSERT OR REPLACE to avoid duplicates
-                cursor.execute(
-                    """
-                    INSERT OR REPLACE INTO download_daily (
-                        repo_owner, repo_name, date, clones, unique_clones
-                    ) VALUES (?, ?, ?, ?, ?)
-                    """,
-                    (
-                        repo_owner,
-                        repo_name,
-                        timestamp[:10],  # Extract YYYY-MM-DD
-                        count,
-                        uniques,
-                    )
-                )
-                stored_count += 1
-            
-            conn.commit()
-            logger.info(f"Stored {stored_count} download data points for {repo_owner}/{repo_name}")
-            
-        except Exception as e:
-            conn.rollback()
-            logger.error(f"Failed to store download stats: {e}")
-            raise
-        finally:
-            conn.close()
-        
+            batch_insert(conn, "download_daily", daily_rows, on_conflict="REPLACE")
+
+        stored_count = len(daily_rows)
+        logger.info(
+            "Stored %d download data points for %s/%s",
+            stored_count, repo_owner, repo_name,
+        )
         return stored_count
+```

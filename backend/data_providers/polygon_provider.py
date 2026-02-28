@@ -11,7 +11,7 @@ Free tier: 5 calls/minute.  Paid plans start at $29/mo for unlimited.
 
 import logging
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional
 
 import requests
@@ -111,7 +111,7 @@ class PolygonProvider(DataProvider):
         try:
             resp = self.session.get(url, params=params, timeout=10)
             self._request_count += 1
-            self._last_request_time = datetime.now()
+            self._last_request_time = datetime.now(timezone.utc)
             self._track_request()
             if resp.status_code == 200:
                 return resp.json()
@@ -137,8 +137,8 @@ class PolygonProvider(DataProvider):
                     ticker=ticker,
                     multiplier=1,
                     timespan='day',
-                    from_=(datetime.now() - timedelta(days=5)).strftime('%Y-%m-%d'),
-                    to=datetime.now().strftime('%Y-%m-%d'),
+                    from_=(datetime.now(timezone.utc) - timedelta(days=5)).strftime('%Y-%m-%d'),
+                    to=datetime.now(timezone.utc).strftime('%Y-%m-%d'),
                     limit=5,
                 ))
                 if aggs:
@@ -153,7 +153,8 @@ class PolygonProvider(DataProvider):
                         high=latest.high,
                         low=latest.low,
                         volume=int(latest.volume),
-                        timestamp=datetime.fromtimestamp(latest.timestamp / 1000),
+                        # Polygon timestamps are milliseconds UTC
+                        timestamp=datetime.fromtimestamp(latest.timestamp / 1000, tz=timezone.utc),
                         currency='USD',
                         change=round(change, 4),
                         change_percent=round(change_pct, 4),
@@ -176,15 +177,16 @@ class PolygonProvider(DataProvider):
                     high=price,
                     low=price,
                     volume=int(trade.get('s', 0)),
-                    timestamp=datetime.fromtimestamp(trade.get('t', time.time()) / 1e9)
-                             if trade.get('t', 0) > 1e12 else datetime.now(),
+                    # Polygon last-trade 't' is nanoseconds UTC when > 1e12
+                    timestamp=datetime.fromtimestamp(trade.get('t', time.time()) / 1e9, tz=timezone.utc)
+                             if trade.get('t', 0) > 1e12 else datetime.now(timezone.utc),
                     currency='USD',
                     source='polygon',
                 )
 
         # -- Another fallback: previous day aggs --
-        yesterday = (datetime.now() - timedelta(days=5)).strftime('%Y-%m-%d')
-        today = datetime.now().strftime('%Y-%m-%d')
+        yesterday = (datetime.now(timezone.utc) - timedelta(days=5)).strftime('%Y-%m-%d')
+        today = datetime.now(timezone.utc).strftime('%Y-%m-%d')
         data = self._get(f'/v2/aggs/ticker/{ticker}/range/1/day/{yesterday}/{today}',
                          {'limit': 5, 'sort': 'desc'})
         if data and data.get('results'):
@@ -196,7 +198,8 @@ class PolygonProvider(DataProvider):
                 high=bar['h'],
                 low=bar['l'],
                 volume=int(bar.get('v', 0)),
-                timestamp=datetime.fromtimestamp(bar['t'] / 1000),
+                # Polygon agg 't' is milliseconds UTC
+                timestamp=datetime.fromtimestamp(bar['t'] / 1000, tz=timezone.utc),
                 currency='USD',
                 source='polygon',
             )
@@ -207,8 +210,8 @@ class PolygonProvider(DataProvider):
         """Return OHLCV bars for *ticker* over *period*."""
         ticker = ticker.upper()
         multiplier, timespan, days_back = _PERIOD_MAP.get(period, (1, 'day', 30))
-        from_date = (datetime.now() - timedelta(days=days_back)).strftime('%Y-%m-%d')
-        to_date = datetime.now().strftime('%Y-%m-%d')
+        from_date = (datetime.now(timezone.utc) - timedelta(days=days_back)).strftime('%Y-%m-%d')
+        to_date = datetime.now(timezone.utc).strftime('%Y-%m-%d')
 
         # -- Try official client first --
         if self._client and HAS_POLYGON_LIB:

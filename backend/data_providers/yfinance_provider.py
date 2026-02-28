@@ -11,7 +11,7 @@ No API key required.
 
 import logging
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional
 
 import requests
@@ -103,7 +103,7 @@ class YFinanceProvider(DataProvider):
         try:
             resp = self.session.get(url, params=params, timeout=10)
             self._request_count += 1
-            self._last_request_time = datetime.now()
+            self._last_request_time = datetime.now(timezone.utc)
             self._track_request()
             if resp.status_code == 200:
                 data = resp.json()
@@ -192,7 +192,10 @@ class YFinanceProvider(DataProvider):
                         high=highs[idx] if highs[idx] is not None else price,
                         low=lows[idx] if lows[idx] is not None else price,
                         volume=int(volumes[idx] or 0),
-                        timestamp=datetime.fromtimestamp(timestamps[idx]) if timestamps else datetime.now(),
+                        # Yahoo Finance returns Unix timestamps in UTC; use timezone.utc
+                        # so the datetime is locale-independent across all server timezones.
+                        timestamp=datetime.fromtimestamp(timestamps[idx], tz=timezone.utc)
+                                  if timestamps else datetime.now(timezone.utc),
                         currency=currency,
                         change=round(change, 4),
                         change_percent=round(change_pct, 4),
@@ -235,7 +238,7 @@ class YFinanceProvider(DataProvider):
                     high=float(high_),
                     low=float(low_),
                     volume=vol,
-                    timestamp=datetime.now(),
+                    timestamp=datetime.now(timezone.utc),
                     currency=currency,
                     change=round(change, 4),
                     change_percent=round(change_pct, 4),
