@@ -1,3 +1,4 @@
+```python
 """
 TickerPulse AI v3.0 - Central Configuration
 All settings are driven by environment variables with sensible defaults.
@@ -116,6 +117,15 @@ class Config:
     DAILY_BUDGET_WARNING = float(os.getenv('DAILY_BUDGET_WARNING', 75.0))
 
     # -------------------------------------------------------------------------
+    # Database connection pool
+    # -------------------------------------------------------------------------
+    # Number of SQLite connections kept alive in the process-wide pool.
+    # Increase if you see "DB pool exhausted" errors under high concurrency.
+    DB_POOL_SIZE: int = int(os.getenv('DB_POOL_SIZE', 5))
+    # Seconds to wait for a free connection before raising RuntimeError.
+    DB_POOL_TIMEOUT: float = float(os.getenv('DB_POOL_TIMEOUT', 10.0))
+
+    # -------------------------------------------------------------------------
     # Rate limiting
     # -------------------------------------------------------------------------
     RATE_LIMIT_DEFAULT = os.getenv('RATE_LIMIT_DEFAULT', '60/minute')
@@ -172,3 +182,4 @@ class Config:
     # Set WS_PRICE_BROADCAST=false to disable WS broadcasting without stopping
     # the SSE price_update feed.
     WS_PRICE_BROADCAST: bool = os.getenv('WS_PRICE_BROADCAST', 'true').lower() == 'true'
+```

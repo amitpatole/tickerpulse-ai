@@ -1,3 +1,4 @@
+```python
 """
 TickerPulse AI v3.0 - Price Refresh Job
 Periodic APScheduler job that fetches live prices for the active watchlist,
@@ -26,13 +27,12 @@ def _get_refresh_interval_from_db() -> int:
     Returns 0 when manual mode is explicitly stored.
     """
     from backend.config import Config
-    from backend.database import get_db_connection
+    from backend.database import pooled_session
     try:
-        conn = get_db_connection()
-        row = conn.execute(
-            "SELECT value FROM settings WHERE key = 'price_refresh_interval'"
-        ).fetchone()
-        conn.close()
+        with pooled_session() as conn:
+            row = conn.execute(
+                "SELECT value FROM settings WHERE key = 'price_refresh_interval'"
+            ).fetchone()
         if row is not None:
             return int(row['value'])
     except Exception as exc:
@@ -77,13 +77,12 @@ def _fetch_price(ticker: str) -> Optional[dict]:
 
 def _get_watchlist_tickers() -> list[str]:
     """Return all active tickers from the stocks table."""
-    from backend.database import get_db_connection
+    from backend.database import pooled_session
     try:
-        conn = get_db_connection()
-        rows = conn.execute(
-            "SELECT ticker FROM stocks WHERE active = 1"
-        ).fetchall()
-        conn.close()
+        with pooled_session() as conn:
+            rows = conn.execute(
+                "SELECT ticker FROM stocks WHERE active = 1"
+            ).fetchall()
         return [row['ticker'] for row in rows]
     except Exception as exc:
         logger.error("price_refresh: could not load watchlist tickers: %s", exc)
@@ -95,41 +94,33 @@ def _persist_prices(prices: dict) -> None:
 
     Only updates current_price, price_change, price_change_pct, and updated_at.
     Does NOT touch rating, score, confidence, or any AI analysis field.
-    Uses INSERT OR IGNORE to create a stub row for new tickers so that a full
-    AI analysis cycle is not required before live prices appear on the dashboard.
+    Uses batch_upsert to INSERT-or-UPDATE all tickers in a single executemany
+    call, cutting 2*N round-trips down to 1.
     """
     if not prices:
         return
-    from backend.database import get_db_connection
+    from backend.database import pooled_session, batch_upsert
     try:
-        conn = get_db_connection()
         now_iso = datetime.now(timezone.utc).isoformat()
-        for ticker, data in prices.items():
-            # Ensure a row exists (may be absent if AI job has never run)
-            conn.execute(
-                "INSERT OR IGNORE INTO ai_ratings (ticker, rating, score, confidence)"
-                " VALUES (?, 'hold', 0, 0)",
-                (ticker,),
+        rows = [
+            {
+                'ticker': ticker,
+                'rating': 'hold',
+                'score': 0,
+                'confidence': 0,
+                'current_price': data['price'],
+                'price_change': data['change'],
+                'price_change_pct': data['change_pct'],
+                'updated_at': now_iso,
+            }
+            for ticker, data in prices.items()
+        ]
+        with pooled_session() as conn:
+            batch_upsert(
+                conn, 'ai_ratings', rows,
+                conflict_cols=['ticker'],
+                update_cols=['current_price', 'price_change', 'price_change_pct', 'updated_at'],
             )
-            conn.execute(
-                """
-                UPDATE ai_ratings
-                   SET current_price    = ?,
-                       price_change     = ?,
-                       price_change_pct = ?,
-                       updated_at       = ?
-                 WHERE ticker = ?
-                """,
-                (
-                    data['price'],
-                    data['change'],
-                    data['change_pct'],
-                    now_iso,
-                    ticker,
-                ),
-            )
-        conn.commit()
-        conn.close()
     except Exception as exc:
         logger.error("price_refresh: DB persist error: %s", exc)
 
@@ -224,3 +215,4 @@ def run_price_refresh() -> None:
         logger.debug("price_refresh: alert_manager not available, skipping alert eval")
     except Exception as exc:
         logger.error("price_refresh: alert evaluation error: %s", exc)
+```

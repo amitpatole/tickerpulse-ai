@@ -9,12 +9,11 @@ Idempotent: repeated runs do not duplicate rows (UNIQUE on ticker + earnings_dat
 """
 
 import logging
-import sqlite3
 from datetime import datetime, timezone
 from typing import Optional
 
-from backend.config import Config
 from backend.jobs._helpers import _get_watchlist, job_timer
+from backend.database import pooled_session, batch_upsert_earnings
 
 logger = logging.getLogger(__name__)
 
@@ -177,72 +176,22 @@ def _parse_earnings_from_yfinance(ticker: str) -> list:
 def _upsert_earnings_events(events: list) -> int:
     """Upsert earnings events into the database.
 
-    Uses ON CONFLICT semantics via the UNIQUE(ticker, earnings_date) constraint.
-    Existing eps_actual / revenue_actual values are preserved when the incoming
-    row has NULL (COALESCE).
+    Uses a single ``executemany`` via :func:`batch_upsert_earnings`.
+    Existing ``eps_actual`` / ``revenue_actual`` values are preserved when the
+    incoming row has NULL (COALESCE in the ON CONFLICT clause).
 
-    Returns the number of rows successfully written.
+    Returns the number of rows written.
     """
     if not events:
         return 0
 
-    now = datetime.now(timezone.utc).isoformat()
-    count = 0
-
     try:
-        conn = sqlite3.connect(Config.DB_PATH)
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-
-        for event in events:
-            try:
-                cursor.execute(
-                    """
-                    INSERT INTO earnings_events
-                        (ticker, company, earnings_date, time_of_day,
-                         eps_estimate, eps_actual, revenue_estimate, revenue_actual,
-                         fiscal_quarter, fetched_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(ticker, earnings_date) DO UPDATE SET
-                        company          = excluded.company,
-                        time_of_day      = COALESCE(excluded.time_of_day,      earnings_events.time_of_day),
-                        eps_estimate     = COALESCE(excluded.eps_estimate,     earnings_events.eps_estimate),
-                        eps_actual       = COALESCE(excluded.eps_actual,       earnings_events.eps_actual),
-                        revenue_estimate = COALESCE(excluded.revenue_estimate, earnings_events.revenue_estimate),
-                        revenue_actual   = COALESCE(excluded.revenue_actual,   earnings_events.revenue_actual),
-                        fiscal_quarter   = COALESCE(excluded.fiscal_quarter,   earnings_events.fiscal_quarter),
-                        fetched_at       = excluded.fetched_at,
-                        updated_at       = excluded.updated_at
-                    """,
-                    (
-                        event['ticker'],
-                        event.get('company'),
-                        event['earnings_date'],
-                        event.get('time_of_day'),
-                        event.get('eps_estimate'),
-                        event.get('eps_actual'),
-                        event.get('revenue_estimate'),
-                        event.get('revenue_actual'),
-                        event.get('fiscal_quarter'),
-                        now,
-                        now,
-                    ),
-                )
-                count += 1
-            except Exception as row_exc:
-                logger.debug(
-                    "Failed to upsert earnings for %s on %s: %s",
-                    event.get('ticker'),
-                    event.get('earnings_date'),
-                    row_exc,
-                )
-
-        conn.commit()
-        conn.close()
+        now = datetime.now(timezone.utc).isoformat()
+        with pooled_session() as conn:
+            return batch_upsert_earnings(conn, events, fetched_at=now)
     except Exception as exc:
         logger.error("DB error during earnings upsert: %s", exc)
-
-    return count
+        return 0
 
 
 # ---------------------------------------------------------------------------
