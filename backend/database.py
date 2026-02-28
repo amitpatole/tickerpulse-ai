@@ -1,5 +1,6 @@
 ```python
 
+
 """
 TickerPulse AI v3.0 - Database Connection Manager
 Thread-safe SQLite helper with context-manager support and table initialisation.
@@ -96,10 +97,7 @@ class ConnectionPool:
                 self._condition.notify()
 
     def stats(self) -> Dict[str, Any]:
-        """Return a snapshot of current pool utilisation.
-
-        Returns ``{size, available, in_use, timeout_s}``.  Thread-safe.
-        """
+        """Return a snapshot of current pool utilisation."""
         with self._lock:
             available = len(self._available)
             in_use = self._in_use
@@ -111,11 +109,7 @@ class ConnectionPool:
         }
 
     def close_all(self) -> None:
-        """Close every idle connection. Call once at process shutdown.
-
-        In-flight connections (currently acquired) are left open; the OS will
-        reclaim them when the process exits.  Safe to call multiple times.
-        """
+        """Close every idle connection. Call once at process shutdown."""
         with self._condition:
             closed = 0
             while self._available:
@@ -149,11 +143,7 @@ def _get_pool() -> "ConnectionPool":
 
 
 def get_pool() -> "ConnectionPool":
-    """Public alias for the process-wide ConnectionPool.
-
-    Use this from application startup code to pre-warm the pool and to obtain
-    a handle for teardown (``get_pool().close_all()``).
-    """
+    """Public alias for the process-wide ConnectionPool."""
     return _get_pool()
 
 
@@ -164,8 +154,7 @@ def get_pool() -> "ConnectionPool":
 def get_db_connection(db_path: Optional[str] = None) -> sqlite3.Connection:
     """Return a new SQLite connection with Row factory enabled.
 
-    Deprecated: prefer ``pooled_session()`` or ``db_session()`` for automatic
-    resource management.  Preserved for legacy callers.
+    Deprecated: prefer ``pooled_session()`` or ``db_session()``.
     """
     path = db_path or Config.DB_PATH
     conn = sqlite3.connect(path, check_same_thread=False)
@@ -203,8 +192,7 @@ def db_session(db_path: Optional[str] = None, immediate: bool = False):
     When *db_path* is provided a dedicated connection is opened to that path
     and closed on exit (legacy path for ``ai_analytics.py``).
 
-    *immediate=True* issues ``BEGIN IMMEDIATE`` before yielding, acquiring a
-    write-lock upfront to prevent TOCTOU races in concurrent writes.
+    *immediate=True* issues ``BEGIN IMMEDIATE`` before yielding.
     """
     if db_path is not None:
         conn = get_db_connection(db_path)
@@ -333,13 +321,6 @@ def batch_delete(
 ) -> int:
     """Delete rows where *where_col* matches any value in *values*.
 
-    Parameters
-    ----------
-    conn:      Open connection from ``pooled_session`` / ``db_session``.
-    table:     Target table name (trusted static strings only).
-    where_col: Column to match against *values*.
-    values:    Sequence of values to delete; empty sequence is a no-op.
-
     Returns the cursor ``rowcount``.
     """
     if not values:
@@ -355,11 +336,7 @@ def batch_upsert_earnings(
     events: List[Dict[str, Any]],
     fetched_at: Optional[str] = None,
 ) -> int:
-    """Upsert earnings events, preserving existing ``*_actual`` values on NULL.
-
-    Uses ``COALESCE`` so confirmed EPS / revenue actuals are never overwritten
-    by a subsequent yfinance fetch that returns NULL for those fields.
-    """
+    """Upsert earnings events, preserving existing ``*_actual`` values on NULL."""
     if not events:
         return 0
     now = fetched_at or datetime.now(timezone.utc).isoformat()
@@ -522,7 +499,6 @@ _NEW_TABLES_SQL = [
         created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
     """,
-    # ai_ratings includes price columns; migration below handles existing DBs
     """
     CREATE TABLE IF NOT EXISTS ai_ratings (
         id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -741,6 +717,23 @@ _NEW_TABLES_SQL = [
         updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
     )
     """,
+    """
+    CREATE TABLE IF NOT EXISTS model_comparisons (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        ticker      TEXT NOT NULL,
+        run_id      TEXT NOT NULL,
+        provider    TEXT NOT NULL,
+        model       TEXT NOT NULL,
+        rating      TEXT,
+        score       REAL,
+        confidence  REAL,
+        summary     TEXT,
+        tokens_used INTEGER,
+        duration_ms INTEGER,
+        error       TEXT,
+        created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+    """,
 ]
 
 _INDEXES_SQL = [
@@ -787,8 +780,11 @@ _INDEXES_SQL = [
     "CREATE INDEX IF NOT EXISTS idx_perf_metrics_source         ON performance_metrics (source, source_id, recorded_at DESC)",
     "CREATE INDEX IF NOT EXISTS idx_agent_schedules_job_id      ON agent_schedules (job_id)",
     "CREATE INDEX IF NOT EXISTS idx_agent_schedules_enabled     ON agent_schedules (enabled)",
-    # Covering index for /api/metrics/agents hot path: WHERE started_at >= ? GROUP BY agent_name
+    # Covering index for /api/metrics/agents hot path
     "CREATE INDEX IF NOT EXISTS idx_agent_runs_agent_started    ON agent_runs (agent_name, started_at DESC)",
+    # Multi-model comparison indexes
+    "CREATE INDEX IF NOT EXISTS idx_mc_ticker_run               ON model_comparisons (ticker, run_id)",
+    "CREATE INDEX IF NOT EXISTS idx_mc_created                  ON model_comparisons (created_at DESC)",
 ]
 
 
@@ -797,11 +793,9 @@ _INDEXES_SQL = [
 # ---------------------------------------------------------------------------
 
 def _migrate_agent_runs(cursor) -> None:
-    """Migrate agent_runs from v3.0.0 schema (tokens_used) to v3.0.1 (tokens_input/tokens_output)."""
     cols = {row[1] for row in cursor.execute("PRAGMA table_info(agent_runs)").fetchall()}
     if not cols:
         return
-
     migrations = []
     if 'tokens_input' not in cols:
         migrations.append("ALTER TABLE agent_runs ADD COLUMN tokens_input INTEGER DEFAULT 0")
@@ -811,17 +805,14 @@ def _migrate_agent_runs(cursor) -> None:
         migrations.append("ALTER TABLE agent_runs ADD COLUMN error TEXT")
     if 'metadata' not in cols:
         migrations.append("ALTER TABLE agent_runs ADD COLUMN metadata TEXT")
-
     if 'tokens_used' in cols and 'tokens_input' not in cols:
         migrations.append("UPDATE agent_runs SET tokens_input = tokens_used WHERE tokens_used > 0")
-
     for sql in migrations:
         cursor.execute(sql)
         logger.info(f"Migration applied: {sql}")
 
 
 def _migrate_news(cursor) -> None:
-    """Add engagement_score column to news table if missing."""
     cols = {row[1] for row in cursor.execute("PRAGMA table_info(news)").fetchall()}
     if not cols:
         return
@@ -831,7 +822,6 @@ def _migrate_news(cursor) -> None:
 
 
 def _migrate_watchlist_stocks(cursor) -> None:
-    """Add position column to watchlist_stocks if missing and initialise positions."""
     cols = {row[1] for row in cursor.execute("PRAGMA table_info(watchlist_stocks)").fetchall()}
     if not cols:
         return
@@ -854,7 +844,6 @@ def _migrate_watchlist_stocks(cursor) -> None:
 
 
 def _migrate_data_providers_config(cursor) -> None:
-    """Add rate limit tracking columns to data_providers_config if missing."""
     cols = {row[1] for row in cursor.execute("PRAGMA table_info(data_providers_config)").fetchall()}
     if not cols:
         return
@@ -871,7 +860,6 @@ def _migrate_data_providers_config(cursor) -> None:
 
 
 def _migrate_watchlists(cursor) -> None:
-    """Add sort_order column to watchlists table if missing."""
     cols = {row[1] for row in cursor.execute("PRAGMA table_info(watchlists)").fetchall()}
     if not cols:
         return
@@ -883,7 +871,6 @@ def _migrate_watchlists(cursor) -> None:
 
 
 def _migrate_price_alerts(cursor) -> None:
-    """Add missing columns to price_alerts table."""
     cols = {row[1] for row in cursor.execute("PRAGMA table_info(price_alerts)").fetchall()}
     if not cols:
         return
@@ -910,7 +897,6 @@ def _migrate_price_alerts(cursor) -> None:
 
 
 def _migrate_error_log(cursor) -> None:
-    """Add session_id column to error_log if missing (schema v3.1)."""
     cols = {row[1] for row in cursor.execute("PRAGMA table_info(error_log)").fetchall()}
     if not cols:
         return
@@ -920,7 +906,6 @@ def _migrate_error_log(cursor) -> None:
 
 
 def _migrate_earnings_events(cursor) -> None:
-    """Add eps_actual, revenue_estimate, revenue_actual, updated_at to earnings_events if missing."""
     cols = {row[1] for row in cursor.execute("PRAGMA table_info(earnings_events)").fetchall()}
     if not cols:
         return
@@ -941,15 +926,9 @@ def _migrate_earnings_events(cursor) -> None:
 
 
 def _migrate_ai_ratings_price_columns(cursor) -> None:
-    """Add live price columns to ai_ratings if missing.
-
-    These three columns are written by the price_refresh job on every cycle.
-    Existing rows keep NULL until the first price refresh runs.
-    Score and confidence columns are never touched by this migration.
-    """
     cols = {row[1] for row in cursor.execute("PRAGMA table_info(ai_ratings)").fetchall()}
     if not cols:
-        return  # table doesn't exist yet; CREATE TABLE will handle it
+        return
     migrations = []
     if 'current_price' not in cols:
         migrations.append("ALTER TABLE ai_ratings ADD COLUMN current_price REAL")
@@ -963,7 +942,6 @@ def _migrate_ai_ratings_price_columns(cursor) -> None:
 
 
 def _migrate_comparison_runs(cursor) -> None:
-    """Add template column to comparison_runs if missing (schema v3.3)."""
     cols = {row[1] for row in cursor.execute("PRAGMA table_info(comparison_runs)").fetchall()}
     if not cols:
         return
@@ -975,7 +953,7 @@ def _migrate_comparison_runs(cursor) -> None:
 
 
 def init_all_tables(db_path: str | None = None) -> None:
-    """Create every table (existing + new v3.0) and apply indexes.
+    """Create every table and apply indexes.
 
     Safe to call multiple times -- all statements use
     ``CREATE TABLE IF NOT EXISTS`` / ``CREATE INDEX IF NOT EXISTS``.
@@ -991,7 +969,6 @@ def init_all_tables(db_path: str | None = None) -> None:
             for sql in _EXISTING_TABLES_SQL:
                 cursor.execute(sql)
 
-            # Migrate existing tables before CREATE TABLE (which is a no-op if table exists)
             _migrate_agent_runs(cursor)
             _migrate_news(cursor)
             _migrate_watchlist_stocks(cursor)
@@ -1009,14 +986,12 @@ def init_all_tables(db_path: str | None = None) -> None:
             for sql in _INDEXES_SQL:
                 cursor.execute(sql)
 
-            # Seed default watchlist idempotently
             cursor.execute("INSERT OR IGNORE INTO watchlists (id, name) VALUES (1, 'My Watchlist')")
             cursor.execute(
                 "INSERT OR IGNORE INTO watchlist_stocks (watchlist_id, ticker) "
                 "SELECT 1, ticker FROM stocks WHERE active = 1"
             )
 
-            # Update query planner statistics for all tables
             conn.execute("ANALYZE")
 
         logger.info("All database tables and indexes initialised successfully")

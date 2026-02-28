@@ -1,5 +1,6 @@
 ```python
 
+
 """
 TickerPulse AI v3.0 - Price Refresh Job
 Periodic APScheduler job that fetches live prices for the active watchlist,
@@ -81,9 +82,8 @@ def _fetch_prices_parallel(tickers: list, max_workers: int = 0) -> dict:
     """Fetch prices for all tickers in parallel using ThreadPoolExecutor.
 
     Each ticker is fetched independently via ``_fetch_price()``.  Partial
-    failures (individual tickers raising or returning None) are silently
-    omitted — mirroring the behaviour of the per-ticker sequential loop it
-    replaces.
+    failures are silently omitted — mirroring the behaviour of the per-ticker
+    sequential loop it replaces.
 
     Parameters
     ----------

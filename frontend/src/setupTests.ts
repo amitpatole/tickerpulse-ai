@@ -1,4 +1,3 @@
-```ts
 import '@testing-library/jest-dom'
 import { vi } from 'vitest'
 
@@ -8,4 +7,3 @@ import { vi } from 'vitest'
 // the equivalent Vitest API without requiring test-file modifications.
 // Type declarations are provided by @types/jest (auto-included as a dep of jest).
 ;(globalThis as any).jest = vi
-```
