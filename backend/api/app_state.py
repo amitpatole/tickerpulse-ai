@@ -1,3 +1,4 @@
+```python
 """
 TickerPulse AI v3.0 — App State API
 
@@ -9,6 +10,12 @@ import json
 import logging
 
 from flask import Blueprint, jsonify, request
+
+from backend.core.error_handlers import (
+    DatabaseError,
+    ValidationError,
+    handle_api_errors,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -25,24 +32,11 @@ def get_state_manager():
     return StateManager()
 
 
-# ---------------------------------------------------------------------------
-# GET /api/app-state
-# ---------------------------------------------------------------------------
-
-
 @app_state_bp.route("/api/app-state", methods=["GET"])
 def get_app_state():
     """Return all persisted UI state.
 
     Returns an empty dict on database error so the UI never hard-fails.
-    ---
-    tags:
-      - System
-    responses:
-      200:
-        description: Flat dict of all stored state keys → values.
-        schema:
-          type: object
     """
     try:
         manager = get_state_manager()
@@ -53,12 +47,8 @@ def get_app_state():
         return jsonify({}), 200
 
 
-# ---------------------------------------------------------------------------
-# PATCH /api/app-state
-# ---------------------------------------------------------------------------
-
-
 @app_state_bp.route("/api/app-state", methods=["PATCH"])
+@handle_api_errors
 def patch_app_state():
     """Upsert or delete state keys.
 
@@ -73,42 +63,34 @@ def patch_app_state():
     at 16 KB.
 
     Returns ``{"ok": true}`` on success.
-    ---
-    tags:
-      - System
-    parameters:
-      - in: body
-        name: body
-        required: true
-        schema:
-          type: object
-    responses:
-      200:
-        description: State persisted successfully.
-      400:
-        description: Invalid request body.
-      500:
-        description: Failed to persist one or more state keys.
     """
-    # Pre-parse total size guard (defense in depth — avoids parsing huge bodies)
+    # Pre-parse total size guard
     if request.content_length and request.content_length > _MAX_BODY_BYTES:
-        return jsonify({"error": "Payload exceeds maximum allowed size (16 KB)"}), 400
+        raise ValidationError(
+            "Payload exceeds maximum allowed size (16 KB)",
+            error_code="PAYLOAD_TOO_LARGE",
+            status_code=413,
+        )
 
     body = request.get_json(silent=True)
 
     if body is None:
-        return jsonify({"error": "Request body must be valid JSON"}), 400
+        raise ValidationError("Request body must be valid JSON")
 
     if not isinstance(body, dict):
-        return jsonify({"error": "Request body must be a JSON object"}), 400
+        raise ValidationError("Request body must be a JSON object")
 
     if len(body) == 0:
-        return jsonify({"error": "Request body must not be empty"}), 400
+        raise ValidationError("Request body must not be empty")
 
     # Post-parse total size guard (catches cases where content_length wasn't set)
     raw = request.get_data()
     if len(raw) > _MAX_BODY_BYTES:
-        return jsonify({"error": "Payload exceeds maximum allowed size (16 KB)"}), 400
+        raise ValidationError(
+            "Payload exceeds maximum allowed size (16 KB)",
+            error_code="PAYLOAD_TOO_LARGE",
+            status_code=413,
+        )
 
     # Per-value type and size validation
     for key, value in body.items():
@@ -116,26 +98,21 @@ def patch_app_state():
             continue  # null → delete; always valid
 
         if not isinstance(value, dict):
-            return jsonify(
-                {"error": f"Value for key '{key}' must be a JSON object or null"}
-            ), 400
+            raise ValidationError(
+                f"Value for key '{key}' must be a JSON object or null"
+            )
 
         try:
             serialized_size = len(json.dumps(value).encode())
         except (TypeError, ValueError):
-            return jsonify(
-                {"error": f"Value for key '{key}' could not be serialized"}
-            ), 400
+            raise ValidationError(f"Value for key '{key}' could not be serialized")
 
         if serialized_size > _MAX_VALUE_BYTES:
-            return jsonify(
-                {
-                    "error": (
-                        f"Value for key '{key}' exceeds maximum value size "
-                        f"({serialized_size} bytes, limit is {_MAX_VALUE_BYTES} bytes)"
-                    )
-                }
-            ), 400
+            raise ValidationError(
+                f"Value for key '{key}' exceeds maximum value size "
+                f"({serialized_size} bytes, limit is {_MAX_VALUE_BYTES} bytes)",
+                error_code="PAYLOAD_TOO_LARGE",
+            )
 
     # Persist all keys — collect failures so we report them together
     manager = get_state_manager()
@@ -154,8 +131,7 @@ def patch_app_state():
             )
 
     if failed_keys:
-        return jsonify(
-            {"error": f"Failed to save keys: {', '.join(failed_keys)}"}
-        ), 500
+        raise DatabaseError(f"Failed to save keys: {', '.join(failed_keys)}")
 
     return jsonify({"ok": True}), 200
+```
