@@ -1,3 +1,4 @@
+```python
 """
 TickerPulse AI v3.0 - Stocks API Routes
 Blueprint for stock management endpoints: list, add, remove, and search stocks.
@@ -10,6 +11,7 @@ from flask import Blueprint, jsonify, request
 
 from backend.core.stock_manager import get_all_stocks, add_stock, remove_stock, search_stock_ticker
 from backend.core.ai_analytics import StockAnalytics
+from backend.core.error_handlers import NotFoundError, ServiceUnavailableError
 from backend.database import get_db_connection
 
 logger = logging.getLogger(__name__)
@@ -103,7 +105,89 @@ _TIMEFRAME_MAP = {
     '3M': ('3mo', '1d'),
     '6M': ('6mo', '1d'),
     '1Y': ('1y', '1d'),
+    '5Y': ('5y', '1wk'),
+    'All': ('max', '1mo'),
 }
+
+
+def _fetch_candles(ticker: str, timeframe: str) -> list:
+    """Fetch OHLCV candlestick data for a ticker and timeframe.
+
+    Args:
+        ticker: Stock ticker symbol (already normalized to uppercase).
+        timeframe: One of the keys in _TIMEFRAME_MAP. Unknown keys default to 1M mapping.
+
+    Returns:
+        List of candle dicts with time, open, high, low, close, volume keys.
+        NaN close prices are silently skipped.
+
+    Raises:
+        NotFoundError: If the ticker has no price history for the given timeframe.
+        ServiceUnavailableError: If yfinance is not installed.
+    """
+    try:
+        import yfinance as yf
+    except ImportError:
+        raise ServiceUnavailableError("yfinance is not installed")
+
+    period, interval = _TIMEFRAME_MAP.get(timeframe, ('1mo', '1d'))
+
+    tk = yf.Ticker(ticker)
+    hist = tk.history(period=period, interval=interval)
+
+    if hist.empty:
+        raise NotFoundError(f"Ticker '{ticker}' not found or has no price history for {timeframe}")
+
+    candles = []
+    for ts, row in hist.iterrows():
+        try:
+            close = float(row['Close'])
+            if math.isnan(close):
+                continue
+        except (TypeError, ValueError):
+            continue
+        candles.append({
+            'time': int(ts.timestamp()),
+            'open': round(float(row['Open']), 4),
+            'high': round(float(row['High']), 4),
+            'low': round(float(row['Low']), 4),
+            'close': round(close, 4),
+            'volume': int(row.get('Volume', 0) or 0),
+        })
+
+    if not candles:
+        raise NotFoundError(f"Ticker '{ticker}' not found or has no price history for {timeframe}")
+
+    return candles
+
+
+@stocks_bp.route('/stocks/<ticker>/candles', methods=['GET'])
+def get_stock_candles(ticker):
+    """Return OHLCV candlestick data for a single ticker and timeframe.
+
+    Path Parameters:
+        ticker (str): Stock ticker symbol (e.g. 'AAPL', 'RELIANCE.NS').
+
+    Query Parameters:
+        timeframe (str, optional): One of 1D, 1W, 1M, 3M, 6M, 1Y, 5Y, All. Default 1M.
+
+    Returns:
+        JSON array of candle objects. Returns 404 for unknown tickers.
+    """
+    ticker = ticker.upper().strip()
+    timeframe = request.args.get('timeframe', '1M')
+
+    try:
+        candles = _fetch_candles(ticker, timeframe)
+        return jsonify(candles)
+    except NotFoundError as exc:
+        return jsonify({'error': str(exc)}), 404
+    except ServiceUnavailableError:
+        logger.error("yfinance unavailable when fetching candles for %s", ticker)
+        return jsonify({'error': 'data provider unavailable'}), 503
+    except Exception as exc:
+        logger.error("Error fetching candles for %s: %s", ticker, exc)
+        return jsonify({'error': 'ticker not found'}), 404
 
 
 @stocks_bp.route('/stocks/<ticker>/detail', methods=['GET'])
@@ -121,35 +205,21 @@ def get_stock_detail(ticker):
     """
     ticker = ticker.upper().strip()
     timeframe = request.args.get('timeframe', '1M')
-    period, interval = _TIMEFRAME_MAP.get(timeframe, ('1mo', '1d'))
+
+    try:
+        candles = _fetch_candles(ticker, timeframe)
+    except NotFoundError:
+        return jsonify({'error': 'ticker not found'}), 404
+    except ServiceUnavailableError:
+        logger.error("yfinance is not installed")
+        return jsonify({'error': 'data provider unavailable'}), 503
+    except Exception as exc:
+        logger.error("Error fetching stock detail for %s: %s", ticker, exc)
+        return jsonify({'error': 'ticker not found'}), 404
 
     try:
         import yfinance as yf
         tk = yf.Ticker(ticker)
-        hist = tk.history(period=period, interval=interval)
-
-        if hist.empty:
-            return jsonify({'error': 'ticker not found'}), 404
-
-        candles = []
-        for ts, row in hist.iterrows():
-            try:
-                close = float(row['Close'])
-                if math.isnan(close):
-                    continue
-            except (TypeError, ValueError):
-                continue
-            candles.append({
-                'time': int(ts.timestamp()),
-                'open': round(float(row['Open']), 4),
-                'high': round(float(row['High']), 4),
-                'low': round(float(row['Low']), 4),
-                'close': round(close, 4),
-                'volume': int(row.get('Volume', 0) or 0),
-            })
-
-        if not candles:
-            return jsonify({'error': 'ticker not found'}), 404
 
         # Fast quote fields
         fast_info = tk.fast_info
@@ -193,8 +263,8 @@ def get_stock_detail(ticker):
     except ImportError:
         logger.error("yfinance is not installed")
         return jsonify({'error': 'data provider unavailable'}), 503
-    except Exception as e:
-        logger.error(f"Error fetching stock detail for {ticker}: {e}")
+    except Exception as exc:
+        logger.error("Error fetching quote for %s: %s", ticker, exc)
         return jsonify({'error': 'ticker not found'}), 404
 
     # Technical indicators via ai_analytics
@@ -246,3 +316,4 @@ def search_stocks():
 
     results = search_stock_ticker(query)
     return jsonify(results)
+```
