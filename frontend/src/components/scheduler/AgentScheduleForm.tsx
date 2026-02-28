@@ -1,11 +1,13 @@
-```tsx
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { X, Clock, Loader2, AlertTriangle } from 'lucide-react';
 import { clsx } from 'clsx';
 import type { AgentSchedule } from '@/lib/types';
 import type { KnownAgent } from '@/lib/api';
+import { ApiError } from '@/lib/api';
+import type { FieldError as ApiFieldError } from '@/lib/api';
+import { FieldError } from '@/components/ui/FieldError';
 
 // ---------------------------------------------------------------------------
 // Schedule presets
@@ -62,10 +64,25 @@ export default function AgentScheduleForm({
   const [presetIdx, setPreset] = useState(0);
   const [saving, setSaving]    = useState(false);
   const [error, setError]      = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<ApiFieldError[]>([]);
+
+  // Guards against re-initializing the form after agents arrive asynchronously.
+  // Without this, a late agents fetch would overwrite jobId/label that the user
+  // has already started editing.
+  const initializedRef = useRef(false);
 
   // Populate form when modal opens
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      initializedRef.current = false;
+      return;
+    }
+    if (initializedRef.current) return;
+    // In create mode, defer until agents have loaded so we can default to agents[0].
+    if (!schedule && agents.length === 0) return;
+
+    initializedRef.current = true;
+
     if (schedule) {
       // Edit mode: populate from existing schedule
       setJobId(schedule.job_id);
@@ -83,11 +100,15 @@ export default function AgentScheduleForm({
       setPreset(0);
     }
     setError(null);
+    setFieldErrors([]);
   }, [open, schedule, agents]);
 
   if (!open) return null;
 
   const isEditing = schedule !== null;
+
+  const getFieldError = (field: string): string | undefined =>
+    fieldErrors.find((fe) => fe.field === field)?.message;
 
   const handleJobSelect = (id: string) => {
     // Auto-fill label when: it's empty (user cleared it) OR it still matches
@@ -111,6 +132,7 @@ export default function AgentScheduleForm({
     }
     setSaving(true);
     setError(null);
+    setFieldErrors([]);
     try {
       const preset = SCHEDULE_PRESETS[presetIdx];
       await onSave({
@@ -122,7 +144,12 @@ export default function AgentScheduleForm({
       });
       onClose();
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to save schedule.');
+      if (e instanceof ApiError && e.fieldErrors.length > 0) {
+        setFieldErrors(e.fieldErrors);
+        setError(e.message);
+      } else {
+        setError(e instanceof Error ? e.message : 'Failed to save schedule.');
+      }
     } finally {
       setSaving(false);
     }
@@ -177,6 +204,7 @@ export default function AgentScheduleForm({
               ))}
             </select>
           )}
+          <FieldError message={getFieldError('job_id')} id="field-error-job_id" />
           {!isEditing && agents.length === 0 && (
             <div
               data-testid="no-agents-notice"
@@ -205,7 +233,9 @@ export default function AgentScheduleForm({
             placeholder="Display name"
             className="w-full rounded-lg border border-slate-700/50 bg-slate-800 px-3 py-2 text-sm text-white placeholder-slate-600 focus:border-blue-500 focus:outline-none"
             aria-label="Schedule label"
+            aria-describedby={getFieldError('label') ? 'field-error-label' : undefined}
           />
+          <FieldError message={getFieldError('label')} id="field-error-label" />
         </div>
 
         {/* Description */}
@@ -238,6 +268,7 @@ export default function AgentScheduleForm({
               </option>
             ))}
           </select>
+          <FieldError message={getFieldError('trigger') ?? getFieldError('trigger_args')} id="field-error-trigger" />
         </div>
 
         {/* Preview */}
@@ -267,7 +298,7 @@ export default function AgentScheduleForm({
           </button>
           <button
             onClick={handleSave}
-            disabled={saving || (!isEditing && agents.length === 0)}
+            disabled={saving || (!isEditing && agents.length === 0) || !label.trim()}
             className={clsx(
               'flex flex-1 items-center justify-center gap-2 rounded-lg py-2 text-sm font-medium text-white transition-colors disabled:opacity-60',
               'bg-blue-600 hover:bg-blue-700'
@@ -286,4 +317,3 @@ export default function AgentScheduleForm({
     </div>
   );
 }
-```

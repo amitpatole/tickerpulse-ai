@@ -1,4 +1,3 @@
-```python
 """
 TickerPulse AI v3.0 - Research API Routes
 Blueprint for AI-generated research briefs.
@@ -15,6 +14,13 @@ from flask import Blueprint, jsonify, request, Response
 
 from backend.config import Config
 from backend.utils.export_briefs import build_zip, build_csv, build_pdf, build_markdown, build_json
+from backend.core.error_handlers import (
+    handle_api_errors,
+    ValidationError,
+    NotFoundError,
+    DatabaseError,
+    ServiceUnavailableError,
+)
 
 try:
     from fpdf import FPDF as _FPDF  # noqa: F401
@@ -35,9 +41,8 @@ def _parse_pagination(args):
     """Parse and validate page/page_size query parameters.
 
     Supports the legacy ``limit`` parameter (treated as ``page_size``).
-    Returns (page, page_size, error_response). On success, error_response is None.
-    On validation failure, page and page_size are None and error_response is a
-    (response, status_code) tuple ready to return from a Flask view.
+    Returns (page, page_size) on success.
+    Raises ValidationError on invalid input.
     """
     try:
         page = int(args.get('page', 1))
@@ -50,12 +55,18 @@ def _parse_pagination(args):
         else:
             page_size = int(args.get('page_size', 25))
     except (ValueError, TypeError):
-        return None, None, (jsonify({'error': 'page and page_size must be integers'}), 400)
+        raise ValidationError(
+            'page and page_size must be integers',
+            error_code='INVALID_TYPE',
+        )
 
     if not (1 <= page_size <= 100):
-        return None, None, (jsonify({'error': 'page_size must be between 1 and 100'}), 400)
+        raise ValidationError(
+            'page_size must be between 1 and 100',
+            field_errors=[{'field': 'page_size', 'message': 'Must be between 1 and 100'}],
+        )
 
-    return page, page_size, None
+    return page, page_size
 
 
 def _extract_summary(content: str) -> str | None:
@@ -144,6 +155,7 @@ def _row_to_brief(row, conn=None, include_key_metrics: bool = False) -> dict:
 # ---------------------------------------------------------------------------
 
 @research_bp.route('/research/briefs', methods=['GET'])
+@handle_api_errors
 def list_briefs():
     """List research briefs, optionally filtered by ticker.
 
@@ -157,9 +169,7 @@ def list_briefs():
         JSON envelope with data array and pagination metadata.
     """
     ticker = request.args.get('ticker', None)
-    page, page_size, err = _parse_pagination(request.args)
-    if err:
-        return err
+    page, page_size = _parse_pagination(request.args)
 
     offset = (page - 1) * page_size
 
@@ -196,12 +206,13 @@ def list_briefs():
             'total': total,
             'has_next': (page * page_size) < total,
         })
-    except Exception as e:
-        logger.error(f"Error fetching research briefs: {e}")
-        return jsonify({'data': [], 'page': page, 'page_size': page_size, 'total': 0, 'has_next': False})
+    except Exception as exc:
+        logger.error("Error fetching research briefs: %s", exc)
+        raise DatabaseError('Database error fetching research briefs') from exc
 
 
 @research_bp.route('/research/briefs/<int:brief_id>', methods=['GET'])
+@handle_api_errors
 def get_brief(brief_id: int):
     """Retrieve a single research brief by ID, including live key metrics.
 
@@ -219,17 +230,20 @@ def get_brief(brief_id: int):
         ).fetchone()
         if not row:
             conn.close()
-            return jsonify({'error': 'Brief not found'}), 404
+            raise NotFoundError(f'Research brief {brief_id} not found')
 
         brief = _row_to_brief(row, conn, include_key_metrics=True)
         conn.close()
         return jsonify(brief)
+    except (NotFoundError, DatabaseError):
+        raise
     except Exception as exc:
         logger.error("Error fetching research brief %s: %s", brief_id, exc)
-        return jsonify({'error': 'Database error'}), 500
+        raise DatabaseError('Database error fetching research brief') from exc
 
 
 @research_bp.route('/research/briefs', methods=['POST'])
+@handle_api_errors
 def generate_brief():
     """Trigger generation of a new research brief.
 
@@ -290,6 +304,7 @@ def _export_filename(briefs: list[dict], fmt: str) -> str:
 
 
 @research_bp.route('/research/briefs/ids', methods=['GET'])
+@handle_api_errors
 def list_brief_ids() -> Response:
     """Return all brief IDs matching an optional ticker filter.
 
@@ -319,10 +334,11 @@ def list_brief_ids() -> Response:
         return jsonify({'ids': ids, 'total': len(ids)})
     except Exception as exc:
         logger.error("list_brief_ids: DB error: %s", exc)
-        return jsonify({'error': 'Database error'}), 500
+        raise DatabaseError('Database error fetching brief IDs') from exc
 
 
 @research_bp.route('/research/briefs/export/capabilities', methods=['GET'])
+@handle_api_errors
 def export_capabilities():
     """Return which export formats are available on this server."""
     return jsonify({
@@ -337,6 +353,7 @@ def export_capabilities():
 
 
 @research_bp.route('/research/briefs/export', methods=['POST'])
+@handle_api_errors
 def export_briefs():
     """Batch-export selected research briefs as ZIP, CSV, Markdown, JSON, or PDF.
 
@@ -357,16 +374,32 @@ def export_briefs():
 
     # -- Validate ids ---------------------------------------------------------
     if not ids or not isinstance(ids, list):
-        return jsonify({'error': 'ids must be a non-empty array'}), 400
+        raise ValidationError(
+            'ids must be a non-empty array',
+            error_code='MISSING_FIELD',
+            field_errors=[{'field': 'ids', 'message': 'Must be a non-empty array of integers'}],
+        )
     if len(ids) > 100:
-        return jsonify({'error': 'Too many briefs selected (max 100)'}), 400
+        raise ValidationError(
+            'Too many briefs selected (max 100)',
+            field_errors=[{'field': 'ids', 'message': 'Maximum 100 IDs allowed'}],
+        )
     if not all(isinstance(i, int) and not isinstance(i, bool) and i > 0 for i in ids):
-        return jsonify({'error': 'ids must be an array of positive integers'}), 400
+        raise ValidationError(
+            'ids must be an array of positive integers',
+            field_errors=[{'field': 'ids', 'message': 'All IDs must be positive integers'}],
+        )
 
     # -- Validate format ------------------------------------------------------
     ALLOWED_FORMATS = {'zip', 'csv', 'pdf', 'markdown', 'json'}
     if fmt not in ALLOWED_FORMATS:
-        return jsonify({'error': f'format must be one of: {", ".join(sorted(ALLOWED_FORMATS))}'}), 400
+        raise ValidationError(
+            f'format must be one of: {", ".join(sorted(ALLOWED_FORMATS))}',
+            field_errors=[{'field': 'format', 'message': f'Must be one of: {", ".join(sorted(ALLOWED_FORMATS))}'}],
+        )
+
+    if fmt == 'pdf' and not FPDF_AVAILABLE:
+        raise ServiceUnavailableError('PDF export requires fpdf2 to be installed')
 
     # -- Deduplicate IDs preserving first-occurrence order --------------------
     seen: set[int] = set()
@@ -399,7 +432,7 @@ def export_briefs():
         )
     except Exception as exc:
         logger.error("export_briefs: DB error: %s", exc)
-        return jsonify({'error': 'Database error while fetching briefs'}), 500
+        raise DatabaseError('Database error while fetching briefs') from exc
     finally:
         if conn is not None:
             conn.close()
@@ -407,7 +440,7 @@ def export_briefs():
     # Graceful skip: export whatever was found; only error if nothing matched.
     briefs = briefs_raw
     if not briefs:
-        return jsonify({'error': 'No matching briefs found for the given IDs'}), 404
+        raise NotFoundError('No matching briefs found for the given IDs')
 
     # -- Generate export payload ----------------------------------------------
     try:
@@ -424,13 +457,11 @@ def export_briefs():
             payload = build_json(briefs)
             mime = 'application/json; charset=utf-8'
         else:  # pdf
-            if not FPDF_AVAILABLE:
-                return jsonify({'error': 'PDF export requires fpdf2 to be installed'}), 501
             payload = build_pdf(briefs)
             mime = 'application/pdf'
     except Exception as exc:
         logger.error("export_briefs: generation error (format=%s): %s", fmt, exc)
-        return jsonify({'error': 'Failed to generate export file'}), 500
+        raise ServiceUnavailableError('Failed to generate export file') from exc
 
     filename = _export_filename(briefs, fmt)
 
@@ -601,4 +632,3 @@ Reddit and social media analysis indicates:
             'model_used': 'claude-sonnet-4-5 (stub)',
             'created_at': now,
         }
-```

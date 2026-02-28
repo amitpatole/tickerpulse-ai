@@ -1,4 +1,3 @@
-```python
 """
 TickerPulse AI v3.0 - News API Routes
 Blueprint for news articles, alerts, and statistics endpoints.
@@ -9,6 +8,7 @@ import html
 import logging
 
 from backend.database import pooled_session
+from backend.core.error_handlers import handle_api_errors, ValidationError, NotFoundError
 
 logger = logging.getLogger(__name__)
 
@@ -18,23 +18,28 @@ news_bp = Blueprint('news', __name__, url_prefix='/api')
 def _parse_pagination(args):
     """Parse and validate page/page_size query parameters.
 
-    Returns (page, page_size, error_response). On success, error_response is None.
-    On validation failure, page and page_size are None and error_response is a
-    (response, status_code) tuple ready to return from a Flask view.
+    Returns (page, page_size) on success.
+    Raises ValidationError on invalid input.
     """
     try:
         page = int(args.get('page', 1))
         page_size = int(args.get('page_size', 25))
     except (ValueError, TypeError):
-        return None, None, (jsonify({'error': 'page and page_size must be integers'}), 400)
+        raise ValidationError('page and page_size must be integers', error_code='INVALID_TYPE')
 
     if not (1 <= page_size <= 100):
-        return None, None, (jsonify({'error': 'page_size must be between 1 and 100'}), 400)
+        raise ValidationError(
+            'page_size must be between 1 and 100',
+            field_errors=[{'field': 'page_size', 'message': 'Must be between 1 and 100'}],
+        )
 
     if page < 1:
-        return None, None, (jsonify({'error': 'page must be a positive integer'}), 400)
+        raise ValidationError(
+            'page must be a positive integer',
+            field_errors=[{'field': 'page', 'message': 'Must be a positive integer'}],
+        )
 
-    return page, page_size, None
+    return page, page_size
 
 
 def _serialize_article(article: object) -> dict:
@@ -54,6 +59,7 @@ def _serialize_article(article: object) -> dict:
 
 
 @news_bp.route('/news', methods=['GET'])
+@handle_api_errors
 def get_news():
     """Get recent news articles with optional ticker filter.
 
@@ -66,9 +72,7 @@ def get_news():
         JSON envelope with data array and pagination metadata.
     """
     ticker = request.args.get('ticker', None)
-    page, page_size, err = _parse_pagination(request.args)
-    if err:
-        return err
+    page, page_size = _parse_pagination(request.args)
 
     offset = (page - 1) * page_size
 
@@ -98,6 +102,7 @@ def get_news():
 
 
 @news_bp.route('/news/<int:article_id>', methods=['GET'])
+@handle_api_errors
 def get_news_article(article_id: int):
     """Fetch a single news article by ID.
 
@@ -118,12 +123,13 @@ def get_news_article(article_id: int):
 
     if row is None:
         logger.debug("news article %d not found", article_id)
-        return jsonify({'error': 'article not found'}), 404
+        raise NotFoundError(f'Article {article_id} not found')
 
     return jsonify(_serialize_article(row))
 
 
 @news_bp.route('/alerts', methods=['GET'])
+@handle_api_errors
 def get_alerts():
     """Get recent alerts (last 50).
 
@@ -153,6 +159,7 @@ def get_alerts():
 
 
 @news_bp.route('/stats', methods=['GET'])
+@handle_api_errors
 def get_stats():
     """Get sentiment statistics for the last 24 hours.
 
@@ -208,4 +215,3 @@ def get_stats():
         } for stat in stats],
         'total_alerts_24h': alert_count
     })
-```
