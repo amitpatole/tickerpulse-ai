@@ -1,4 +1,3 @@
-```tsx
 'use client';
 
 import { X } from 'lucide-react';
@@ -107,4 +106,3 @@ export default function KeyboardShortcutsModal({ isOpen, onClose }: Props) {
     </div>
   );
 }
-```
