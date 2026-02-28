@@ -1,3 +1,4 @@
+```python
 """
 TickerPulse AI v3.0 - Earnings Calendar API
 Blueprint serving upcoming and past earnings events with watchlist filtering.
@@ -52,56 +53,19 @@ def _row_to_dict(row):
 def get_earnings():
     """Return upcoming and past earnings events split at today's date.
 
-    ---
-    tags:
-      - Earnings
-    parameters:
-      - name: days
-        in: query
-        type: integer
-        minimum: 1
-        maximum: 90
-        default: 30
-        description: Number of calendar days to look ahead (upcoming) and back (past).
-      - name: watchlist_id
-        in: query
-        type: integer
-        description: Filter events to tickers in the specified watchlist.
-      - name: ticker
-        in: query
-        type: string
-        description: Filter to a single ticker symbol.
-    responses:
-      200:
-        description: Earnings events split into upcoming and past arrays.
-        schema:
-          type: object
-          properties:
-            upcoming:
-              type: array
-              items:
-                $ref: '#/definitions/EarningsEvent'
-            past:
-              type: array
-              items:
-                $ref: '#/definitions/EarningsEvent'
-            stale:
-              type: boolean
-            as_of:
-              type: string
-              format: date-time
+    Query parameters:
+      days         (int, 1-90, default 30): Look-ahead and look-back window.
+      watchlist_id (int, optional): Scope results to tickers in this watchlist.
+      ticker       (str, optional): Filter to a single ticker symbol.
     """
-    # --- days param ---
     try:
         days = int(request.args.get('days', 30))
         days = max(1, min(90, days))
     except (TypeError, ValueError):
         days = 30
 
-    # --- watchlist_id param ---
     watchlist_id = request.args.get('watchlist_id', type=int)
 
-    # --- ticker param (single ticker filter) ---
     raw_ticker = request.args.get('ticker', '').strip().upper()
     ticker_filter = raw_ticker if raw_ticker else None
 
@@ -110,7 +74,6 @@ def get_earnings():
     start_str = (today - timedelta(days=days)).isoformat()
     end_str = (today + timedelta(days=days)).isoformat()
 
-    # Build dynamic WHERE clauses with named params
     where_parts = ["e.earnings_date >= :start", "e.earnings_date <= :end"]
     bind: dict = {"start": start_str, "end": end_str}
 
@@ -124,7 +87,6 @@ def get_earnings():
         )
         bind["wl_id"] = watchlist_id
 
-    # on_watchlist: check membership in specified watchlist or any watchlist
     if watchlist_id:
         on_wl_expr = (
             "(SELECT COUNT(*) FROM watchlist_stocks "
@@ -161,7 +123,6 @@ def get_earnings():
         else:
             past.append(event)
 
-    # past sorted newest-first for display
     past.sort(key=lambda e: e['earnings_date'], reverse=True)
 
     newest_fetched_at = freshness_row['newest'] if freshness_row else None
@@ -177,36 +138,10 @@ def get_earnings():
 
 @earnings_bp.route('/earnings/<ticker>', methods=['GET'])
 def get_ticker_earnings(ticker: str):
-    """Return all earnings events for a specific ticker, sorted by date descending.
-
-    ---
-    tags:
-      - Earnings
-    parameters:
-      - name: ticker
-        in: path
-        type: string
-        required: true
-        description: Stock ticker symbol.
-    responses:
-      200:
-        description: All earnings events for the ticker.
-        schema:
-          type: object
-          properties:
-            ticker:
-              type: string
-            events:
-              type: array
-              items:
-                $ref: '#/definitions/EarningsEvent'
-      404:
-        description: Ticker not found in the database.
-    """
+    """Return all earnings events for a specific ticker, sorted by date descending."""
     ticker = ticker.upper()
 
     with db_session() as conn:
-        # Check if ticker exists in the stocks table
         stock_row = conn.execute(
             "SELECT ticker FROM stocks WHERE ticker = ?", (ticker,)
         ).fetchone()
@@ -234,27 +169,7 @@ def get_ticker_earnings(ticker: str):
 
 @earnings_bp.route('/earnings/sync', methods=['POST'])
 def sync_earnings():
-    """Manually trigger an earnings calendar sync from Yahoo Finance.
-
-    ---
-    tags:
-      - Earnings
-    responses:
-      200:
-        description: Sync triggered successfully.
-        schema:
-          type: object
-          properties:
-            message:
-              type: string
-            synced_at:
-              type: string
-              format: date-time
-      500:
-        description: Sync failed.
-        schema:
-          $ref: '#/definitions/Error'
-    """
+    """Manually trigger an earnings calendar sync from Yahoo Finance."""
     try:
         from backend.jobs.earnings_sync import run_earnings_sync
         run_earnings_sync()
@@ -279,3 +194,4 @@ def _is_stale(fetched_at_str: str | None) -> bool:
         return age_hours > _STALE_THRESHOLD_HOURS
     except (ValueError, OverflowError):
         return True
+```

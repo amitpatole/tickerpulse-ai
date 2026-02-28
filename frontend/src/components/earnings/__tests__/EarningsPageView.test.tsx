@@ -1,4 +1,4 @@
-```tsx
+```typescript
 /**
  * TickerPulse AI v3.0 — EarningsPageView Component Tests
  *
@@ -30,7 +30,6 @@ jest.mock('next/link', () => {
 // Mock data
 // ---------------------------------------------------------------------------
 
-// Two upcoming events sharing the same earnings_date — tests date grouping
 const twoEventsOneDate: EarningsResponse = {
   upcoming: [
     {
@@ -65,7 +64,6 @@ const twoEventsOneDate: EarningsResponse = {
   as_of: '2027-03-01T10:00:00Z',
 };
 
-// Past events with one EPS beat and one EPS miss
 const pastWithResults: EarningsResponse = {
   upcoming: [],
   past: [
@@ -119,10 +117,6 @@ describe('EarningsPageView', () => {
     (api.triggerEarningsSync as jest.Mock).mockResolvedValue({ ok: true });
   });
 
-  // -------------------------------------------------------------------------
-  // Upcoming section — date grouping
-  // -------------------------------------------------------------------------
-
   describe('Upcoming section — date grouping', () => {
     it('renders both events that share the same earnings date', async () => {
       (api.getEarnings as jest.Mock).mockResolvedValue(twoEventsOneDate);
@@ -149,10 +143,6 @@ describe('EarningsPageView', () => {
     });
   });
 
-  // -------------------------------------------------------------------------
-  // Past section — columns and badges
-  // -------------------------------------------------------------------------
-
   describe('Past section — table columns and badges', () => {
     it('renders all past table column headers', async () => {
       (api.getEarnings as jest.Mock).mockResolvedValue(pastWithResults);
@@ -177,7 +167,6 @@ describe('EarningsPageView', () => {
       render(<EarningsPageView />);
 
       await waitFor(() => {
-        // META: eps_actual 6.20 > 6.03
         expect(screen.getAllByText('Beat').length).toBeGreaterThanOrEqual(1);
       });
 
@@ -191,7 +180,6 @@ describe('EarningsPageView', () => {
       render(<EarningsPageView />);
 
       await waitFor(() => {
-        // GOOGL: eps_actual 1.75 < 1.84
         expect(screen.getAllByText('Miss').length).toBeGreaterThanOrEqual(1);
       });
 
@@ -211,10 +199,6 @@ describe('EarningsPageView', () => {
     });
   });
 
-  // -------------------------------------------------------------------------
-  // Watchlist filter
-  // -------------------------------------------------------------------------
-
   describe('Watchlist filter', () => {
     it('hides non-watchlist tickers when watchlist-only is toggled', async () => {
       (api.getEarnings as jest.Mock).mockResolvedValue(twoEventsOneDate);
@@ -226,7 +210,6 @@ describe('EarningsPageView', () => {
         expect(screen.getByText('CSCO')).toBeInTheDocument();
       });
 
-      // Toggle watchlist-only (NVDA: on_watchlist=true, CSCO: on_watchlist=false)
       fireEvent.click(screen.getByRole('button', { name: /watchlist only/i }));
 
       await waitFor(() => {
@@ -235,10 +218,6 @@ describe('EarningsPageView', () => {
       });
     });
   });
-
-  // -------------------------------------------------------------------------
-  // Empty states
-  // -------------------------------------------------------------------------
 
   describe('Empty states', () => {
     it('shows "No upcoming earnings" message when upcoming array is empty', async () => {
@@ -261,10 +240,6 @@ describe('EarningsPageView', () => {
       });
     });
   });
-
-  // -------------------------------------------------------------------------
-  // Stale data warning
-  // -------------------------------------------------------------------------
 
   describe('Stale data warning', () => {
     it('shows AlertTriangle when stale is true', async () => {
@@ -289,10 +264,6 @@ describe('EarningsPageView', () => {
       });
     });
   });
-
-  // -------------------------------------------------------------------------
-  // Sync button
-  // -------------------------------------------------------------------------
 
   describe('Sync button', () => {
     it('calls triggerEarningsSync when sync button is clicked', async () => {
@@ -329,10 +300,8 @@ describe('EarningsPageView', () => {
 
       fireEvent.click(screen.getByRole('button', { name: /sync earnings data/i }));
 
-      // Button should switch to loading state immediately
       expect(screen.getByText(/Syncing/i)).toBeInTheDocument();
 
-      // Resolve the pending sync
       await act(async () => {
         resolveSync();
       });
@@ -343,10 +312,6 @@ describe('EarningsPageView', () => {
       });
     });
   });
-
-  // -------------------------------------------------------------------------
-  // Days range selector
-  // -------------------------------------------------------------------------
 
   describe('Days range selector', () => {
     it('calls getEarnings with updated days when selector changes', async () => {
@@ -371,10 +336,6 @@ describe('EarningsPageView', () => {
     });
   });
 
-  // -------------------------------------------------------------------------
-  // Error handling
-  // -------------------------------------------------------------------------
-
   describe('Error handling', () => {
     it('displays error message when getEarnings fails', async () => {
       (api.getEarnings as jest.Mock).mockRejectedValue(
@@ -387,7 +348,6 @@ describe('EarningsPageView', () => {
         expect(screen.getByText(/Failed to fetch earnings data/i)).toBeInTheDocument();
       });
 
-      // No upcoming or past sections should be visible
       expect(screen.queryByText('Upcoming')).not.toBeInTheDocument();
       expect(screen.queryByText('Past')).not.toBeInTheDocument();
     });
@@ -441,10 +401,6 @@ describe('EarningsPageView', () => {
     });
   });
 
-  // -------------------------------------------------------------------------
-  // Edge cases — revenue and EPS formatting
-  // -------------------------------------------------------------------------
-
   describe('Edge cases — revenue and EPS formatting', () => {
     it('shows dashes for null revenue and EPS values', async () => {
       const edgeCaseResponse: EarningsResponse = {
@@ -476,7 +432,6 @@ describe('EarningsPageView', () => {
         expect(screen.getByText('TEST')).toBeInTheDocument();
       });
 
-      // Check for dashes in the grid (revenue and EPS columns)
       const dashElements = screen.getAllByText('—');
       expect(dashElements.length).toBeGreaterThanOrEqual(2);
     });
@@ -541,10 +496,6 @@ describe('EarningsPageView', () => {
       await waitFor(() => {
         expect(screen.getByText('AMZN')).toBeInTheDocument();
       });
-
-      // Clock icon should not appear
-      const clockIcons = screen.queryAllByRole('img', { hidden: true });
-      expect(clockIcons).toBeDefined();
     });
 
     it('shows Met badge when EPS actual equals estimate exactly', async () => {
@@ -575,29 +526,21 @@ describe('EarningsPageView', () => {
       render(<EarningsPageView />);
 
       await waitFor(() => {
-        expect(screen.getByText('IBM')).toBeInTheDocument();
+        expect(screen.getAllByText('Met').length).toBeGreaterThanOrEqual(1);
       });
 
       const metBadges = screen.getAllByText('Met');
-      expect(metBadges.length).toBeGreaterThanOrEqual(1);
       expect(metBadges[0]).toHaveClass('bg-slate-600/30');
     });
   });
 
-  // -------------------------------------------------------------------------
-  // Loading state
-  // -------------------------------------------------------------------------
-
   describe('Loading state', () => {
     it('shows skeleton loaders while data is loading', async () => {
-      const promise = new Promise<EarningsResponse>(() => {
-        // Never resolves — simulates infinite loading
-      });
+      const promise = new Promise<EarningsResponse>(() => {});
       (api.getEarnings as jest.Mock).mockReturnValue(promise);
 
       render(<EarningsPageView />);
 
-      // aria-busy should be present on the loading container
       const loadingContainer = screen.getByRole('region', { hidden: true });
       expect(loadingContainer).toHaveAttribute('aria-busy', 'true');
     });
@@ -611,7 +554,6 @@ describe('EarningsPageView', () => {
         expect(screen.getByText('NVDA')).toBeInTheDocument();
       });
 
-      // aria-busy should be removed or false
       const containers = screen.queryAllByRole('region', { hidden: true });
       containers.forEach((container) => {
         expect(container).not.toHaveAttribute('aria-busy', 'true');

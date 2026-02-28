@@ -1,3 +1,4 @@
+```typescript
 /**
  * TickerPulse AI v3.0 — EarningsCalendar Component Tests
  *
@@ -27,7 +28,7 @@ jest.mock('next/link', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Mock data — correct EarningsResponse format ({ upcoming, past, stale, as_of })
+// Mock data
 // ---------------------------------------------------------------------------
 
 const upcomingEvents: EarningsResponse['upcoming'] = [
@@ -128,10 +129,6 @@ describe('EarningsCalendar', () => {
     jest.clearAllMocks();
   });
 
-  // -------------------------------------------------------------------------
-  // Upcoming Tab
-  // -------------------------------------------------------------------------
-
   describe('Upcoming Tab — happy path', () => {
     it('renders upcoming earnings with Date, Ticker/Company, EPS Est., Quarter columns', async () => {
       (api.getEarnings as jest.Mock).mockResolvedValue(mockUpcomingResponse);
@@ -146,7 +143,6 @@ describe('EarningsCalendar', () => {
       expect(screen.getByText('Ticker / Company')).toBeInTheDocument();
       expect(screen.getByText('EPS Est.')).toBeInTheDocument();
       expect(screen.getByText('Quarter')).toBeInTheDocument();
-
       expect(screen.getByText('MSFT')).toBeInTheDocument();
       expect(screen.getByText('Apple Inc.')).toBeInTheDocument();
       expect(screen.getByText('Q1 2025')).toBeInTheDocument();
@@ -173,7 +169,6 @@ describe('EarningsCalendar', () => {
         expect(screen.getByText('AAPL')).toBeInTheDocument();
       });
 
-      // AAPL row (on_watchlist=true) should have watchlist highlight class
       const aaplLink = screen.getByText('AAPL');
       const aaplRow = aaplLink.closest('div[class*="grid"]');
       expect(aaplRow).toHaveClass('border-emerald-700/40');
@@ -217,10 +212,6 @@ describe('EarningsCalendar', () => {
     });
   });
 
-  // -------------------------------------------------------------------------
-  // Past Tab — EPS + Revenue columns
-  // -------------------------------------------------------------------------
-
   describe('Past Tab — EPS beat/miss and revenue columns', () => {
     it('shows EPS Actual and Rev Est. / Rev Actual column headers', async () => {
       (api.getEarnings as jest.Mock).mockResolvedValue(mockPastResponse);
@@ -250,7 +241,6 @@ describe('EarningsCalendar', () => {
         expect(screen.getByText('Beat')).toBeInTheDocument();
       });
 
-      // AAPL beat (2.18 > 2.1)
       expect(screen.getByText('Beat')).toHaveClass('bg-emerald-500/20');
     });
 
@@ -265,7 +255,6 @@ describe('EarningsCalendar', () => {
         expect(screen.getByText('Miss')).toBeInTheDocument();
       });
 
-      // GOOGL miss (1.75 < 1.8)
       expect(screen.getByText('Miss')).toHaveClass('bg-red-500/20');
     });
 
@@ -280,9 +269,7 @@ describe('EarningsCalendar', () => {
         expect(screen.getByText('AAPL')).toBeInTheDocument();
       });
 
-      // 84.0e9 → $84.00B
       expect(screen.getByText('$84.00B')).toBeInTheDocument();
-      // 88.0e9 → $88.00B
       expect(screen.getByText('$88.00B')).toBeInTheDocument();
     });
 
@@ -294,7 +281,6 @@ describe('EarningsCalendar', () => {
       fireEvent.click(screen.getByRole('button', { name: /past/i }));
 
       await waitFor(() => {
-        // Multiple "Beat" badges may exist (EPS + Revenue for AAPL both beat)
         const beatBadges = screen.getAllByText('Beat');
         expect(beatBadges.length).toBeGreaterThanOrEqual(1);
       });
@@ -344,15 +330,10 @@ describe('EarningsCalendar', () => {
         expect(screen.getByText('TSLA')).toBeInTheDocument();
       });
 
-      // Revenue estimate shows '—' when null
       const dashes = screen.getAllByText('—');
       expect(dashes.length).toBeGreaterThanOrEqual(1);
     });
   });
-
-  // -------------------------------------------------------------------------
-  // Loading state
-  // -------------------------------------------------------------------------
 
   describe('Loading State', () => {
     it('shows skeleton loaders while fetching data', () => {
@@ -366,10 +347,6 @@ describe('EarningsCalendar', () => {
     });
   });
 
-  // -------------------------------------------------------------------------
-  // Error state
-  // -------------------------------------------------------------------------
-
   describe('Error Handling', () => {
     it('displays an error message when the API call fails', async () => {
       (api.getEarnings as jest.Mock).mockRejectedValue(new Error('Network error'));
@@ -381,10 +358,6 @@ describe('EarningsCalendar', () => {
       });
     });
   });
-
-  // -------------------------------------------------------------------------
-  // Empty states
-  // -------------------------------------------------------------------------
 
   describe('Empty Data States', () => {
     it('shows upcoming empty state when no upcoming events in window', async () => {
@@ -421,10 +394,6 @@ describe('EarningsCalendar', () => {
       });
     });
   });
-
-  // -------------------------------------------------------------------------
-  // Watchlist filter
-  // -------------------------------------------------------------------------
 
   describe('Watchlist Filter', () => {
     it('shows all tickers by default', async () => {
@@ -504,7 +473,6 @@ describe('EarningsCalendar', () => {
         expect(screen.getByText('GOOGL')).toBeInTheDocument();
       });
 
-      // Enable watchlist filter — only AAPL (on_watchlist=true) should remain
       fireEvent.click(screen.getByRole('button', { name: /watchlist/i }));
 
       await waitFor(() => {
@@ -513,10 +481,6 @@ describe('EarningsCalendar', () => {
       });
     });
   });
-
-  // -------------------------------------------------------------------------
-  // Stale indicator
-  // -------------------------------------------------------------------------
 
   describe('Staleness Indicator', () => {
     it('shows AlertTriangle when stale=true', async () => {
@@ -547,10 +511,6 @@ describe('EarningsCalendar', () => {
     });
   });
 
-  // -------------------------------------------------------------------------
-  // Day-range selector
-  // -------------------------------------------------------------------------
-
   describe('Days Range Control', () => {
     it('calls getEarnings with updated days when dropdown changes', async () => {
       (api.getEarnings as jest.Mock).mockResolvedValue(mockUpcomingResponse);
@@ -563,7 +523,6 @@ describe('EarningsCalendar', () => {
         );
       });
 
-      // Change to 14 days
       const daysSelect = screen.getByDisplayValue('30 days') as HTMLSelectElement;
       fireEvent.change(daysSelect, { target: { value: '14' } });
 
@@ -574,10 +533,6 @@ describe('EarningsCalendar', () => {
       });
     });
   });
-
-  // -------------------------------------------------------------------------
-  // Refresh button
-  // -------------------------------------------------------------------------
 
   describe('Refresh Button', () => {
     it('triggers a new API call when clicked', async () => {
@@ -597,10 +552,6 @@ describe('EarningsCalendar', () => {
     });
   });
 
-  // -------------------------------------------------------------------------
-  // Tab badge count
-  // -------------------------------------------------------------------------
-
   describe('Upcoming tab badge', () => {
     it('shows count badge on upcoming tab when there are events', async () => {
       (api.getEarnings as jest.Mock).mockResolvedValue(mockBothResponse);
@@ -611,8 +562,8 @@ describe('EarningsCalendar', () => {
         expect(screen.getByText('AAPL')).toBeInTheDocument();
       });
 
-      // The count badge should show "2" for 2 upcoming events
       expect(screen.getByText('2')).toBeInTheDocument();
     });
   });
 });
+```

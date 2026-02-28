@@ -1,3 +1,4 @@
+```typescript
 'use client';
 
 import { useState } from 'react';
@@ -297,6 +298,7 @@ export default function EarningsCalendar({ watchlistId }: EarningsCalendarProps)
             onClick={refetch}
             className="p-1 rounded text-slate-400 hover:text-white hover:bg-slate-700 transition-colors"
             title="Refresh"
+            aria-label="Refresh"
           >
             <RefreshCw className="h-3.5 w-3.5" />
           </button>
@@ -377,3 +379,4 @@ export default function EarningsCalendar({ watchlistId }: EarningsCalendarProps)
     </div>
   );
 }
+```

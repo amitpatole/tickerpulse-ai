@@ -1,3 +1,4 @@
+```python
 """
 TickerPulse AI v3.0 - Earnings Sync Job
 
@@ -50,7 +51,6 @@ def _parse_earnings_from_yfinance(ticker: str) -> list:
 
         # --- Strategy 1: get_earnings_dates (covers upcoming + recent past) ---
         try:
-            import pandas as pd  # type: ignore
             earnings_dates = t.get_earnings_dates(limit=12)
             if earnings_dates is not None and not earnings_dates.empty:
                 for dt_idx, row in earnings_dates.iterrows():
@@ -105,7 +105,6 @@ def _parse_earnings_from_yfinance(ticker: str) -> list:
             if cal is not None and isinstance(cal, dict):
                 ed_raw = cal.get('Earnings Date')
                 if ed_raw is not None:
-                    # Normalise: list, Timestamp, or plain date
                     if isinstance(ed_raw, list):
                         ed_raw = ed_raw[0] if ed_raw else None
                     if ed_raw is not None:
@@ -146,7 +145,6 @@ def _parse_earnings_from_yfinance(ticker: str) -> list:
                                 'fiscal_quarter': None,
                             })
                         else:
-                            # Backfill revenue estimate onto the matching entry
                             for r in results:
                                 if r['earnings_date'] == upcoming_str:
                                     if rev_est is not None and r['revenue_estimate'] is None:
@@ -179,9 +177,9 @@ def _parse_earnings_from_yfinance(ticker: str) -> list:
 def _upsert_earnings_events(events: list) -> int:
     """Upsert earnings events into the database.
 
-    Uses ``INSERT OR REPLACE`` semantics via the UNIQUE(ticker, earnings_date)
-    constraint.  Existing ``eps_actual`` / ``revenue_actual`` values are
-    preserved when the incoming row has NULL (COALESCE).
+    Uses ON CONFLICT semantics via the UNIQUE(ticker, earnings_date) constraint.
+    Existing eps_actual / revenue_actual values are preserved when the incoming
+    row has NULL (COALESCE).
 
     Returns the number of rows successfully written.
     """
@@ -256,9 +254,7 @@ def run_earnings_sync() -> None:
 
     For each ticker:
     - Calls yfinance to get upcoming + past earnings dates, EPS, and revenue.
-    - Upserts into ``earnings_events`` (idempotent).
-
-    Logs duration and result summary via the ``job_timer`` helper.
+    - Upserts into earnings_events (idempotent).
     """
     with job_timer(JOB_ID, JOB_NAME) as ctx:
         watchlist = _get_watchlist()
@@ -284,3 +280,4 @@ def run_earnings_sync() -> None:
             f"{len(tickers) - no_data_count}/{len(tickers)} tickers"
         )
         logger.info("Earnings sync complete: %s", ctx['result_summary'])
+```
