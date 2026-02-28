@@ -1,1 +1,1 @@
-*(restored full 834-line file — see write above)*
+Surgical edits — `AgentMetric` corrected to match API + component, `api_latency_p95` removed from `SystemMetricsSnapshot`, new `ApiEndpointMetric` interface added, `SystemMetricsResponse` updated with `endpoints`.

@@ -1,0 +1,1 @@
+14 tests across 3 suites: loading skeletons, null/empty state, snapshot gauge values + labels, endpoint table rendering (multi-row, empty state, large latency formatting, 2xx/4xx/5xx badge colors).
