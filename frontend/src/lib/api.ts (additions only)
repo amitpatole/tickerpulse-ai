@@ -1,0 +1,6 @@
+Added `EarningsWidgetResponse` to imports and:
+```ts
+export async function getEarningsWidget(days = 14): Promise<EarningsWidgetResponse> {
+  return apiFetch<EarningsWidgetResponse>(`/api/earnings/widget?days=${days}`);
+}
+```
