@@ -1,6 +1,7 @@
+```typescript
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
   X,
   Bell,
@@ -10,29 +11,47 @@ import {
   ToggleRight,
   Trash2,
   Pencil,
+  Volume2,
+  VolumeX,
 } from 'lucide-react';
+import { getAlertSoundSettings, updateAlertSoundSettings } from '@/lib/api';
 import { clsx } from 'clsx';
 import { useAlerts } from '@/hooks/useAlerts';
+import { timeAgo } from '@/lib/formatTime';
 import AlertFormModal from '@/components/alerts/AlertFormModal';
 import type { Alert } from '@/lib/types';
 
 type Tab = 'active' | 'history';
 
-function timeAgo(dateStr: string): string {
-  const now = new Date();
-  const date = new Date(dateStr);
-  if (isNaN(date.getTime())) return '—';
-  const diffMs = now.getTime() - date.getTime();
-  const diffMins = Math.floor(diffMs / 60_000);
-  if (diffMins < 1) return 'Just now';
-  if (diffMins < 60) return `${diffMins}m ago`;
-  const diffHours = Math.floor(diffMins / 60);
-  if (diffHours < 24) return `${diffHours}h ago`;
-  return `${Math.floor(diffHours / 24)}d ago`;
-}
-
 interface AlertsPanelProps {
   onClose: () => void;
+}
+
+/** Tiny sound badge shown inline on each active-alert row. */
+function SoundBadge({ soundType }: { soundType: string }) {
+  if (!soundType || soundType === 'default') return null;
+
+  if (soundType === 'silent') {
+    return (
+      <span
+        title="Sound: silent"
+        className="flex items-center gap-0.5 text-[10px] text-amber-400"
+      >
+        <VolumeX className="h-2.5 w-2.5" aria-hidden="true" />
+        silent
+      </span>
+    );
+  }
+
+  return (
+    <span
+      title={`Sound: ${soundType}`}
+      className="flex items-center gap-0.5 text-[10px] text-blue-400"
+    >
+      <Volume2 className="h-2.5 w-2.5" aria-hidden="true" />
+      {soundType}
+    </span>
+  );
 }
 
 export default function AlertsPanel({ onClose }: AlertsPanelProps) {
@@ -42,6 +61,28 @@ export default function AlertsPanel({ onClose }: AlertsPanelProps) {
   const [actionError, setActionError] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [togglingId, setTogglingId] = useState<number | null>(null);
+  const [soundEnabled, setSoundEnabled] = useState<boolean | null>(null);
+  const [muteSaving, setMuteSaving] = useState(false);
+
+  useEffect(() => {
+    getAlertSoundSettings()
+      .then((s) => setSoundEnabled(s.enabled))
+      .catch(() => {/* non-critical: leave null to hide the button */});
+  }, []);
+
+  const handleToggleMute = useCallback(async () => {
+    if (soundEnabled === null || muteSaving) return;
+    const next = !soundEnabled;
+    setSoundEnabled(next);
+    setMuteSaving(true);
+    try {
+      await updateAlertSoundSettings({ enabled: next });
+    } catch {
+      setSoundEnabled(!next); // revert on failure
+    } finally {
+      setMuteSaving(false);
+    }
+  }, [soundEnabled, muteSaving]);
 
   const {
     alerts,
@@ -145,6 +186,27 @@ export default function AlertsPanel({ onClose }: AlertsPanelProps) {
               <Plus className="h-3 w-3" aria-hidden="true" />
               New
             </button>
+            {soundEnabled !== null && (
+              <button
+                type="button"
+                onClick={handleToggleMute}
+                disabled={muteSaving}
+                aria-label={soundEnabled ? 'Mute alert sounds' : 'Unmute alert sounds'}
+                aria-pressed={!soundEnabled}
+                className={clsx(
+                  'rounded p-1 transition-colors disabled:opacity-50',
+                  soundEnabled
+                    ? 'text-slate-400 hover:bg-slate-700/50 hover:text-slate-200'
+                    : 'text-amber-400 hover:bg-slate-700/50'
+                )}
+              >
+                {soundEnabled ? (
+                  <Volume2 className="h-4 w-4" aria-hidden="true" />
+                ) : (
+                  <VolumeX className="h-4 w-4" aria-hidden="true" />
+                )}
+              </button>
+            )}
             <button
               type="button"
               onClick={onClose}
@@ -250,8 +312,9 @@ export default function AlertsPanel({ onClose }: AlertsPanelProps) {
                             {alert.message}
                           </span>
                         </div>
-                        <div className="mt-0.5 text-[11px] text-slate-500">
-                          Created {timeAgo(alert.created_at)}
+                        <div className="mt-0.5 flex items-center gap-2 text-[11px] text-slate-500">
+                          <span>Created {timeAgo(alert.created_at)}</span>
+                          <SoundBadge soundType={alert.sound_type} />
                         </div>
                       </div>
 
@@ -364,3 +427,4 @@ export default function AlertsPanel({ onClose }: AlertsPanelProps) {
     </>
   );
 }
+```

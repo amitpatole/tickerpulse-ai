@@ -1,3 +1,4 @@
+```typescript
 'use client';
 
 // ============================================================
@@ -15,7 +16,12 @@ import { useSSE } from '@/hooks/useSSE';
 import { toast } from '@/lib/toastBus';
 import { playAlertSound } from '@/lib/alertSound';
 import { getAlertSoundSettings } from '@/lib/api';
+import { sanitizeAlertText } from '@/lib/sanitize';
 import type { AlertSoundSettings, AlertEvent } from '@/lib/types';
+
+// Allowlist mirrors backend _VALID_SOUND_TYPES. Any value arriving over SSE
+// that is not in this set is treated as 'default' (falls back to global setting).
+const VALID_SOUND_TYPES = new Set(['chime', 'alarm', 'silent', 'default'] as const);
 
 type ElectronBridge = {
   showNotification?: (ticker: string, message: string) => void;
@@ -32,9 +38,12 @@ export interface UseSSEAlertsReturn {
  * Hook that wires real-time alert side-effects to the shared SSE stream.
  *
  * For every new `alert` event that arrives after this hook mounts it:
- *  1. Dispatches an in-app toast via `toastBus`.
- *  2. Plays a Web Audio tone (respects per-alert sound_type + global settings).
- *  3. Calls `window.tickerpulse.showNotification()` for Electron desktop
+ *  1. Sanitizes `ticker` and `message` via `sanitizeAlertText` (strips control
+ *     chars, caps at 200 chars, HTML-encodes) before any further processing.
+ *  2. Dispatches an in-app toast via `toastBus`.
+ *  3. Plays a Web Audio tone (respects per-alert sound_type + global settings,
+ *     including mute_when_active when the tab is focused).
+ *  4. Calls `window.tickerpulse.showNotification()` for Electron desktop
  *     notifications (no-op in the browser).
  */
 export function useSSEAlerts(): UseSSEAlertsReturn {
@@ -81,26 +90,46 @@ export function useSSEAlerts(): UseSSEAlertsReturn {
 
     const settings = soundSettingsRef.current;
 
+    // mute_when_active: suppress sound when the tab currently has focus.
+    const tabIsFocused =
+      typeof document !== 'undefined' && document.hasFocus();
+    const mutedByFocus = settings.mute_when_active && tabIsFocused;
+
     for (const alertEvent of newAlerts) {
+      // Sanitize untrusted SSE fields before any use: strip control chars,
+      // cap at 200 chars, HTML-encode to prevent injection into any renderer
+      // that interprets HTML (including Electron's notification API).
+      const safeTicker = sanitizeAlertText(alertEvent.ticker);
+      const safeMessage = sanitizeAlertText(alertEvent.message);
+
       // 1. In-app toast notification.
-      toast(`${alertEvent.ticker}: ${alertEvent.message}`, 'info');
+      toast(`${safeTicker}: ${safeMessage}`, 'info');
 
       // 2. Web Audio sound.
+      // Reject any sound_type not in the allowlist before it reaches playAlertSound.
+      const rawSoundType = alertEvent.sound_type;
+      const safeSoundType =
+        rawSoundType && VALID_SOUND_TYPES.has(rawSoundType) ? rawSoundType : 'default';
       const effectiveSoundType =
-        !alertEvent.sound_type || alertEvent.sound_type === 'default'
+        safeSoundType === 'default'
           ? settings.sound_type || 'chime'
-          : alertEvent.sound_type;
+          : safeSoundType;
 
-      if (settings.enabled !== false && effectiveSoundType !== 'silent') {
+      if (
+        settings.enabled !== false &&
+        effectiveSoundType !== 'silent' &&
+        !mutedByFocus
+      ) {
         playAlertSound(effectiveSoundType, (settings.volume ?? 70) / 100);
       }
 
       // 3. Electron desktop notification (no-op in the browser).
       const tp = (window as Window & { tickerpulse?: ElectronBridge })
         .tickerpulse;
-      tp?.showNotification?.(alertEvent.ticker, alertEvent.message);
+      tp?.showNotification?.(safeTicker, safeMessage);
     }
   }, [recentAlerts]);
 
   return { recentAlerts, connected };
 }
+```
