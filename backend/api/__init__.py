@@ -16,6 +16,7 @@ from backend.api.errors import errors_bp
 from backend.api.error_stats import error_stats_bp
 from backend.api.metrics import metrics_bp
 from backend.api.earnings import earnings_bp
+from backend.api.app_state import app_state_bp
 
 __all__ = [
     'stocks_bp',
@@ -30,5 +31,6 @@ __all__ = [
     'error_stats_bp',
     'metrics_bp',
     'earnings_bp',
+    'app_state_bp',
 ]
 ```

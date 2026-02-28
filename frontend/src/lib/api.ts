@@ -1,3 +1,4 @@
+```typescript
 /**
  * TickerPulse AI v3.0 - API Client
  * Typed fetch wrappers for all backend REST endpoints.
@@ -9,6 +10,23 @@ import type {
   PriceAlert,
   AlertConditionType,
   RefreshIntervalConfig,
+  MetricsSummary,
+  AgentMetrics,
+  JobMetrics,
+  TimeseriesDataPoint,
+  SystemMetricsResponse,
+  ScheduledJob,
+  AgentSchedule,
+  KnownAgent,
+  AgentRun,
+  Candle,
+  StockDetail,
+  CompareResponse,
+  EarningsWidgetResponse,
+  ActivityFeedResponse,
+  ActivityFilterType,
+  ScheduleTrigger,
+  NextRunsResponse,
 } from './types';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? '';
@@ -103,6 +121,35 @@ export async function setRefreshInterval(interval: number): Promise<{ success: b
 }
 
 // ---------------------------------------------------------------------------
+// Performance metrics
+// ---------------------------------------------------------------------------
+
+export async function getMetricsSummary(days = 30): Promise<MetricsSummary> {
+  return apiFetch<MetricsSummary>(`/api/metrics/summary?days=${days}`);
+}
+
+export async function getAgentMetrics(days = 30): Promise<{ period_days: number; agents: AgentMetrics[] }> {
+  return apiFetch<{ period_days: number; agents: AgentMetrics[] }>(`/api/metrics/agents?days=${days}`);
+}
+
+export async function getMetricsTimeseries(
+  days = 30,
+  metric = 'cost',
+): Promise<{ metric: string; period_days: number; data: TimeseriesDataPoint[] }> {
+  return apiFetch<{ metric: string; period_days: number; data: TimeseriesDataPoint[] }>(
+    `/api/metrics/timeseries?days=${days}&metric=${metric}`,
+  );
+}
+
+export async function getJobMetrics(days = 30): Promise<{ period_days: number; jobs: JobMetrics[] }> {
+  return apiFetch<{ period_days: number; jobs: JobMetrics[] }>(`/api/metrics/jobs?days=${days}`);
+}
+
+export async function getSystemMetrics(days = 7): Promise<SystemMetricsResponse> {
+  return apiFetch<SystemMetricsResponse>(`/api/metrics/system?days=${days}`);
+}
+
+// ---------------------------------------------------------------------------
 // App state persistence
 // ---------------------------------------------------------------------------
 
@@ -118,3 +165,102 @@ export async function patchState(
     body: JSON.stringify(updates),
   });
 }
+
+// ---------------------------------------------------------------------------
+// Stock detail & candles
+// ---------------------------------------------------------------------------
+
+export async function getStockDetail(ticker: string, timeframe = '1M'): Promise<StockDetail> {
+  return apiFetch<StockDetail>(
+    `/api/stocks/${encodeURIComponent(ticker)}/detail?timeframe=${timeframe}`,
+  );
+}
+
+export async function getStockCandles(ticker: string, timeframe = '1M'): Promise<Candle[]> {
+  return apiFetch<Candle[]>(
+    `/api/stocks/${encodeURIComponent(ticker)}/candles?timeframe=${timeframe}`,
+  );
+}
+
+export async function getCompareData(
+  symbols: string[],
+  timeframe: string,
+): Promise<CompareResponse> {
+  return apiFetch<CompareResponse>(
+    `/api/stocks/compare?symbols=${symbols.map(encodeURIComponent).join(',')}&timeframe=${timeframe}`,
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Earnings calendar widget
+// ---------------------------------------------------------------------------
+
+export async function getEarningsWidget(days = 14): Promise<EarningsWidgetResponse> {
+  return apiFetch<EarningsWidgetResponse>(`/api/earnings/widget?days=${days}`);
+}
+
+// ---------------------------------------------------------------------------
+// Activity feed
+// ---------------------------------------------------------------------------
+
+export async function getActivityFeed(params: {
+  days?: number;
+  type?: ActivityFilterType;
+  limit?: number;
+  offset?: number;
+} = {}): Promise<ActivityFeedResponse> {
+  const qs = new URLSearchParams();
+  if (params.days !== undefined) qs.set('days', String(params.days));
+  if (params.type !== undefined) qs.set('type', params.type);
+  if (params.limit !== undefined) qs.set('limit', String(params.limit));
+  if (params.offset !== undefined) qs.set('offset', String(params.offset));
+  const query = qs.toString();
+  return apiFetch<ActivityFeedResponse>(`/api/activity/feed${query ? `?${query}` : ''}`);
+}
+
+// ---------------------------------------------------------------------------
+// Scheduler
+// ---------------------------------------------------------------------------
+
+export async function getSchedulerJobs(): Promise<ScheduledJob[]> {
+  const data = await apiFetch<{ jobs: ScheduledJob[]; total: number }>('/api/scheduler/jobs');
+  return data.jobs;
+}
+
+export async function triggerJob(jobId: string): Promise<{ success: boolean; job_id: string }> {
+  return apiFetch<{ success: boolean; job_id: string }>(
+    `/api/scheduler/jobs/${encodeURIComponent(jobId)}/trigger`,
+    { method: 'POST' },
+  );
+}
+
+export async function pauseJob(jobId: string): Promise<{ success: boolean; job_id: string }> {
+  return apiFetch<{ success: boolean; job_id: string }>(
+    `/api/scheduler/jobs/${encodeURIComponent(jobId)}/pause`,
+    { method: 'POST' },
+  );
+}
+
+export async function resumeJob(jobId: string): Promise<{ success: boolean; job_id: string }> {
+  return apiFetch<{ success: boolean; job_id: string }>(
+    `/api/scheduler/jobs/${encodeURIComponent(jobId)}/resume`,
+    { method: 'POST' },
+  );
+}
+
+export async function updateJobSchedule(
+  jobId: string,
+  payload: ScheduleTrigger,
+): Promise<{ success: boolean; job_id: string; message: string }> {
+  return apiFetch<{ success: boolean; job_id: string; message: string }>(
+    `/api/scheduler/jobs/${encodeURIComponent(jobId)}/schedule`,
+    { method: 'PUT', body: JSON.stringify(payload) },
+  );
+}
+
+export async function getNextRuns(jobId: string, n = 5): Promise<NextRunsResponse> {
+  return apiFetch<NextRunsResponse>(
+    `/api/scheduler/jobs/${encodeURIComponent(jobId)}/next-runs?n=${n}`,
+  );
+}
+```

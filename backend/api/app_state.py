@@ -1,3 +1,4 @@
+```python
 """
 TickerPulse AI v3.0 — App State API
 
@@ -159,3 +160,4 @@ def patch_app_state():
         ), 500
 
     return jsonify({"ok": True}), 200
+```
