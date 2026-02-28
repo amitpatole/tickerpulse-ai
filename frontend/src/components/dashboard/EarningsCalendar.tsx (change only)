@@ -1,0 +1,2 @@
+Line 6: `import { getEarnings }` → `import { getEarningsWidget }`  
+Line 47: `getEarnings(days)` → `getEarningsWidget(days)`

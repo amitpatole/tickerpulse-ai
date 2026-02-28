@@ -22,14 +22,16 @@ class AIProvider(ABC):
         self.api_key = api_key
 
     @abstractmethod
-    def generate_analysis(self, prompt: str, max_tokens: int = 500) -> str:
-        """Generate AI analysis from prompt"""
-        pass
+    def generate_analysis(self, prompt: str, max_tokens: int = 500) -> tuple[str, int]:
+        """Generate AI analysis from prompt.
+
+        Returns:
+            (response_text, tokens_used) — tokens_used is 0 when unavailable.
+        """
 
     @abstractmethod
     def get_provider_name(self) -> str:
         """Return provider name"""
-        pass
 
 
 class OpenAIProvider(AIProvider):
@@ -40,7 +42,7 @@ class OpenAIProvider(AIProvider):
         self.model = model
         self.base_url = "https://api.openai.com/v1/chat/completions"
 
-    def generate_analysis(self, prompt: str, max_tokens: int = 500) -> str:
+    def generate_analysis(self, prompt: str, max_tokens: int = 500) -> tuple[str, int]:
         try:
             headers = {
                 "Authorization": f"Bearer {self.api_key}",
@@ -61,11 +63,13 @@ class OpenAIProvider(AIProvider):
             response.raise_for_status()
 
             result = response.json()
-            return result['choices'][0]['message']['content'].strip()
+            text = result['choices'][0]['message']['content'].strip()
+            tokens_used = result.get('usage', {}).get('completion_tokens', 0)
+            return text, tokens_used
 
         except Exception as e:
             logger.error(f"OpenAI API error: {e}")
-            return f"Error: {str(e)}"
+            return f"Error: {str(e)}", 0
 
     def get_provider_name(self) -> str:
         return f"OpenAI ({self.model})"
@@ -79,7 +83,7 @@ class AnthropicProvider(AIProvider):
         self.model = model
         self.base_url = "https://api.anthropic.com/v1/messages"
 
-    def generate_analysis(self, prompt: str, max_tokens: int = 500) -> str:
+    def generate_analysis(self, prompt: str, max_tokens: int = 500) -> tuple[str, int]:
         try:
             headers = {
                 "x-api-key": self.api_key,
@@ -100,11 +104,13 @@ class AnthropicProvider(AIProvider):
             response.raise_for_status()
 
             result = response.json()
-            return result['content'][0]['text'].strip()
+            text = result['content'][0]['text'].strip()
+            tokens_used = result.get('usage', {}).get('output_tokens', 0)
+            return text, tokens_used
 
         except Exception as e:
             logger.error(f"Anthropic API error: {e}")
-            return f"Error: {str(e)}"
+            return f"Error: {str(e)}", 0
 
     def get_provider_name(self) -> str:
         return f"Anthropic ({self.model})"
@@ -118,7 +124,7 @@ class GoogleProvider(AIProvider):
         self.model = model
         self.base_url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 
-    def generate_analysis(self, prompt: str, max_tokens: int = 500) -> str:
+    def generate_analysis(self, prompt: str, max_tokens: int = 500) -> tuple[str, int]:
         try:
             headers = {
                 "Content-Type": "application/json"
@@ -147,16 +153,18 @@ class GoogleProvider(AIProvider):
             if response.status_code != 200:
                 error_msg = f"HTTP {response.status_code}: {response.text}"
                 logger.error(f"Google API error: HTTP {response.status_code}")
-                return f"Error: {error_msg}"
+                return f"Error: {error_msg}", 0
 
             response.raise_for_status()
 
             result = response.json()
-            return result['candidates'][0]['content']['parts'][0]['text'].strip()
+            text = result['candidates'][0]['content']['parts'][0]['text'].strip()
+            tokens_used = result.get('usageMetadata', {}).get('candidatesTokenCount', 0)
+            return text, tokens_used
 
         except Exception as e:
             logger.error(f"Google API error: {e}")
-            return f"Error: {str(e)}"
+            return f"Error: {str(e)}", 0
 
     def get_provider_name(self) -> str:
         return f"Google ({self.model})"
@@ -170,7 +178,7 @@ class GrokProvider(AIProvider):
         self.model = model
         self.base_url = "https://api.x.ai/v1/chat/completions"
 
-    def generate_analysis(self, prompt: str, max_tokens: int = 500) -> str:
+    def generate_analysis(self, prompt: str, max_tokens: int = 500) -> tuple[str, int]:
         try:
             headers = {
                 "Authorization": f"Bearer {self.api_key}",
@@ -197,12 +205,14 @@ class GrokProvider(AIProvider):
             if response.status_code != 200:
                 error_msg = f"HTTP {response.status_code}: {response.text}"
                 logger.error(f"Grok API error: {error_msg}")
-                return f"Error: {error_msg}"
+                return f"Error: {error_msg}", 0
 
             response.raise_for_status()
 
             result = response.json()
-            return result['choices'][0]['message']['content'].strip()
+            text = result['choices'][0]['message']['content'].strip()
+            tokens_used = result.get('usage', {}).get('completion_tokens', 0)
+            return text, tokens_used
 
         except Exception as e:
             error_msg = f"Grok API error: {str(e)}"
@@ -214,7 +224,7 @@ class GrokProvider(AIProvider):
                     logger.error(f"Grok API response detail: {error_detail}")
                 except Exception as je:
                     logger.error(f"Could not parse response JSON: {str(je)}")
-            return f"Error: {str(e)}"
+            return f"Error: {str(e)}", 0
 
     def get_provider_name(self) -> str:
         return f"xAI ({self.model})"
@@ -287,7 +297,7 @@ def test_provider_connection(provider_name: str, api_key: str, model: Optional[s
             return {'success': False, 'error': 'Invalid provider'}
 
         # Simple test prompt
-        response = provider.generate_analysis("Say 'OK' if you can read this.", max_tokens=10)
+        response, _ = provider.generate_analysis("Say 'OK' if you can read this.", max_tokens=10)
 
         if response and not response.startswith('Error:'):
             return {'success': True, 'provider': provider.get_provider_name()}

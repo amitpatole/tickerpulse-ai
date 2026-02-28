@@ -1,0 +1,1 @@
+Removed markdown code fences; added `persistentError` + `clearPersistentError` to context; wired `setGlobalErrorReporter(reportPersistentError)` on mount so `apiFetch`'s 4xx reporter is live.

@@ -7,16 +7,25 @@ import logging
 from datetime import datetime, timezone
 from typing import Optional
 
-from backend.database import db_session
+from backend.database import pooled_session
 
 logger = logging.getLogger(__name__)
 
 # Price data older than this is considered too stale to fire an alert.
 _AI_RATINGS_TTL_SECONDS = 1800  # 30 minutes
 
+# ---------------------------------------------------------------------------
+# Validation constants
+# ---------------------------------------------------------------------------
+
+_VALID_CONDITION_TYPES: frozenset = frozenset({'price_above', 'price_below', 'pct_change'})
+_VALID_SOUND_TYPES: frozenset = frozenset({'default', 'chime', 'alarm', 'silent'})
+_THRESHOLD_MAX: float = 1_000_000.0
+_DEFAULT_COOLDOWN_MINUTES: int = 15
+
 
 # ---------------------------------------------------------------------------
-# CRUD helpers
+# Private helpers
 # ---------------------------------------------------------------------------
 
 def _row_to_dict(row) -> dict:
@@ -26,16 +35,67 @@ def _row_to_dict(row) -> dict:
     return d
 
 
-def get_alerts() -> list[dict]:
+def _validate_condition_type(condition_type: str) -> None:
+    if condition_type not in _VALID_CONDITION_TYPES:
+        raise ValueError(
+            f"Invalid condition_type '{condition_type}'. "
+            f"Must be one of: {sorted(_VALID_CONDITION_TYPES)}"
+        )
+
+
+def _validate_sound_type(sound_type: str) -> None:
+    if sound_type not in _VALID_SOUND_TYPES:
+        raise ValueError(
+            f"Invalid sound_type '{sound_type}'. "
+            f"Must be one of: {sorted(_VALID_SOUND_TYPES)}"
+        )
+
+
+def _validate_threshold(threshold: float, condition_type: str) -> None:
+    if threshold <= 0:
+        raise ValueError("threshold must be > 0")
+    if threshold > _THRESHOLD_MAX:
+        raise ValueError(f"threshold must be <= {_THRESHOLD_MAX}")
+    if condition_type == 'pct_change' and threshold > 100:
+        raise ValueError("pct_change must be <= 100")
+
+
+def _get_cooldown_minutes() -> int:
+    """Return the configured alert cooldown in minutes (from settings table)."""
+    try:
+        with pooled_session() as conn:
+            row = conn.execute(
+                "SELECT value FROM settings WHERE key = 'alert_cooldown_minutes'"
+            ).fetchone()
+            if row is None:
+                return _DEFAULT_COOLDOWN_MINUTES
+            try:
+                return max(1, int(row['value']))
+            except (ValueError, TypeError):
+                return _DEFAULT_COOLDOWN_MINUTES
+    except Exception:
+        return _DEFAULT_COOLDOWN_MINUTES
+
+
+# ---------------------------------------------------------------------------
+# CRUD helpers
+# ---------------------------------------------------------------------------
+
+def get_alerts() -> list:
     """Return all price alerts ordered by creation date descending."""
-    with db_session() as conn:
+    with pooled_session() as conn:
         cursor = conn.execute(
             'SELECT * FROM price_alerts ORDER BY created_at DESC'
         )
         return [_row_to_dict(row) for row in cursor.fetchall()]
 
 
-def create_alert(ticker: str, condition_type: str, threshold: float, sound_type: str = 'default') -> dict:
+def create_alert(
+    ticker: str,
+    condition_type: str,
+    threshold: float,
+    sound_type: str = 'default',
+) -> dict:
     """Insert a new price alert and return the created row.
 
     Parameters
@@ -45,7 +105,8 @@ def create_alert(ticker: str, condition_type: str, threshold: float, sound_type:
     condition_type : str
         One of 'price_above', 'price_below', 'pct_change'.
     threshold : float
-        Numeric threshold for the condition.
+        Numeric threshold for the condition. Must be > 0 and <= _THRESHOLD_MAX.
+        For pct_change conditions must also be <= 100.
     sound_type : str, optional
         Per-alert sound: one of 'default', 'chime', 'alarm', 'silent'. Defaults to 'default'.
 
@@ -53,8 +114,18 @@ def create_alert(ticker: str, condition_type: str, threshold: float, sound_type:
     -------
     dict
         The newly created alert row.
+
+    Raises
+    ------
+    ValueError
+        On invalid condition_type, sound_type, or threshold.
     """
-    with db_session() as conn:
+    _validate_condition_type(condition_type)
+    _validate_sound_type(sound_type)
+    threshold = float(threshold)
+    _validate_threshold(threshold, condition_type)
+
+    with pooled_session() as conn:
         cursor = conn.execute(
             '''INSERT INTO price_alerts (ticker, condition_type, threshold, sound_type)
                VALUES (?, ?, ?, ?)''',
@@ -67,6 +138,60 @@ def create_alert(ticker: str, condition_type: str, threshold: float, sound_type:
         return _row_to_dict(row)
 
 
+def update_alert(
+    alert_id: int,
+    condition_type: Optional[str] = None,
+    threshold: Optional[float] = None,
+    sound_type: Optional[str] = None,
+) -> Optional[dict]:
+    """Update fields on a price alert.
+
+    Returns None if the ID was not found.
+
+    When any field is changed the fire-tracking columns (fired_at, fire_count)
+    are reset so the alert can fire again with the new parameters.
+    When no fields are changed the current row is returned unchanged.
+
+    Raises
+    ------
+    ValueError
+        On invalid condition_type, sound_type, or threshold.
+    """
+    if condition_type is not None:
+        _validate_condition_type(condition_type)
+    if sound_type is not None:
+        _validate_sound_type(sound_type)
+
+    with pooled_session() as conn:
+        row = conn.execute(
+            'SELECT * FROM price_alerts WHERE id = ?', (alert_id,)
+        ).fetchone()
+        if row is None:
+            return None
+
+        has_change = condition_type is not None or threshold is not None or sound_type is not None
+        if not has_change:
+            return _row_to_dict(row)
+
+        new_condition_type = condition_type if condition_type is not None else row['condition_type']
+        new_threshold = float(threshold) if threshold is not None else float(row['threshold'])
+        new_sound_type = sound_type if sound_type is not None else row['sound_type']
+
+        _validate_threshold(new_threshold, new_condition_type)
+
+        conn.execute(
+            '''UPDATE price_alerts
+               SET condition_type = ?, threshold = ?, sound_type = ?,
+                   fired_at = NULL, fire_count = 0
+               WHERE id = ?''',
+            (new_condition_type, new_threshold, new_sound_type, alert_id),
+        )
+        updated = conn.execute(
+            'SELECT * FROM price_alerts WHERE id = ?', (alert_id,)
+        ).fetchone()
+        return _row_to_dict(updated)
+
+
 def update_alert_sound_type(alert_id: int, sound_type: str) -> Optional[dict]:
     """Update the sound_type of a price alert.
 
@@ -74,8 +199,14 @@ def update_alert_sound_type(alert_id: int, sound_type: str) -> Optional[dict]:
     -------
     dict or None
         Updated alert row, or None if the ID was not found.
+
+    Raises
+    ------
+    ValueError
+        If sound_type is not a valid option.
     """
-    with db_session() as conn:
+    _validate_sound_type(sound_type)
+    with pooled_session() as conn:
         cursor = conn.execute(
             'UPDATE price_alerts SET sound_type = ? WHERE id = ?',
             (sound_type, alert_id),
@@ -90,7 +221,7 @@ def update_alert_sound_type(alert_id: int, sound_type: str) -> Optional[dict]:
 
 def delete_alert(alert_id: int) -> bool:
     """Delete a price alert by ID. Returns True if a row was deleted."""
-    with db_session() as conn:
+    with pooled_session() as conn:
         cursor = conn.execute(
             'DELETE FROM price_alerts WHERE id = ?', (alert_id,)
         )
@@ -100,22 +231,36 @@ def delete_alert(alert_id: int) -> bool:
 def toggle_alert(alert_id: int) -> Optional[dict]:
     """Flip the enabled flag on a price alert.
 
+    When re-enabling (disabled → enabled), fire-tracking columns are reset
+    so the alert can fire again with fresh state.
+    When disabling (enabled → disabled), fire state is preserved.
+
     Returns
     -------
     dict or None
         Updated alert row, or None if the ID was not found.
     """
-    with db_session() as conn:
+    with pooled_session() as conn:
         row = conn.execute(
             'SELECT * FROM price_alerts WHERE id = ?', (alert_id,)
         ).fetchone()
         if row is None:
             return None
-        new_enabled = 0 if row['enabled'] else 1
-        conn.execute(
-            'UPDATE price_alerts SET enabled = ? WHERE id = ?',
-            (new_enabled, alert_id),
-        )
+
+        currently_enabled = bool(row['enabled'])
+        if currently_enabled:
+            conn.execute(
+                'UPDATE price_alerts SET enabled = 0 WHERE id = ?',
+                (alert_id,),
+            )
+        else:
+            conn.execute(
+                '''UPDATE price_alerts
+                   SET enabled = 1, fired_at = NULL, fire_count = 0, notification_sent = 0
+                   WHERE id = ?''',
+                (alert_id,),
+            )
+
         updated = conn.execute(
             'SELECT * FROM price_alerts WHERE id = ?', (alert_id,)
         ).fetchone()
@@ -126,7 +271,7 @@ def toggle_alert(alert_id: int) -> Optional[dict]:
 # Evaluation
 # ---------------------------------------------------------------------------
 
-def evaluate_price_alerts(tickers: list[str]) -> None:
+def evaluate_price_alerts(tickers: list) -> None:
     """Check enabled alerts against the latest prices in ai_ratings.
 
     Called at the tail of run_technical_monitor() after the scanner run.
@@ -149,7 +294,7 @@ def evaluate_price_alerts(tickers: list[str]) -> None:
         logger.warning("evaluate_price_alerts: could not import send_sse_event")
         send_sse_event = None  # type: ignore[assignment]
 
-    with db_session() as conn:
+    with pooled_session() as conn:
         # Fetch all enabled alerts for the current watchlist tickers
         placeholders = ','.join('?' * len(tickers))
         rows = conn.execute(
@@ -160,18 +305,18 @@ def evaluate_price_alerts(tickers: list[str]) -> None:
         if not rows:
             return
 
-        # Build a lookup: ticker -> (current_price, price_change_pct, cached_at)
+        # Build a lookup: ticker -> (current_price, price_change_pct)
         price_rows = conn.execute(
             f'SELECT ticker, current_price, price_change_pct, updated_at'
             f' FROM ai_ratings WHERE ticker IN ({placeholders})',
             tickers,
         ).fetchall()
-        prices: dict[str, tuple[float, float, str]] = {}
+        prices: dict = {}
         for pr in price_rows:
             cp = pr['current_price']
             pcp = pr['price_change_pct'] or 0.0
             if cp is not None:
-                prices[pr['ticker']] = (float(cp), float(pcp), pr['updated_at'] or '')
+                prices[pr['ticker']] = (float(cp), float(pcp))
 
         now = datetime.now(timezone.utc).isoformat()
 
@@ -212,7 +357,6 @@ def evaluate_price_alerts(tickers: list[str]) -> None:
                 alert['id'], ticker, condition, threshold, current_price,
             )
 
-            # Build human-readable message
             cond_labels = {
                 'price_above': f"price rose above ${threshold:.2f}",
                 'price_below': f"price fell below ${threshold:.2f}",

@@ -4,7 +4,7 @@ AI-Powered Stock Analytics
 Analyzes technical indicators, news sentiment, and social media to provide stock ratings
 """
 
-import sqlite3
+import re
 import requests
 import logging
 from datetime import datetime, timedelta
@@ -12,8 +12,60 @@ from typing import Dict, List, Tuple, Optional
 import json
 
 from backend.config import Config
+from backend.database import db_session
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Reusable structured-response parser
+# ---------------------------------------------------------------------------
+
+def parse_structured_response(text: str) -> dict | None:
+    """Extract structured rating/score/confidence/summary from an LLM response.
+
+    Tries, in order:
+      1. Direct JSON parse of the full text
+      2. First ```json ... ``` code block
+      3. First inline JSON object containing a ``"rating"`` key
+
+    Returns a dict with keys ``rating``, ``score``, ``confidence``, ``summary``
+    or ``None`` if no valid structured data can be extracted.
+    """
+    if not text:
+        return None
+
+    def _validate(data: dict) -> dict:
+        rating = str(data.get('rating', '')).upper()
+        if rating not in ('BUY', 'HOLD', 'SELL'):
+            raise ValueError(f"invalid rating: {rating!r}")
+        return {
+            'rating': rating,
+            'score': max(0.0, min(100.0, float(data.get('score', 50)))),
+            'confidence': max(0.0, min(100.0, float(data.get('confidence', 50)))),
+            'summary': str(data.get('summary', '')).strip()[:1000],
+        }
+
+    try:
+        return _validate(json.loads(text.strip()))
+    except (json.JSONDecodeError, ValueError):
+        pass
+
+    block = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', text, re.DOTALL)
+    if block:
+        try:
+            return _validate(json.loads(block.group(1)))
+        except (json.JSONDecodeError, ValueError):
+            pass
+
+    obj = re.search(r'\{[^{}]*"rating"[^{}]*\}', text, re.DOTALL)
+    if obj:
+        try:
+            return _validate(json.loads(obj.group(0)))
+        except (json.JSONDecodeError, ValueError):
+            pass
+
+    return None
 
 
 class StockAnalytics:
@@ -164,22 +216,19 @@ class StockAnalytics:
 
     def get_sentiment_analysis(self, ticker: str, days: int = 7) -> Dict:
         """Analyze news and social media sentiment from database"""
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-
         since_date = (datetime.now() - timedelta(days=days)).isoformat()
 
-        # Get all articles for this ticker in the last N days
-        cursor.execute('''
-            SELECT sentiment_score, sentiment_label, source, engagement_score, created_at
-            FROM news
-            WHERE ticker = ? AND created_at > ?
-            ORDER BY created_at DESC
-        ''', (ticker, since_date))
-
-        articles = cursor.fetchall()
-        conn.close()
+        try:
+            with db_session(db_path=self.db_path) as conn:
+                articles = conn.execute('''
+                    SELECT sentiment_score, sentiment_label, source, engagement_score, created_at
+                    FROM news
+                    WHERE ticker = ? AND created_at > ?
+                    ORDER BY created_at DESC
+                ''', (ticker, since_date)).fetchall()
+        except Exception as exc:
+            logger.error(f"Failed to load sentiment for {ticker}: {exc}")
+            articles = []
 
         if not articles:
             return {
@@ -431,35 +480,33 @@ class StockAnalytics:
     def _save_rating_to_db(self, rating_data: Dict) -> None:
         """Cache computed rating to ai_ratings table for fast subsequent reads."""
         try:
-            conn = sqlite3.connect(self.db_path)
-            conn.execute("""
-                INSERT INTO ai_ratings
-                    (ticker, rating, score, confidence, current_price, price_change, price_change_pct,
-                     rsi, sentiment_score, sentiment_label, technical_score, summary, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-                ON CONFLICT(ticker) DO UPDATE SET
-                    rating=excluded.rating, score=excluded.score, confidence=excluded.confidence,
-                    current_price=excluded.current_price, price_change=excluded.price_change,
-                    price_change_pct=excluded.price_change_pct, rsi=excluded.rsi,
-                    sentiment_score=excluded.sentiment_score, sentiment_label=excluded.sentiment_label,
-                    technical_score=excluded.technical_score, summary=excluded.summary,
-                    updated_at=CURRENT_TIMESTAMP
-            """, (
-                rating_data['ticker'],
-                rating_data['rating'],
-                rating_data['score'],
-                rating_data['confidence'],
-                rating_data.get('current_price'),
-                rating_data.get('price_change'),
-                rating_data.get('price_change_pct'),
-                rating_data.get('rsi'),
-                rating_data.get('sentiment_score'),
-                rating_data.get('sentiment_label', 'neutral'),
-                rating_data.get('technical_score'),
-                rating_data.get('analysis_summary'),
-            ))
-            conn.commit()
-            conn.close()
+            with db_session(db_path=self.db_path) as conn:
+                conn.execute("""
+                    INSERT INTO ai_ratings
+                        (ticker, rating, score, confidence, current_price, price_change, price_change_pct,
+                         rsi, sentiment_score, sentiment_label, technical_score, summary, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    ON CONFLICT(ticker) DO UPDATE SET
+                        rating=excluded.rating, score=excluded.score, confidence=excluded.confidence,
+                        current_price=excluded.current_price, price_change=excluded.price_change,
+                        price_change_pct=excluded.price_change_pct, rsi=excluded.rsi,
+                        sentiment_score=excluded.sentiment_score, sentiment_label=excluded.sentiment_label,
+                        technical_score=excluded.technical_score, summary=excluded.summary,
+                        updated_at=CURRENT_TIMESTAMP
+                """, (
+                    rating_data['ticker'],
+                    rating_data['rating'],
+                    rating_data['score'],
+                    rating_data['confidence'],
+                    rating_data.get('current_price'),
+                    rating_data.get('price_change'),
+                    rating_data.get('price_change_pct'),
+                    rating_data.get('rsi'),
+                    rating_data.get('sentiment_score'),
+                    rating_data.get('sentiment_label', 'neutral'),
+                    rating_data.get('technical_score'),
+                    rating_data.get('analysis_summary'),
+                ))
         except Exception as e:
             logger.debug(f"Could not cache rating for {rating_data['ticker']}: {e}")
 
@@ -571,17 +618,14 @@ Be direct and actionable. Avoid disclaimers."""
 
     def get_all_ratings(self) -> List[Dict]:
         """Get AI ratings for all active stocks"""
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-
         try:
-            cursor.execute('SELECT ticker FROM stocks WHERE active = 1 ORDER BY ticker')
-            stocks = [row['ticker'] for row in cursor.fetchall()]
-        except sqlite3.OperationalError:
+            with db_session(db_path=self.db_path) as conn:
+                rows = conn.execute(
+                    'SELECT ticker FROM stocks WHERE active = 1 ORDER BY ticker'
+                ).fetchall()
+            stocks = [row['ticker'] for row in rows]
+        except Exception:
             stocks = []
-
-        conn.close()
 
         ratings = []
         for ticker in stocks:

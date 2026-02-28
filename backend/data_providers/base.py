@@ -155,9 +155,9 @@ class DataProvider(ABC):
 
     def _flush_rate_limit_to_db(self, used: int, max_: int, reset_at: Optional[str]) -> None:
         try:
-            from backend.database import db_session  # lazy to avoid circular import
+            from backend.database import pooled_session  # lazy to avoid circular import
             provider_name = self.get_provider_info().name
-            with db_session() as conn:
+            with pooled_session() as conn:
                 conn.execute(
                     "INSERT OR IGNORE INTO data_providers_config (provider_name) VALUES (?)",
                     (provider_name,),

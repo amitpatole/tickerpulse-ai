@@ -10,6 +10,15 @@ from backend.api.chat import chat_bp
 from backend.api.settings import settings_bp
 from backend.api.agents import agents_bp
 from backend.api.scheduler_routes import scheduler_bp
+from backend.api.health import health_bp
+from backend.api.errors import errors_bp
+from backend.api.error_stats import error_stats_bp
+from backend.api.metrics import metrics_bp
+from backend.api.earnings import earnings_bp
+from backend.api.app_state import app_state_bp
+from backend.api.activity import activity_bp
+from backend.api.comparison import comparison_bp
+from backend.api.ai_compare import ai_compare_bp
 
 __all__ = [
     'stocks_bp',
@@ -19,4 +28,13 @@ __all__ = [
     'settings_bp',
     'agents_bp',
     'scheduler_bp',
+    'health_bp',
+    'errors_bp',
+    'error_stats_bp',
+    'metrics_bp',
+    'earnings_bp',
+    'app_state_bp',
+    'activity_bp',
+    'comparison_bp',
+    'ai_compare_bp',
 ]

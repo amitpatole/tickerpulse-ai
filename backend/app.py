@@ -1,4 +1,3 @@
-```python
 """
 TickerPulse AI v3.0 - Flask Application Factory
 Creates and configures the Flask app, registers blueprints, sets up SSE,
@@ -13,7 +12,7 @@ from datetime import datetime
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
-from flask import Flask, Response, jsonify, send_from_directory
+from flask import Flask, Response, jsonify, request, send_from_directory
 
 from backend.config import Config
 from backend.database import db_session, init_all_tables
@@ -139,12 +138,9 @@ def send_sse_event(event_type: str, data: dict) -> None:
                 client_queue.put_nowait((event_type, data))
             except queue.Full:
                 dead_clients.append(client_queue)
-        # Remove any clients whose queues overflowed
         for dead in dead_clients:
             sse_clients.remove(dead)
 
-    # Invalidate stale sentiment cache whenever a news event lands so the
-    # next GET /api/stocks/<ticker>/sentiment recomputes immediately.
     if event_type == 'news':
         ticker = data.get('ticker')
         if ticker:
@@ -243,6 +239,13 @@ def create_app() -> Flask:
     # -- Register API blueprints ---------------------------------------------
     _register_blueprints(app)
 
+    # -- Request ID, timing, and latency tracking middleware -----------------
+    try:
+        from backend.middleware.request_logging import init_request_logging
+        init_request_logging(app)
+    except Exception as exc:
+        logger.warning("Could not initialise request logging middleware: %s", exc)
+
     # -- SSE endpoint --------------------------------------------------------
     @app.route('/api/stream')
     def stream():
@@ -252,10 +255,7 @@ def create_app() -> Flask:
             with sse_lock:
                 sse_clients.append(q)
             try:
-                # Send immediate heartbeat so the browser knows we're connected
                 yield "event: heartbeat\ndata: {}\n\n"
-                # Push current state so the UI has initial data without
-                # waiting for the next scheduled job to fire.
                 try:
                     snapshot_data = _build_snapshot()
                     yield (
@@ -272,7 +272,6 @@ def create_app() -> Flask:
                             f"data: {json.dumps(data)}\n\n"
                         )
                     except queue.Empty:
-                        # Send a heartbeat so proxies / browsers don't drop
                         yield "event: heartbeat\ndata: {}\n\n"
             except GeneratorExit:
                 pass
@@ -286,31 +285,10 @@ def create_app() -> Flask:
             mimetype='text/event-stream',
             headers={
                 'Cache-Control': 'no-cache',
-                'X-Accel-Buffering': 'no',  # nginx compatibility
+                'X-Accel-Buffering': 'no',
                 'Connection': 'keep-alive',
             },
         )
-
-    # -- Health check --------------------------------------------------------
-    @app.route('/api/health')
-    def health():
-        """Simple health-check endpoint for load balancers / monitoring."""
-        import sqlite3
-        db_status = 'error'
-        try:
-            conn = sqlite3.connect(Config.DB_PATH)
-            conn.execute('SELECT 1')
-            conn.close()
-            db_status = 'ok'
-        except Exception:
-            pass
-
-        return jsonify({
-            'status': 'ok',
-            'version': '3.0.0',
-            'timestamp': datetime.utcnow().isoformat() + 'Z',
-            'database': db_status,
-        })
 
     # -- Legacy dashboard fallback -------------------------------------------
     @app.route('/legacy')
@@ -338,7 +316,6 @@ def _setup_logging(app: Flask) -> None:
 
     log_level = getattr(logging, Config.LOG_LEVEL.upper(), logging.INFO)
 
-    # Rotating file handler
     file_handler = RotatingFileHandler(
         str(log_dir / 'tickerpulse.log'),
         maxBytes=Config.LOG_MAX_BYTES,
@@ -347,12 +324,10 @@ def _setup_logging(app: Flask) -> None:
     file_handler.setLevel(log_level)
     file_handler.setFormatter(logging.Formatter(Config.LOG_FORMAT))
 
-    # Console handler
     console_handler = logging.StreamHandler()
     console_handler.setLevel(log_level)
     console_handler.setFormatter(logging.Formatter(Config.LOG_FORMAT))
 
-    # Apply to root logger so all modules pick it up
     root_logger = logging.getLogger()
     root_logger.setLevel(log_level)
     root_logger.addHandler(file_handler)
@@ -364,10 +339,8 @@ def _setup_logging(app: Flask) -> None:
 def _register_blueprints(app: Flask) -> None:
     """Import and register API blueprints.
 
-    Each blueprint lives in ``backend/api/<module>.py`` and exposes a
-    Flask ``Blueprint`` instance named ``<name>_bp``.  Missing modules
-    are logged as warnings so the app can still start during incremental
-    development.
+    Each blueprint lives in ``backend/api/<module>.py``.  Missing modules
+    are logged as warnings so the app starts during incremental development.
     """
     blueprint_map = {
         'backend.api.stocks':           'stocks_bp',
@@ -384,7 +357,15 @@ def _register_blueprints(app: Flask) -> None:
         'backend.api.sentiment':        'sentiment_bp',
         'backend.api.providers':        'providers_bp',
         'backend.api.compare':          'compare_bp',
+        'backend.api.comparison':       'comparison_bp',
+        'backend.api.ai_compare':       'ai_compare_bp',
         'backend.api.watchlist':        'watchlist_bp',
+        'backend.api.app_state':        'app_state_bp',
+        'backend.api.metrics':          'metrics_bp',
+        'backend.api.health':           'health_bp',
+        'backend.api.errors':           'errors_bp',
+        'backend.api.error_stats':      'error_stats_bp',
+        'backend.api.activity':         'activity_bp',
     }
 
     for module_path, bp_name in blueprint_map.items():
@@ -412,7 +393,6 @@ def _init_scheduler(app: Flask) -> None:
         scheduler = APScheduler()
         scheduler.init_app(app)
 
-        # Attach to app so backend.scheduler can access it later
         app.scheduler = scheduler
         logger.info("APScheduler initialised")
     except ImportError:
@@ -421,15 +401,12 @@ def _init_scheduler(app: Flask) -> None:
             "Install with: pip install flask-apscheduler"
         )
 
-    # Register all jobs with SchedulerManager so they appear in the UI,
-    # regardless of whether APScheduler is running.
     try:
         from backend.scheduler import scheduler_manager
         from backend.jobs import register_all_jobs
 
         register_all_jobs(scheduler_manager)
 
-        # Initialize with the app (connects to APScheduler if available)
         if hasattr(app, 'scheduler'):
             scheduler_manager.init_app(app)
             scheduler_manager.start_all_jobs()
@@ -451,4 +428,3 @@ if __name__ == '__main__':
         port=Config.FLASK_PORT,
         debug=Config.FLASK_DEBUG,
     )
-```

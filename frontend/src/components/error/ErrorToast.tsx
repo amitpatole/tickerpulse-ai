@@ -1,0 +1,1 @@
+Removed markdown code fences that were preventing the file from being valid TypeScript.

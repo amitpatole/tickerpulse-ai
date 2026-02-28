@@ -1,4 +1,3 @@
-```typescript
 'use client';
 
 import { use, useCallback, useEffect, useState } from 'react';
@@ -229,4 +228,3 @@ export default function StockDetailPage({ params }: StockDetailPageProps) {
     </div>
   );
 }
-```

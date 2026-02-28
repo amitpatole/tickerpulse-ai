@@ -1,4 +1,3 @@
-```python
 """
 APScheduler configuration and management for TickerPulse AI.
 Sets up job store (SQLite), job defaults, and exposes helpers.
@@ -152,11 +151,18 @@ class SchedulerManager:
                         logger.info("Scheduled job: %s (%s)", job_id, meta['name'])
                 except Exception as exc:
                     logger.error("Failed to schedule job %s: %s", job_id, exc)
+                    try:
+                        from backend.core.error_handlers import _emit_to_error_log
+                        _emit_to_error_log('JOB_DISPATCH_ERROR', str(exc), None)
+                    except Exception:
+                        pass
 
         if not self.scheduler.running:
             self.scheduler.start()
             logger.info("Scheduler started with %d active jobs",
                         len(self.scheduler.get_jobs()))
+
+        self._reload_custom_schedules()
 
     def get_scheduler_timezone(self) -> str:
         """Return the IANA timezone name of the scheduler's configured timezone."""
@@ -208,11 +214,20 @@ class SchedulerManager:
             }
 
     def pause_job(self, job_id: str) -> bool:
-        """Pause a job."""
+        """Pause a job.
+
+        Raises
+        ------
+        SchedulerJobNotFoundError
+            When *job_id* is not in the job registry.
+        SchedulerOperationError
+            When APScheduler raises an unexpected error.
+        """
+        from backend.core.error_handlers import SchedulerJobNotFoundError, SchedulerOperationError
         with self._lock:
             if job_id not in self._job_registry:
                 logger.warning("Cannot pause unknown job: %s", job_id)
-                return False
+                raise SchedulerJobNotFoundError(f"Job not found: {job_id}")
             try:
                 if self.scheduler:
                     sched_job = self.scheduler.get_job(job_id)
@@ -221,16 +236,27 @@ class SchedulerManager:
                 self._job_registry[job_id]['enabled'] = False
                 logger.info("Paused job: %s", job_id)
                 return True
+            except SchedulerJobNotFoundError:
+                raise
             except Exception as exc:
                 logger.error("Failed to pause job %s: %s", job_id, exc)
-                return False
+                raise SchedulerOperationError(f"Failed to pause job '{job_id}': {exc}") from exc
 
     def resume_job(self, job_id: str) -> bool:
-        """Resume a paused job."""
+        """Resume a paused job.
+
+        Raises
+        ------
+        SchedulerJobNotFoundError
+            When *job_id* is not in the job registry.
+        SchedulerOperationError
+            When APScheduler raises an unexpected error.
+        """
+        from backend.core.error_handlers import SchedulerJobNotFoundError, SchedulerOperationError
         with self._lock:
             if job_id not in self._job_registry:
                 logger.warning("Cannot resume unknown job: %s", job_id)
-                return False
+                raise SchedulerJobNotFoundError(f"Job not found: {job_id}")
             try:
                 if self.scheduler:
                     sched_job = self.scheduler.get_job(job_id)
@@ -250,16 +276,27 @@ class SchedulerManager:
                 self._job_registry[job_id]['enabled'] = True
                 logger.info("Resumed job: %s", job_id)
                 return True
+            except SchedulerJobNotFoundError:
+                raise
             except Exception as exc:
                 logger.error("Failed to resume job %s: %s", job_id, exc)
-                return False
+                raise SchedulerOperationError(f"Failed to resume job '{job_id}': {exc}") from exc
 
     def trigger_job(self, job_id: str) -> bool:
-        """Trigger immediate execution of a job."""
+        """Trigger immediate execution of a job.
+
+        Raises
+        ------
+        SchedulerJobNotFoundError
+            When *job_id* is not in the job registry.
+        SchedulerOperationError
+            When APScheduler raises an unexpected error.
+        """
+        from backend.core.error_handlers import SchedulerJobNotFoundError, SchedulerOperationError
         with self._lock:
             if job_id not in self._job_registry:
                 logger.warning("Cannot trigger unknown job: %s", job_id)
-                return False
+                raise SchedulerJobNotFoundError(f"Job not found: {job_id}")
             try:
                 meta = self._job_registry[job_id]
                 # Add a one-shot job that runs immediately
@@ -274,9 +311,16 @@ class SchedulerManager:
                     )
                 logger.info("Triggered immediate run of job: %s", job_id)
                 return True
+            except SchedulerJobNotFoundError:
+                raise
             except Exception as exc:
                 logger.error("Failed to trigger job %s: %s", job_id, exc)
-                return False
+                try:
+                    from backend.core.error_handlers import _emit_to_error_log
+                    _emit_to_error_log('JOB_DISPATCH_ERROR', str(exc), None)
+                except Exception:
+                    pass
+                raise SchedulerOperationError(f"Failed to trigger job '{job_id}': {exc}") from exc
 
     def update_job_schedule(self, job_id: str, trigger: str, **trigger_args) -> bool:
         """Update a job's schedule.
@@ -289,11 +333,19 @@ class SchedulerManager:
             New trigger type (``'cron'``, ``'interval'``).
         **trigger_args
             New trigger keyword arguments.
+
+        Raises
+        ------
+        SchedulerJobNotFoundError
+            When *job_id* is not in the job registry.
+        SchedulerOperationError
+            When APScheduler raises an unexpected error.
         """
+        from backend.core.error_handlers import SchedulerJobNotFoundError, SchedulerOperationError
         with self._lock:
             if job_id not in self._job_registry:
                 logger.warning("Cannot update unknown job: %s", job_id)
-                return False
+                raise SchedulerJobNotFoundError(f"Job not found: {job_id}")
             try:
                 # Reschedule in APScheduler FIRST; only update registry on success
                 if self.scheduler:
@@ -317,9 +369,11 @@ class SchedulerManager:
                 logger.info("Updated schedule for job %s: trigger=%s, args=%s",
                             job_id, trigger, trigger_args)
                 return True
+            except SchedulerJobNotFoundError:
+                raise
             except Exception as exc:
                 logger.error("Failed to update job %s schedule: %s", job_id, exc)
-                return False
+                raise SchedulerOperationError(f"Failed to update schedule for job '{job_id}': {exc}") from exc
 
     def reschedule_job(self, job_id: str, seconds: int) -> bool:
         """Set a new interval for a job, or pause it when seconds == 0.
@@ -376,6 +430,144 @@ class SchedulerManager:
                 logger.error("Failed to reschedule job %s: %s", job_id, exc)
                 return False
 
+    def register_custom_schedule(
+        self,
+        schedule_id: int,
+        job_id: str,
+        label: str,
+        trigger: str,
+        trigger_args: dict,
+        enabled: bool = True,
+    ) -> bool:
+        """Add or replace a custom agent schedule in APScheduler.
+
+        The APScheduler job ID is ``custom_{schedule_id}`` to avoid collisions
+        with built-in jobs.  When *enabled* is False the job is removed from
+        APScheduler (but the DB row is kept by the caller).
+
+        Parameters
+        ----------
+        schedule_id : int
+            Primary key from the ``agent_schedules`` table.
+        job_id : str
+            Agent job identifier (e.g. ``'morning_briefing'``).
+        label : str
+            Human-readable name shown in the scheduler UI.
+        trigger : str
+            ``'cron'`` or ``'interval'``.
+        trigger_args : dict
+            Trigger keyword arguments forwarded to APScheduler.
+        enabled : bool
+            When False, the job is removed from APScheduler instead of added.
+        """
+        from backend.jobs.run_agent import run_agent_job
+        aps_job_id = f'custom_{schedule_id}'
+        try:
+            if not enabled:
+                if self.scheduler:
+                    existing = self.scheduler.get_job(aps_job_id)
+                    if existing:
+                        self.scheduler.remove_job(aps_job_id)
+                        logger.info("Custom schedule disabled: aps_id=%s", aps_job_id)
+                return True
+
+            if self.scheduler:
+                self.scheduler.add_job(
+                    run_agent_job,
+                    trigger,
+                    id=aps_job_id,
+                    name=label,
+                    args=[job_id],
+                    replace_existing=True,
+                    **trigger_args,
+                )
+                logger.info(
+                    "Custom schedule registered: id=%d job_id=%s aps_id=%s trigger=%s",
+                    schedule_id, job_id, aps_job_id, trigger,
+                )
+            return True
+        except Exception as exc:
+            logger.error("Failed to register custom schedule %d: %s", schedule_id, exc)
+            try:
+                from backend.core.error_handlers import _emit_to_error_log
+                _emit_to_error_log('JOB_DISPATCH_ERROR', str(exc), None)
+            except Exception:
+                pass
+            return False
+
+    def remove_custom_schedule(self, schedule_id: int) -> bool:
+        """Remove a custom agent schedule from APScheduler.
+
+        Parameters
+        ----------
+        schedule_id : int
+            Primary key from the ``agent_schedules`` table.
+        """
+        aps_job_id = f'custom_{schedule_id}'
+        try:
+            if self.scheduler:
+                existing = self.scheduler.get_job(aps_job_id)
+                if existing:
+                    self.scheduler.remove_job(aps_job_id)
+                    logger.info("Custom schedule removed: aps_id=%s", aps_job_id)
+            return True
+        except Exception as exc:
+            logger.error("Failed to remove custom schedule %d: %s", schedule_id, exc)
+            return False
+
+    def _reload_custom_schedules(self) -> None:
+        """Sync enabled custom schedules from ``agent_schedules`` into APScheduler.
+
+        Called from :meth:`start_all_jobs` after the standard jobs are started.
+        Ensures custom schedules persist across restarts even if the APScheduler
+        SQLAlchemy job store is reset.
+        """
+        try:
+            from backend.database import pooled_session
+            import json
+            with pooled_session() as conn:
+                rows = conn.execute(
+                    "SELECT id, job_id, label, trigger, trigger_args, enabled "
+                    "FROM agent_schedules"
+                ).fetchall()
+            for row in rows:
+                schedule_id = row['id']
+                aps_job_id = f'custom_{schedule_id}'
+                # If APScheduler already has this job (persisted jobstore), skip
+                if self.scheduler and self.scheduler.get_job(aps_job_id):
+                    continue
+                trigger_args = json.loads(row['trigger_args'] or '{}')
+                self.register_custom_schedule(
+                    schedule_id=schedule_id,
+                    job_id=row['job_id'],
+                    label=row['label'],
+                    trigger=row['trigger'],
+                    trigger_args=trigger_args,
+                    enabled=bool(row['enabled']),
+                )
+        except Exception as exc:
+            logger.error("Failed to reload custom schedules: %s", exc)
+
+    def get_status(self) -> Dict[str, Any]:
+        """Return a lightweight scheduler status snapshot for health checks.
+
+        Returns a dict with ``running``, ``job_count``, and ``timezone``.
+        Thread-safe; does not require the scheduler to be running.
+        """
+        running = self.is_running()
+        with self._lock:
+            job_count = len(self._job_registry)
+        timezone = self.get_scheduler_timezone()
+        return {
+            'running': running,
+            'job_count': job_count,
+            'timezone': timezone,
+        }
+
+    def is_running(self) -> bool:
+        """Return True if the underlying APScheduler instance is running."""
+        return bool(self.scheduler and self.scheduler.running)
+
     def is_market_hours(self, market: str = 'US') -> bool:
         """Check if currently within market hours.
 
@@ -416,4 +608,3 @@ class SchedulerManager:
 
 # Module-level singleton -- populated by backend.jobs.register_all_jobs()
 scheduler_manager = SchedulerManager()
-```

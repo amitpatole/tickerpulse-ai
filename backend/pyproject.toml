@@ -1,0 +1,22 @@
+# TickerPulse AI v3.0 — Python tooling configuration
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["backend"]
+
+[tool.ruff.lint]
+# E = pycodestyle errors, F = pyflakes (undefined names, unused imports)
+select = ["E", "F"]
+ignore = [
+    "E501",  # line too long — formatter handles this, not linter
+    "E402",  # module-level import not at top — Flask app factory pattern requires this
+    "F401",  # imported but unused — __init__.py re-exports and TYPE_CHECKING guards
+]
+
+exclude = [
+    "__pycache__",
+    ".git",
+    "*.pyc",
+    "backend/tests",
+]

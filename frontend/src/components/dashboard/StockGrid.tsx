@@ -1,4 +1,3 @@
-```typescript
 'use client';
 
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
@@ -401,4 +400,3 @@ export default function StockGrid({ watchlistId = 1 }: StockGridProps) {
     </div>
   );
 }
-```

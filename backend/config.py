@@ -116,6 +116,21 @@ class Config:
     DAILY_BUDGET_WARNING = float(os.getenv('DAILY_BUDGET_WARNING', 75.0))
 
     # -------------------------------------------------------------------------
+    # Database connection pool
+    # -------------------------------------------------------------------------
+    # Number of SQLite connections kept alive in the process-wide pool.
+    # Increase if you see "DB pool exhausted" errors under high concurrency.
+    DB_POOL_SIZE: int = int(os.getenv('DB_POOL_SIZE', 5))
+    # Seconds to wait for a free connection before raising RuntimeError.
+    DB_POOL_TIMEOUT: float = float(os.getenv('DB_POOL_TIMEOUT', 10.0))
+    # Milliseconds SQLite waits on a locked resource before returning SQLITE_BUSY.
+    # Prevents spurious "database is locked" errors under concurrent writes.
+    DB_BUSY_TIMEOUT_MS: int = int(os.getenv('DB_BUSY_TIMEOUT_MS', 5000))
+    # SQLite page-cache size in KiB (stored as negative value per PRAGMA convention).
+    # 2 MB default keeps hot tables in memory, reducing I/O on repeated reads.
+    DB_CACHE_SIZE_KB: int = int(os.getenv('DB_CACHE_SIZE_KB', 8000))
+
+    # -------------------------------------------------------------------------
     # Rate limiting
     # -------------------------------------------------------------------------
     RATE_LIMIT_DEFAULT = os.getenv('RATE_LIMIT_DEFAULT', '60/minute')
@@ -130,3 +145,50 @@ class Config:
     LOG_FORMAT = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     LOG_MAX_BYTES = int(os.getenv('LOG_MAX_BYTES', 10_485_760))  # 10 MB
     LOG_BACKUP_COUNT = int(os.getenv('LOG_BACKUP_COUNT', 5))
+    # Emit structured JSON logs instead of plaintext (set LOG_FORMAT_JSON=true).
+    # Accepts LOG_JSON as a legacy alias so existing deployments keep working.
+    LOG_FORMAT_JSON: bool = (
+        os.getenv('LOG_FORMAT_JSON', os.getenv('LOG_JSON', 'false')).lower() == 'true'
+    )
+    # Log the request body on POST/PUT requests (disabled by default — may
+    # contain sensitive data).
+    LOG_REQUEST_BODY: bool = os.getenv('LOG_REQUEST_BODY', 'false').lower() == 'true'
+
+    # -------------------------------------------------------------------------
+    # Swagger / OpenAPI
+    # -------------------------------------------------------------------------
+    SWAGGER_ENABLED: bool = os.getenv('SWAGGER_ENABLED', 'true').lower() == 'true'
+
+    # -------------------------------------------------------------------------
+    # Price refresh (real-time WebSocket updates)
+    # -------------------------------------------------------------------------
+    # Default polling interval in seconds used when no DB override is stored.
+    # 0 means manual mode (auto-refresh disabled).
+    # The value is persisted to the settings table via PUT /api/settings/refresh-interval
+    # so users can change it at runtime without restarting the server.
+    PRICE_REFRESH_INTERVAL_SECONDS: int = int(
+        os.getenv('PRICE_REFRESH_INTERVAL_SECONDS', 30)
+    )
+
+    # Canonical alias referenced by the settings endpoint and scheduler when
+    # computing the effective default.  Mirrors PRICE_REFRESH_INTERVAL_SECONDS.
+    REFRESH_INTERVAL_DEFAULT_SEC: int = int(
+        os.getenv('PRICE_REFRESH_INTERVAL_SECONDS', 30)
+    )
+
+    # Maximum number of tickers a single WebSocket client may subscribe to.
+    # Protects against accidental (or malicious) subscription flooding.
+    WS_MAX_SUBSCRIPTIONS_PER_CLIENT: int = int(
+        os.getenv('WS_MAX_SUBSCRIPTIONS_PER_CLIENT', 50)
+    )
+
+    # When True (default), the price_refresh job fans out a ``price_batch``
+    # WebSocket message to every subscribed client after each fetch cycle.
+    # Set WS_PRICE_BROADCAST=false to disable WS broadcasting without stopping
+    # the SSE price_update feed.
+    WS_PRICE_BROADCAST: bool = os.getenv('WS_PRICE_BROADCAST', 'true').lower() == 'true'
+
+    # Number of parallel worker threads for the price refresh job.
+    # Each worker calls _fetch_price() for one ticker; keep <= DB_POOL_SIZE
+    # to avoid pool contention when persisting results.
+    PRICE_REFRESH_WORKERS: int = int(os.getenv('PRICE_REFRESH_WORKERS', 10))

@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { CalendarDays, Clock, TrendingUp, RefreshCw, AlertTriangle } from 'lucide-react';
-import { getEarnings } from '@/lib/api';
+import { getEarningsWidget } from '@/lib/api';
 import type { EarningsEvent } from '@/lib/types';
 
 const TIME_LABELS: Record<string, string> = {
@@ -44,7 +44,7 @@ export default function EarningsCalendar() {
     setLoading(true);
     setError(null);
     try {
-      const data = await getEarnings(days);
+      const data = await getEarningsWidget(days);
       setEvents(data.events);
       setStale(data.stale);
     } catch (err) {
