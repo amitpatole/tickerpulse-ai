@@ -1,3 +1,4 @@
+```yaml
 # TickerPulse AI v3.0 - Docker Compose
 # Optional containerized deployment
 
@@ -36,6 +37,7 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
+      start_period: 15s
 
   frontend:
     build:
@@ -54,3 +56,4 @@ services:
 volumes:
   tickerpulse-data:
     driver: local
+```
