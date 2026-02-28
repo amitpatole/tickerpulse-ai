@@ -1,3 +1,4 @@
+```yaml
 name: Build Windows Installer
 
 on:
@@ -15,7 +16,7 @@ permissions:
   contents: write
 
 jobs:
-  build:
+  build-windows:
     runs-on: windows-latest
     timeout-minutes: 45
 
@@ -98,7 +99,10 @@ jobs:
 
       - name: Download Node.js Windows binary
         run: |
-          $NodeVersion = "v22.14.0"
+          # Pin to a specific Node 24 LTS release — keep in sync with the
+          # "Set up Node.js 24" step above. Update this version when the CI
+          # node-version is bumped.
+          $NodeVersion = "v24.2.0"
           $NodeUrl = "https://nodejs.org/dist/$NodeVersion/win-x64/node.exe"
           Write-Host "Downloading Node.js $NodeVersion..."
           Invoke-WebRequest -Uri $NodeUrl -OutFile "build\frontend\node.exe"
@@ -162,3 +166,4 @@ jobs:
           name: TickerPulse-AI-Windows-Installer
           path: ${{ steps.find-exe.outputs.EXE_PATH }}
           retention-days: 30
+```
