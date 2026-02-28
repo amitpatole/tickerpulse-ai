@@ -1,4 +1,5 @@
 ```python
+
 """
 TickerPulse AI v3.0 - Price Refresh Job
 Periodic APScheduler job that fetches live prices for the active watchlist,
@@ -126,6 +127,9 @@ def _fetch_prices_batch(tickers: list) -> dict:
     success is acceptable, mirroring the old per-ticker behaviour).
     """
     import yfinance as yf
+
+    if not tickers:
+        return {}
 
     try:
         df = yf.download(
