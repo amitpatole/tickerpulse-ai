@@ -1,3 +1,4 @@
+```python
 """
 TickerPulse AI v3.0 - Google OAuth Authentication Routes
 OAuth 2.0 login flow: initiate, callback, logout, and current-user info.
@@ -10,24 +11,18 @@ from flask_login import login_user, logout_user, current_user
 
 from backend.config import Config
 from backend.auth_utils import User
+from backend.core.error_handlers import UnauthorizedError, handle_api_errors
 
 logger = logging.getLogger(__name__)
 
 auth_bp = Blueprint('auth', __name__, url_prefix='/auth')
 
-# OAuth client is initialised lazily via init_oauth() called from create_app()
 _google = None
 
 
 def init_oauth(app) -> None:
-    """Register the Google OAuth client with the Flask app.
-
-    Must be called from ``create_app()`` after the app object is created so
-    that authlib can store state in ``app.extensions``.
-    """
     global _google
     from authlib.integrations.flask_client import OAuth
-
     oauth = OAuth(app)
     _google = oauth.register(
         name='google',
@@ -40,48 +35,47 @@ def init_oauth(app) -> None:
 
 @auth_bp.route('/google')
 def google_login():
-    """Redirect the browser to Google's OAuth consent screen."""
     redirect_uri = url_for('auth.google_callback', _external=True)
     return _google.authorize_redirect(redirect_uri)
 
 
 @auth_bp.route('/google/callback')
+@handle_api_errors
 def google_callback():
-    """Exchange the OAuth authorisation code for a token, upsert the user
-    record, create a Flask-Login session, and redirect to the dashboard."""
     try:
         token = _google.authorize_access_token()
+    except Exception as exc:
+        exc_name = type(exc).__name__
+        exc_msg = str(exc).lower()
+        if 'mismatch' in exc_name.lower() or 'state' in exc_msg:
+            raise UnauthorizedError('OAuth state mismatch — possible CSRF attempt')
+        logger.exception("OAuth callback failed")
+        return redirect(f"{Config.FRONTEND_URL}/login?error=auth_failed")
+
+    try:
         userinfo = token.get('userinfo')
         if userinfo is None:
             userinfo = _google.userinfo()
-
-        google_id = userinfo['sub']
-        email = userinfo['email']
-        name = userinfo.get('name')
-
-        user = User.upsert(google_id, email, name)
+        user = User.upsert(userinfo['sub'], userinfo['email'], userinfo.get('name'))
         login_user(user, remember=True)
-        logger.info("User authenticated: %s", email)
+        logger.info("User authenticated: %s", userinfo['email'])
         return redirect(f"{Config.FRONTEND_URL}/")
     except Exception:
-        logger.exception("OAuth callback failed")
+        logger.exception("OAuth callback failed after token exchange")
         return redirect(f"{Config.FRONTEND_URL}/login?error=auth_failed")
 
 
 @auth_bp.route('/logout')
+@handle_api_errors
 def logout():
-    """Clear the Flask-Login session and redirect to the login page."""
     logout_user()
     return redirect(f"{Config.FRONTEND_URL}/login")
 
 
 @auth_bp.route('/me')
+@handle_api_errors
 def me():
-    """Return ``{id, email, name}`` for the authenticated user; 401 otherwise."""
     if not current_user.is_authenticated:
-        return jsonify({'error': 'Not authenticated'}), 401
-    return jsonify({
-        'id': current_user.id,
-        'email': current_user.email,
-        'name': current_user.name,
-    })
+        raise UnauthorizedError('Not authenticated')
+    return jsonify({'id': current_user.id, 'email': current_user.email, 'name': current_user.name})
+```
