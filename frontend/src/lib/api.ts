@@ -1,3 +1,4 @@
+```typescript
 // ─────────────────────────────────────────────────────────────────────────────
 // TickerPulse AI — API client
 // All functions return typed Promises; errors surface as ApiError instances.
@@ -20,8 +21,6 @@ import type {
   EarningsResponse,
   ExportCapabilities,
   ExportFormat,
-  HealthReadyResponse,
-  HealthResponse,
   JobMetricsResponse,
   MetricsSummary,
   MetricsTimeseriesResponse,
@@ -265,11 +264,16 @@ export async function updateAlertSoundSettings(
   });
 }
 
+/**
+ * Override the sound type for a single price alert.
+ * Calls PUT /api/alerts/<id>/sound and returns the updated alert row.
+ */
 export async function updateAlertSoundType(
+  id: number,
   soundType: AlertSoundType,
-): Promise<AlertSoundSettings> {
-  return _fetch<AlertSoundSettings>('/api/settings/alert-sound', {
-    method: 'PATCH',
+): Promise<Alert> {
+  return _fetch<Alert>(`/api/alerts/${id}/sound`, {
+    method: 'PUT',
     body: JSON.stringify({ sound_type: soundType }),
   });
 }
@@ -291,9 +295,8 @@ export async function getNews(params?: {
 // ---------------------------------------------------------------------------
 
 export async function getEarnings(params?: {
-  days?: number;
+  days_ahead?: number;
   watchlist_id?: number;
-  ticker?: string;
 }): Promise<EarningsResponse> {
   return _fetch<EarningsResponse>(`/api/earnings${_qs(params ?? {})}`);
 }
@@ -650,3 +653,8 @@ export async function getHealth(): Promise<HealthResponse> {
 export async function getHealthReady(): Promise<HealthReadyResponse> {
   return _fetch<HealthReadyResponse>('/api/health/ready');
 }
+
+// Re-export HealthResponse / HealthReadyResponse from types so consumers can
+// import from a single location.
+export type { HealthResponse, HealthReadyResponse } from './types';
+```

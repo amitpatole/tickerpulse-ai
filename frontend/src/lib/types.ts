@@ -1,3 +1,4 @@
+```typescript
 // ─────────────────────────────────────────────────────────────────────────────
 // Shared TypeScript types for TickerPulse AI frontend
 // ─────────────────────────────────────────────────────────────────────────────
@@ -30,10 +31,16 @@ export interface AlertSoundSettings {
 export interface Alert {
   id: number;
   ticker: string;
-  condition: 'above' | 'below';
+  /** Condition stored in DB — e.g. 'price_above', 'price_below' */
+  condition_type: string;
+  /** Legacy alias kept for backwards-compat with older API responses */
+  condition?: 'above' | 'below';
   threshold: number;
   current_price?: number;
-  active: boolean;
+  /** Whether the alert is currently active (DB column: enabled) */
+  enabled: boolean;
+  /** Legacy alias kept for backwards-compat */
+  active?: boolean;
   triggered_at?: string | null;
   created_at?: string;
   sound_type?: AlertSoundType;
@@ -284,21 +291,19 @@ export interface DashboardSummary {
 }
 
 export type WidgetId =
-  | 'kpi-cards'
-  | 'rate-limit'
-  | 'stock-watchlist'
-  | 'portfolio-chart'
-  | 'sector-breakdown'
-  | 'market-mood'
-  | 'news-feed'
-  | 'earnings-calendar'
-  | 'top-movers'
-  | 'sentiment-chart'
-  | 'ai-ratings'
-  | 'alerts-table';
+  | 'ai_ratings'
+  | 'news_feed'
+  | 'earnings_calendar'
+  | 'portfolio_chart'
+  | 'price_alerts'
+  | 'market_mood'
+  | 'sector_breakdown'
+  | 'top_movers'
+  | 'sentiment_chart';
 
 export interface DashboardLayout {
-  widgets: Record<WidgetId, { enabled: boolean; order: number }>;
+  widgets: WidgetId[];
+  columns?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -344,27 +349,22 @@ export interface ComparisonResult {
 // ---------------------------------------------------------------------------
 
 export interface EarningsEvent {
-  id: number;
   ticker: string;
-  company: string | null;
-  earnings_date: string;
-  time_of_day: string | null;
-  eps_estimate: number | null;
-  eps_actual: number | null;
-  revenue_estimate: number | null;
-  revenue_actual: number | null;
-  fiscal_quarter: string | null;
-  fetched_at?: string | null;
-  updated_at?: string | null;
-  on_watchlist: boolean;
+  name?: string;
+  date: string;
+  time?: 'before_open' | 'after_close' | 'during_trading' | null;
+  eps_estimate?: number | null;
+  eps_actual?: number | null;
+  revenue_estimate?: number | null;
+  revenue_actual?: number | null;
   surprise_pct?: number | null;
 }
 
 export interface EarningsResponse {
-  upcoming: EarningsEvent[];
-  past: EarningsEvent[];
-  stale: boolean;
-  as_of: string;
+  events: EarningsEvent[];
+  total?: number;
+  page?: number;
+  page_size?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -718,3 +718,4 @@ export interface HealthReadyResponse {
   db: string;
   ts: string;
 }
+```

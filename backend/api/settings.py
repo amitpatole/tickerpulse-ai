@@ -1,14 +1,16 @@
+```python
 """
 TickerPulse AI v3.0 - Settings API Routes
 Blueprint for AI provider settings, data provider settings, and agent framework configuration.
 """
 
+import json
 import sqlite3
 import logging
 
 from flask import Blueprint, jsonify, request
 
-from backend.api.error_codes import ErrorCode
+from backend.core.error_codes import ErrorCode
 from backend.api.validators.provider_validators import (
     validate_add_provider_request,
     validate_test_provider_request,
@@ -18,6 +20,8 @@ from backend.core.settings_manager import (
     add_ai_provider,
     set_active_provider,
     delete_ai_provider,
+    get_setting,
+    set_setting,
 )
 from backend.core.ai_providers import test_provider_connection
 from backend.config import Config
@@ -840,3 +844,229 @@ def set_refresh_interval():
         logger.warning("Could not reschedule price_refresh job: %s", e)
 
     return jsonify({'success': True, 'interval': interval})
+
+
+# ---------------------------------------------------------------------------
+# UI Preferences endpoints
+# Stores a JSON blob under the 'ui_preferences' key in the settings table.
+# Only an explicit allowlist of keys is accepted to prevent arbitrary storage.
+# ---------------------------------------------------------------------------
+
+_UI_PREF_ALLOWED_KEYS: frozenset[str] = frozenset({
+    'sidebar_collapsed',
+    'selected_market',
+    'selected_watchlist_id',
+    'dashboard_layout',
+    'color_scheme',
+})
+
+_UI_PREF_DEFAULTS: dict = {
+    'sidebar_collapsed': False,
+    'selected_market': 'All',
+    'selected_watchlist_id': None,
+    'dashboard_layout': None,
+    'color_scheme': 'system',
+}
+
+
+@settings_bp.route('/settings/ui-prefs', methods=['GET'])
+def get_ui_prefs():
+    """Return all persisted UI preference values merged with defaults.
+    ---
+    tags:
+      - Settings
+    summary: Get UI preferences
+    description: >
+      Returns a JSON object of UI preferences stored in the settings table.
+      Any key not yet saved returns its default value.
+    responses:
+      200:
+        description: UI preferences.
+        schema:
+          type: object
+          properties:
+            sidebar_collapsed:
+              type: boolean
+              example: false
+            selected_market:
+              type: string
+              example: All
+            selected_watchlist_id:
+              type: integer
+              nullable: true
+              example: null
+    """
+    try:
+        raw = get_setting('ui_preferences')
+        stored: dict = json.loads(raw) if raw else {}
+        prefs = {
+            **_UI_PREF_DEFAULTS,
+            **{k: v for k, v in stored.items() if k in _UI_PREF_ALLOWED_KEYS},
+        }
+        return jsonify(prefs)
+    except Exception as e:
+        logger.error("Error reading ui_preferences: %s", e)
+        return jsonify(_UI_PREF_DEFAULTS)
+
+
+@settings_bp.route('/settings/ui-prefs', methods=['PUT'])
+def update_ui_prefs():
+    """Patch one or more UI preferences.
+    ---
+    tags:
+      - Settings
+    summary: Update UI preferences
+    consumes:
+      - application/json
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          properties:
+            sidebar_collapsed:
+              type: boolean
+            selected_market:
+              type: string
+            selected_watchlist_id:
+              type: integer
+              nullable: true
+    responses:
+      200:
+        description: Updated preferences.
+      400:
+        description: Unknown preference keys in request body.
+        schema:
+          $ref: '#/definitions/Error'
+      500:
+        description: Database write error.
+        schema:
+          $ref: '#/definitions/Error'
+    """
+    data = request.get_json(silent=True) or {}
+
+    unknown = set(data.keys()) - _UI_PREF_ALLOWED_KEYS
+    if unknown:
+        return jsonify({
+            'error': f'Unknown preference keys: {", ".join(sorted(unknown))}',
+        }), 400
+
+    try:
+        raw = get_setting('ui_preferences')
+        current: dict = json.loads(raw) if raw else {}
+        current.update({k: v for k, v in data.items() if k in _UI_PREF_ALLOWED_KEYS})
+        set_setting('ui_preferences', json.dumps(current))
+        prefs = {
+            **_UI_PREF_DEFAULTS,
+            **{k: v for k, v in current.items() if k in _UI_PREF_ALLOWED_KEYS},
+        }
+        return jsonify(prefs)
+    except Exception as e:
+        logger.error("Error updating ui_preferences: %s", e)
+        return jsonify({'error': 'Database error'}), 500
+
+
+# ---------------------------------------------------------------------------
+# Alert Sound Settings
+# Global notification sound configuration for price alerts.
+# Stored as individual keys in the settings KV table.
+# ---------------------------------------------------------------------------
+
+_VALID_ALERT_SOUND_TYPES = frozenset({'chime', 'alarm', 'silent'})
+
+_ALERT_SOUND_DEFAULTS: dict = {
+    'enabled': True,
+    'sound_type': 'chime',
+    'volume': 70,
+    'mute_when_active': False,
+}
+
+
+def _read_alert_sound_settings() -> dict:
+    """Read alert sound settings from KV store, merging with defaults."""
+    enabled_raw = get_setting('alert_sound_enabled')
+    sound_type = get_setting('alert_sound_type') or _ALERT_SOUND_DEFAULTS['sound_type']
+    volume_raw = get_setting('alert_sound_volume')
+    mute_raw = get_setting('alert_mute_when_active')
+
+    enabled = (
+        enabled_raw.lower() == 'true'
+        if enabled_raw is not None
+        else _ALERT_SOUND_DEFAULTS['enabled']
+    )
+    volume = int(volume_raw) if volume_raw is not None else _ALERT_SOUND_DEFAULTS['volume']
+    mute_when_active = (
+        mute_raw.lower() == 'true'
+        if mute_raw is not None
+        else _ALERT_SOUND_DEFAULTS['mute_when_active']
+    )
+
+    return {
+        'enabled': enabled,
+        'sound_type': sound_type,
+        'volume': volume,
+        'mute_when_active': mute_when_active,
+    }
+
+
+@settings_bp.route('/settings/alert-sound', methods=['GET'])
+def get_alert_sound_settings():
+    """Return global alert notification sound settings.
+
+    Returns the current sound configuration including enabled state, sound type,
+    volume level (0-100), and mute-when-active preference.  Falls back to defaults
+    for any key not yet persisted.
+    """
+    try:
+        return jsonify(_read_alert_sound_settings())
+    except Exception as e:
+        logger.error("Error reading alert sound settings: %s", e)
+        return jsonify(_ALERT_SOUND_DEFAULTS)
+
+
+@settings_bp.route('/settings/alert-sound', methods=['PATCH'])
+def update_alert_sound_settings():
+    """Patch global alert notification sound settings.
+
+    Accepts a partial object — only keys present in the body are updated.
+    Unrecognised keys are silently ignored.
+
+    Valid ``sound_type`` values: ``chime``, ``alarm``, ``silent``.
+    ``volume`` must be an integer in [0, 100].
+    """
+    data = request.get_json(silent=True) or {}
+
+    if 'sound_type' in data:
+        sound_type = data['sound_type']
+        if sound_type not in _VALID_ALERT_SOUND_TYPES:
+            return jsonify({
+                'error': (
+                    f'sound_type must be one of: {", ".join(sorted(_VALID_ALERT_SOUND_TYPES))}'
+                ),
+                'error_code': 'VALIDATION_ERROR',
+            }), 400
+
+    if 'volume' in data:
+        volume = data['volume']
+        if not isinstance(volume, (int, float)) or not (0 <= volume <= 100):
+            return jsonify({
+                'error': 'volume must be a number between 0 and 100',
+                'error_code': 'VALIDATION_ERROR',
+            }), 400
+
+    try:
+        if 'enabled' in data:
+            set_setting('alert_sound_enabled', str(bool(data['enabled'])).lower())
+        if 'sound_type' in data:
+            set_setting('alert_sound_type', data['sound_type'])
+        if 'volume' in data:
+            set_setting('alert_sound_volume', str(int(data['volume'])))
+        if 'mute_when_active' in data:
+            set_setting('alert_mute_when_active', str(bool(data['mute_when_active'])).lower())
+
+        return jsonify(_read_alert_sound_settings())
+    except Exception as e:
+        logger.error("Error updating alert sound settings: %s", e)
+        return jsonify({'error': 'Database error'}), 500
+```
