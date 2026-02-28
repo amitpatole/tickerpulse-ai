@@ -1,3 +1,4 @@
+```typescript
 /**
  * TickerPulse AI v3.0 - API Client
  * Typed fetch wrappers for all backend REST endpoints.
@@ -35,6 +36,7 @@ import type {
   ModelComparisonRun,
   BulkPricesResponse,
   HealthResponse,
+  HealthStatusResponse,
 } from './types';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? '';
@@ -422,3 +424,8 @@ export async function fetchBulkPrices(tickers: string[]): Promise<BulkPricesResp
 export async function fetchHealth(): Promise<HealthResponse> {
   return apiFetch<HealthResponse>('/api/health');
 }
+
+export async function fetchHealthStatus(): Promise<HealthStatusResponse> {
+  return apiFetch<HealthStatusResponse>('/api/health/status');
+}
+```

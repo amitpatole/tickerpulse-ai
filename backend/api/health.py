@@ -1,3 +1,4 @@
+```python
 """
 TickerPulse AI v3.0 - Health Check API
 
@@ -517,21 +518,25 @@ def health_live():
 def health_status():
     """Slim health status optimised for frontend polling (target: <5 ms).
 
-    Combines job health (single DB query), scheduler (sys.modules read), and
+    Combines job health (single DB query), scheduler (sys.modules read),
+    data freshness (price age check), ws_manager (extension lookup), and
     AI provider (Config attribute read) without pool-stat or file-stat I/O.
 
     Response shape::
 
         {
-            "status":     "ok" | "degraded",
-            "db":         "ok" | "error",
-            "scheduler":  "ok" | "error" | "not_configured",
-            "job_health": "ok" | "degraded" | "error",
-            "ai_provider": "ok" | "unconfigured" | "error",
-            "ts":          "<ISO-8601 UTC>"
+            "status":         "ok" | "degraded",
+            "db":             "ok" | "error",
+            "scheduler":      "ok" | "error" | "not_configured",
+            "job_health":     "ok" | "degraded" | "error",
+            "data_freshness": { "stale": bool, "prices_age_min": float, ... },
+            "ws_manager":     { "status": str, "client_count": int | null },
+            "ai_provider":    "ok" | "unconfigured" | "error",
+            "ts":             "<ISO-8601 UTC>"
         }
     """
     import sys
+    app = current_app._get_current_object()
 
     # Single DB query covers both connectivity and job last-run status.
     job_health_info = _check_job_health()
@@ -550,12 +555,21 @@ def health_status():
         logger.warning('health_status: scheduler check: %s', exc)
         scheduler_status = 'error'
 
+    # Data freshness — check if prices are stale.
+    freshness_info = _check_data_freshness()
+    stale = freshness_info.get('stale', False)
+
+    # WebSocket manager — extension lookup, no I/O.
+    ws_info = _check_ws_manager(app)
+
     # AI provider — Config attribute reads, no I/O.
     ai_status = _check_ai_provider()['status']
 
     overall = _derive_overall_status(
         db_status,
         scheduler_status,
+        stale=stale,
+        ws_status=ws_info['status'],
         job_health_status=job_health_info['status'],
     )
 
@@ -564,6 +578,9 @@ def health_status():
         'db': db_status,
         'scheduler': scheduler_status,
         'job_health': job_health_info['status'],
+        'data_freshness': freshness_info,
+        'ws_manager': ws_info,
         'ai_provider': ai_status,
         'ts': datetime.utcnow().isoformat() + 'Z',
     })
+```
