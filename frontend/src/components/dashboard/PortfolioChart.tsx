@@ -1,6 +1,7 @@
+```tsx
 'use client';
 
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useId, useRef } from 'react';
 import {
   createChart,
   AreaSeries,
@@ -10,16 +11,17 @@ import {
 } from 'lightweight-charts';
 import { clsx } from 'clsx';
 import { useApi } from '@/hooks/useApi';
+import { useChartTimeframe } from '@/hooks/useChartTimeframe';
 import { getPortfolioHistory } from '@/lib/api';
-import type { PortfolioPoint } from '@/lib/types';
+import type { PortfolioPoint, Timeframe } from '@/lib/types';
+import TimeframeToggle from '@/components/stocks/TimeframeToggle';
 
-type DaysOption = 7 | 30 | 90;
-
-const DAYS_OPTIONS: { label: string; value: DaysOption }[] = [
-  { label: '7D', value: 7 },
-  { label: '30D', value: 30 },
-  { label: '90D', value: 90 },
-];
+const PORTFOLIO_TIMEFRAMES: Timeframe[] = ['1W', '1M', '3M'];
+const PORTFOLIO_DAYS_MAP: Record<string, number> = {
+  '1W': 7,
+  '1M': 30,
+  '3M': 90,
+};
 
 interface PortfolioAreaChartProps {
   data: PortfolioPoint[];
@@ -67,9 +69,7 @@ function PortfolioAreaChart({ data, height = 200 }: PortfolioAreaChartProps) {
     });
 
     if (data.length > 0) {
-      areaSeries.setData(
-        data.map((p) => ({ time: p.date as Time, value: p.value }))
-      );
+      areaSeries.setData(data.map((p) => ({ time: p.date as Time, value: p.value })));
       chart.timeScale().fitContent();
     }
 
@@ -111,14 +111,20 @@ function PortfolioAreaChart({ data, height = 200 }: PortfolioAreaChartProps) {
 }
 
 export default function PortfolioChart() {
-  const [days, setDays] = useState<DaysOption>(30);
+  const [portfolioTimeframe, setPortfolioTimeframe] = useChartTimeframe(
+    'vo_portfolio_chart_timeframe',
+    '1M',
+    PORTFOLIO_TIMEFRAMES,
+  );
+
+  const days = PORTFOLIO_DAYS_MAP[portfolioTimeframe] ?? 30;
 
   const fetcher = () => getPortfolioHistory(days);
-  const { data: points, loading, error } = useApi<PortfolioPoint[]>(
-    fetcher,
-    [days],
-    { refreshInterval: 300_000 }
-  );
+  const {
+    data: points,
+    loading,
+    error,
+  } = useApi<PortfolioPoint[]>(fetcher, [days], { refreshInterval: 300_000 });
 
   const first = points?.[0]?.value ?? 0;
   const last = points?.[points.length - 1]?.value ?? 0;
@@ -135,31 +141,21 @@ export default function PortfolioChart() {
             <span
               className={clsx(
                 'font-mono text-xs font-semibold',
-                isPositive ? 'text-emerald-400' : 'text-red-400'
+                isPositive ? 'text-emerald-400' : 'text-red-400',
               )}
             >
-              {isPositive ? '+' : ''}{delta.toFixed(2)}%
+              {isPositive ? '+' : ''}
+              {delta.toFixed(2)}%
             </span>
           )}
         </div>
 
-        <div role="group" aria-label="Select time range" className="flex gap-1">
-          {DAYS_OPTIONS.map((opt) => (
-            <button
-              key={opt.value}
-              onClick={() => setDays(opt.value)}
-              className={clsx(
-                'rounded px-2.5 py-1 text-xs font-medium transition-colors',
-                days === opt.value
-                  ? 'bg-slate-700 text-white'
-                  : 'text-slate-400 hover:bg-slate-700/50 hover:text-slate-200'
-              )}
-              aria-pressed={days === opt.value}
-            >
-              {opt.label}
-            </button>
-          ))}
-        </div>
+        <TimeframeToggle
+          selected={portfolioTimeframe}
+          onChange={setPortfolioTimeframe}
+          timeframes={PORTFOLIO_TIMEFRAMES}
+          compact
+        />
       </div>
 
       {/* Body */}
@@ -181,3 +177,4 @@ export default function PortfolioChart() {
     </div>
   );
 }
+```
