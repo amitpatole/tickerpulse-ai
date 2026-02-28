@@ -1,4 +1,4 @@
-```typescript
+```tsx
 'use client';
 
 import { useState } from 'react';
@@ -11,6 +11,7 @@ import JobsTable from '@/components/metrics/JobsTable';
 import SystemPanel from '@/components/metrics/SystemPanel';
 import PeriodSelector from '@/components/metrics/PeriodSelector';
 import { useApi } from '@/hooks/useApi';
+import { usePersistedState } from '@/hooks/usePersistedState';
 import {
   getMetricsSummary,
   getAgentMetrics,
@@ -24,7 +25,7 @@ import {
 // ---------------------------------------------------------------------------
 
 type TabId = 'overview' | 'agents' | 'jobs' | 'system';
-type MetricId = 'cost' | 'runs' | 'duration' | 'tokens';
+type MetricId = 'cost' | 'runs' | 'duration' | 'tokens' | 'error_rate';
 
 const TABS: { id: TabId; label: string; Icon: React.ComponentType<{ className?: string }> }[] = [
   { id: 'overview', label: 'Overview', Icon: BarChart3 },
@@ -34,10 +35,11 @@ const TABS: { id: TabId; label: string; Icon: React.ComponentType<{ className?: 
 ];
 
 const METRICS: { id: MetricId; label: string }[] = [
-  { id: 'cost',     label: 'Cost'     },
-  { id: 'runs',     label: 'Runs'     },
-  { id: 'duration', label: 'Duration' },
-  { id: 'tokens',   label: 'Tokens'   },
+  { id: 'cost',       label: 'Cost'       },
+  { id: 'runs',       label: 'Runs'       },
+  { id: 'duration',   label: 'Duration'   },
+  { id: 'tokens',     label: 'Tokens'     },
+  { id: 'error_rate', label: 'Error Rate' },
 ];
 
 // ---------------------------------------------------------------------------
@@ -45,8 +47,8 @@ const METRICS: { id: MetricId; label: string }[] = [
 // ---------------------------------------------------------------------------
 
 export default function MetricsPage() {
-  const [days, setDays]             = useState(30);
-  const [tab, setTab]               = useState<TabId>('overview');
+  const [days, setDays]             = usePersistedState('metrics_period_days', 30);
+  const [tab, setTab]               = usePersistedState<TabId>('metrics_active_tab', 'overview');
   const [metric, setMetric]         = useState<MetricId>('cost');
   const [refreshKey, setRefreshKey] = useState(0);
 
