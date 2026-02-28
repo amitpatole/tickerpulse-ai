@@ -1,4 +1,3 @@
-```yaml
 name: Build Windows Installer
 
 on:
@@ -166,4 +165,3 @@ jobs:
           name: TickerPulse-AI-Windows-Installer
           path: ${{ steps.find-exe.outputs.EXE_PATH }}
           retention-days: 30
-```
