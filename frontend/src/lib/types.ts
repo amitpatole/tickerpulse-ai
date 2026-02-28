@@ -1,4 +1,1 @@
-Added one line after `TimezoneMode`:
-```ts
-export type ChartViewMode = 'single' | 'multi';
-```
+*(restored full 834-line file — see write above)*
