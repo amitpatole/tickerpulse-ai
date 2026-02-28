@@ -1,4 +1,4 @@
-```tsx
+```typescript
 'use client';
 
 import { useState, useCallback, useEffect, useRef } from 'react';
@@ -6,26 +6,22 @@ import { useRouter } from 'next/navigation';
 import { Loader2 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { useApi } from '@/hooks/useApi';
+import { useChartTimeframes } from '@/hooks/useChartTimeframe';
 import { getStockDetail, getCompareData } from '@/lib/api';
 import type { Timeframe, StockDetail, CompareResponse } from '@/lib/types';
 import PriceChart from '@/components/charts/PriceChart';
 import TimeframeToggle, { STOCK_CHART_TIMEFRAMES } from './TimeframeToggle';
+import MultiTimeframeGrid from './MultiTimeframeGrid';
 import CompareInput from './CompareInput';
 
 const STORAGE_KEY = 'vo_chart_timeframe';
 const VIEW_MODE_KEY = 'vo_chart_view_mode';
 const MULTI_TF_KEY = 'vo_chart_multi_timeframes';
 const VALID_TIMEFRAMES: Timeframe[] = STOCK_CHART_TIMEFRAMES;
-const COMPARISON_PALETTE = ['#f59e0b', '#10b981', '#8b5cf6', '#ef4444'];
 const DEFAULT_MULTI_TIMEFRAMES: Timeframe[] = ['1W', '1M', '3M', '1Y'];
+const COMPARISON_PALETTE = ['#f59e0b', '#10b981', '#8b5cf6', '#ef4444'];
 
 type ViewMode = 'single' | 'multi';
-
-type MultiChartEntry = {
-  points: { time: number; value: number }[];
-  loading: boolean;
-  error: string | null;
-};
 
 interface CompareOverlay {
   symbol: string;
@@ -49,25 +45,6 @@ function getInitialViewMode(): ViewMode {
   return localStorage.getItem(VIEW_MODE_KEY) === 'multi' ? 'multi' : 'single';
 }
 
-function getInitialMultiTimeframes(): Timeframe[] {
-  if (typeof window === 'undefined') return DEFAULT_MULTI_TIMEFRAMES;
-  try {
-    const stored = localStorage.getItem(MULTI_TF_KEY);
-    if (!stored) return DEFAULT_MULTI_TIMEFRAMES;
-    const parsed = JSON.parse(stored) as unknown;
-    if (
-      Array.isArray(parsed) &&
-      parsed.length >= 2 &&
-      parsed.every((tf) => VALID_TIMEFRAMES.includes(tf as Timeframe))
-    ) {
-      return parsed as Timeframe[];
-    }
-  } catch {
-    // ignore malformed storage value
-  }
-  return DEFAULT_MULTI_TIMEFRAMES;
-}
-
 function parseCompareParam(): string[] {
   if (typeof window === 'undefined') return [];
   const params = new URLSearchParams(window.location.search);
@@ -85,8 +62,11 @@ export default function StockPriceChart({ ticker }: StockPriceChartProps) {
 
   const [viewMode, setViewMode] = useState<ViewMode>(getInitialViewMode);
   const [timeframe, setTimeframe] = useState<Timeframe>(getInitialTimeframe);
-  const [selectedTimeframes, setSelectedTimeframes] = useState<Timeframe[]>(getInitialMultiTimeframes);
-  const [multiData, setMultiData] = useState<Partial<Record<Timeframe, MultiChartEntry>>>({});
+  const [multiTimeframes, setMultiTimeframes] = useChartTimeframes(
+    MULTI_TF_KEY,
+    DEFAULT_MULTI_TIMEFRAMES,
+    VALID_TIMEFRAMES,
+  );
   const [compareSymbols, setCompareSymbols] = useState<string[]>(parseCompareParam);
   const [compareData, setCompareData] = useState<CompareResponse | null>(null);
   const [compareLoading, setCompareLoading] = useState(false);
@@ -101,51 +81,6 @@ export default function StockPriceChart({ ticker }: StockPriceChartProps) {
   const { data, loading, error } = useApi<StockDetail>(fetcher, [ticker, timeframe], {
     enabled: viewMode === 'single',
   });
-
-  // Multi-mode: fetch all selected timeframes in parallel
-  useEffect(() => {
-    if (viewMode !== 'multi' || selectedTimeframes.length === 0) return;
-
-    let cancelled = false;
-
-    // Mark all selected timeframes as loading
-    setMultiData(
-      Object.fromEntries(
-        selectedTimeframes.map((tf) => [tf, { points: [], loading: true, error: null }])
-      ) as Partial<Record<Timeframe, MultiChartEntry>>
-    );
-
-    Promise.all(
-      selectedTimeframes.map((tf) =>
-        getStockDetail(ticker, tf)
-          .then((d) => ({ tf, d, error: null as string | null }))
-          .catch((err) => ({
-            tf,
-            d: null,
-            error: err instanceof Error ? err.message : 'Failed to load',
-          }))
-      )
-    ).then((results) => {
-      if (cancelled) return;
-      const newData: Partial<Record<Timeframe, MultiChartEntry>> = {};
-      for (const result of results) {
-        if (result.error || !result.d) {
-          newData[result.tf] = { points: [], loading: false, error: result.error ?? 'No data' };
-        } else {
-          newData[result.tf] = {
-            points: (result.d.candles ?? []).map((c) => ({ time: c.time, value: c.close })),
-            loading: false,
-            error: null,
-          };
-        }
-      }
-      setMultiData(newData);
-    });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [viewMode, ticker, selectedTimeframes]);
 
   // Sync compareSymbols → URL (skip first mount to avoid spurious navigation)
   useEffect(() => {
@@ -199,9 +134,10 @@ export default function StockPriceChart({ ticker }: StockPriceChartProps) {
     setTimeframe(tf);
   }
 
-  function handleMultiTimeframesChange(tfs: Timeframe[]) {
-    localStorage.setItem(MULTI_TF_KEY, JSON.stringify(tfs));
-    setSelectedTimeframes(tfs);
+  // Clicking a mini chart promotes it: lock in the timeframe then switch to single view
+  function handleMiniChartSelect(tf: Timeframe) {
+    handleTimeframeChange(tf);
+    handleViewModeChange('single');
   }
 
   function handleAddSymbol(symbol: string) {
@@ -256,14 +192,6 @@ export default function StockPriceChart({ ticker }: StockPriceChartProps) {
     }
   }
 
-  // Grid layout class for multi mode
-  function multiGridClass(count: number): string {
-    if (count <= 1) return 'grid-cols-1';
-    if (count === 2) return 'grid-cols-1 sm:grid-cols-2';
-    if (count === 3) return 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3';
-    return 'grid-cols-1 sm:grid-cols-2';
-  }
-
   return (
     <div className="rounded-xl border border-slate-700/50 bg-slate-900 p-6">
       {/* Header: title + view mode toggle + timeframe selector */}
@@ -304,13 +232,15 @@ export default function StockPriceChart({ ticker }: StockPriceChartProps) {
           </div>
         </div>
 
+        {/* Timeframe toggle: single-select in single mode, multi-select in multi mode */}
         {viewMode === 'single' ? (
           <TimeframeToggle selected={timeframe} onChange={handleTimeframeChange} />
         ) : (
           <TimeframeToggle
             multiSelect
-            selected={selectedTimeframes}
-            onChange={handleMultiTimeframesChange}
+            selected={multiTimeframes}
+            onChange={setMultiTimeframes}
+            compact
           />
         )}
       </div>
@@ -363,71 +293,14 @@ export default function StockPriceChart({ ticker }: StockPriceChartProps) {
         </>
       )}
 
-      {/* ── Multi mode ── */}
+      {/* ── Multi mode: responsive grid of mini-charts for selected timeframes ── */}
       {viewMode === 'multi' && (
         <div className="mt-2">
-          {selectedTimeframes.length === 0 ? (
-            <p className="py-12 text-center text-sm text-slate-500">
-              Select at least two timeframes above
-            </p>
-          ) : (
-            <div className={clsx('grid gap-4', multiGridClass(selectedTimeframes.length))}>
-              {selectedTimeframes.map((tf) => {
-                const entry = multiData[tf];
-                const isLoading = !entry || entry.loading;
-
-                if (isLoading) {
-                  return (
-                    <div
-                      key={tf}
-                      className="flex min-h-[220px] items-center justify-center rounded-xl border border-slate-700/50 bg-slate-800/50"
-                      aria-label={`Loading ${tf} chart`}
-                    >
-                      <Loader2
-                        className="h-5 w-5 animate-spin text-slate-500"
-                        aria-hidden="true"
-                      />
-                      <span className="sr-only">Loading {tf} data…</span>
-                    </div>
-                  );
-                }
-
-                if (entry.error) {
-                  return (
-                    <div
-                      key={tf}
-                      className="flex min-h-[220px] flex-col items-center justify-center gap-1 rounded-xl border border-slate-700/50 bg-slate-800/50 p-4"
-                    >
-                      <p className="text-xs font-semibold text-slate-400">{tf}</p>
-                      <p className="text-xs text-red-400">{entry.error}</p>
-                    </div>
-                  );
-                }
-
-                if (entry.points.length === 0) {
-                  return (
-                    <div
-                      key={tf}
-                      className="flex min-h-[220px] flex-col items-center justify-center gap-1 rounded-xl border border-slate-700/50 bg-slate-800/50 p-4"
-                    >
-                      <p className="text-xs font-semibold text-slate-400">{tf}</p>
-                      <p className="text-xs text-slate-500">No data available</p>
-                    </div>
-                  );
-                }
-
-                return (
-                  <PriceChart
-                    key={tf}
-                    data={entry.points}
-                    title={tf}
-                    height={200}
-                    timeframe={tf}
-                  />
-                );
-              })}
-            </div>
-          )}
+          <MultiTimeframeGrid
+            ticker={ticker}
+            timeframes={multiTimeframes}
+            onTimeframeSelect={handleMiniChartSelect}
+          />
         </div>
       )}
     </div>
