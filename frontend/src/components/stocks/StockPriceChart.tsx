@@ -1,23 +1,71 @@
+```tsx
 'use client';
 
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { Loader2 } from 'lucide-react';
+import { clsx } from 'clsx';
 import { useApi } from '@/hooks/useApi';
 import { getStockDetail, getCompareData } from '@/lib/api';
 import type { Timeframe, StockDetail, CompareResponse } from '@/lib/types';
 import PriceChart from '@/components/charts/PriceChart';
-import TimeframeToggle from './TimeframeToggle';
+import TimeframeToggle, { STOCK_CHART_TIMEFRAMES } from './TimeframeToggle';
 import CompareInput from './CompareInput';
 
 const STORAGE_KEY = 'vo_chart_timeframe';
-const VALID_TIMEFRAMES: Timeframe[] = ['1D', '1W', '1M', '3M', '1Y', 'All'];
+const VIEW_MODE_KEY = 'vo_chart_view_mode';
+const MULTI_TF_KEY = 'vo_chart_multi_timeframes';
+const VALID_TIMEFRAMES: Timeframe[] = STOCK_CHART_TIMEFRAMES;
 const COMPARISON_PALETTE = ['#f59e0b', '#10b981', '#8b5cf6', '#ef4444'];
+const DEFAULT_MULTI_TIMEFRAMES: Timeframe[] = ['1W', '1M', '3M', '1Y'];
+
+type ViewMode = 'single' | 'multi';
+
+type MultiChartEntry = {
+  points: { time: number; value: number }[];
+  loading: boolean;
+  error: string | null;
+};
+
+interface CompareOverlay {
+  symbol: string;
+  color: string;
+  points: { time: number; value: number }[];
+  current_pct: number;
+}
+
+interface StockPriceChartProps {
+  ticker: string;
+}
 
 function getInitialTimeframe(): Timeframe {
   if (typeof window === 'undefined') return '1M';
   const stored = localStorage.getItem(STORAGE_KEY);
   return VALID_TIMEFRAMES.includes(stored as Timeframe) ? (stored as Timeframe) : '1M';
+}
+
+function getInitialViewMode(): ViewMode {
+  if (typeof window === 'undefined') return 'single';
+  return localStorage.getItem(VIEW_MODE_KEY) === 'multi' ? 'multi' : 'single';
+}
+
+function getInitialMultiTimeframes(): Timeframe[] {
+  if (typeof window === 'undefined') return DEFAULT_MULTI_TIMEFRAMES;
+  try {
+    const stored = localStorage.getItem(MULTI_TF_KEY);
+    if (!stored) return DEFAULT_MULTI_TIMEFRAMES;
+    const parsed = JSON.parse(stored) as unknown;
+    if (
+      Array.isArray(parsed) &&
+      parsed.length >= 2 &&
+      parsed.every((tf) => VALID_TIMEFRAMES.includes(tf as Timeframe))
+    ) {
+      return parsed as Timeframe[];
+    }
+  } catch {
+    // ignore malformed storage value
+  }
+  return DEFAULT_MULTI_TIMEFRAMES;
 }
 
 function parseCompareParam(): string[] {
@@ -32,32 +80,72 @@ function parseCompareParam(): string[] {
     .slice(0, 4);
 }
 
-interface CompareOverlay {
-  symbol: string;
-  color: string;
-  points: { time: number; value: number }[];
-  current_pct: number;
-}
-
-interface StockPriceChartProps {
-  ticker: string;
-}
-
 export default function StockPriceChart({ ticker }: StockPriceChartProps) {
   const router = useRouter();
 
+  const [viewMode, setViewMode] = useState<ViewMode>(getInitialViewMode);
   const [timeframe, setTimeframe] = useState<Timeframe>(getInitialTimeframe);
+  const [selectedTimeframes, setSelectedTimeframes] = useState<Timeframe[]>(getInitialMultiTimeframes);
+  const [multiData, setMultiData] = useState<Partial<Record<Timeframe, MultiChartEntry>>>({});
   const [compareSymbols, setCompareSymbols] = useState<string[]>(parseCompareParam);
   const [compareData, setCompareData] = useState<CompareResponse | null>(null);
   const [compareLoading, setCompareLoading] = useState(false);
 
   const isFirstMount = useRef(true);
 
+  // Single-mode data fetch
   const fetcher = useCallback(
     () => getStockDetail(ticker, timeframe),
     [ticker, timeframe]
   );
-  const { data, loading, error } = useApi<StockDetail>(fetcher, [ticker, timeframe]);
+  const { data, loading, error } = useApi<StockDetail>(fetcher, [ticker, timeframe], {
+    enabled: viewMode === 'single',
+  });
+
+  // Multi-mode: fetch all selected timeframes in parallel
+  useEffect(() => {
+    if (viewMode !== 'multi' || selectedTimeframes.length === 0) return;
+
+    let cancelled = false;
+
+    // Mark all selected timeframes as loading
+    setMultiData(
+      Object.fromEntries(
+        selectedTimeframes.map((tf) => [tf, { points: [], loading: true, error: null }])
+      ) as Partial<Record<Timeframe, MultiChartEntry>>
+    );
+
+    Promise.all(
+      selectedTimeframes.map((tf) =>
+        getStockDetail(ticker, tf)
+          .then((d) => ({ tf, d, error: null as string | null }))
+          .catch((err) => ({
+            tf,
+            d: null,
+            error: err instanceof Error ? err.message : 'Failed to load',
+          }))
+      )
+    ).then((results) => {
+      if (cancelled) return;
+      const newData: Partial<Record<Timeframe, MultiChartEntry>> = {};
+      for (const result of results) {
+        if (result.error || !result.d) {
+          newData[result.tf] = { points: [], loading: false, error: result.error ?? 'No data' };
+        } else {
+          newData[result.tf] = {
+            points: (result.d.candles ?? []).map((c) => ({ time: c.time, value: c.close })),
+            loading: false,
+            error: null,
+          };
+        }
+      }
+      setMultiData(newData);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [viewMode, ticker, selectedTimeframes]);
 
   // Sync compareSymbols → URL (skip first mount to avoid spurious navigation)
   useEffect(() => {
@@ -75,9 +163,9 @@ export default function StockPriceChart({ ticker }: StockPriceChartProps) {
     router.replace(`${window.location.pathname}${qs ? `?${qs}` : ''}`);
   }, [compareSymbols, router]);
 
-  // Fetch comparison data when symbols or timeframe changes
+  // Fetch comparison overlays (single mode only)
   useEffect(() => {
-    if (compareSymbols.length === 0 || timeframe === 'All') {
+    if (viewMode !== 'single' || compareSymbols.length === 0 || timeframe === 'All') {
       setCompareData(null);
       return;
     }
@@ -99,11 +187,21 @@ export default function StockPriceChart({ ticker }: StockPriceChartProps) {
     return () => {
       cancelled = true;
     };
-  }, [compareSymbols, timeframe]);
+  }, [viewMode, compareSymbols, timeframe]);
+
+  function handleViewModeChange(mode: ViewMode) {
+    localStorage.setItem(VIEW_MODE_KEY, mode);
+    setViewMode(mode);
+  }
 
   function handleTimeframeChange(tf: Timeframe) {
     localStorage.setItem(STORAGE_KEY, tf);
     setTimeframe(tf);
+  }
+
+  function handleMultiTimeframesChange(tfs: Timeframe[]) {
+    localStorage.setItem(MULTI_TF_KEY, JSON.stringify(tfs));
+    setSelectedTimeframes(tfs);
   }
 
   function handleAddSymbol(symbol: string) {
@@ -116,9 +214,9 @@ export default function StockPriceChart({ ticker }: StockPriceChartProps) {
     setCompareSymbols((prev) => prev.filter((s) => s !== symbol));
   }
 
-  const isComparing = compareSymbols.length > 0 && timeframe !== 'All';
+  const isComparing = viewMode === 'single' && compareSymbols.length > 0 && timeframe !== 'All';
 
-  // Build overlays for PriceChart
+  // Build overlays for single-mode comparison
   const compareOverlays: CompareOverlay[] = compareSymbols
     .map((symbol, idx) => {
       if (!compareData) return null;
@@ -147,7 +245,7 @@ export default function StockPriceChart({ ticker }: StockPriceChartProps) {
     }));
   })();
 
-  // Collect per-symbol error warnings
+  // Per-symbol compare warnings
   const warnings: Record<string, string> = {};
   if (compareData) {
     for (const symbol of compareSymbols) {
@@ -158,63 +256,181 @@ export default function StockPriceChart({ ticker }: StockPriceChartProps) {
     }
   }
 
+  // Grid layout class for multi mode
+  function multiGridClass(count: number): string {
+    if (count <= 1) return 'grid-cols-1';
+    if (count === 2) return 'grid-cols-1 sm:grid-cols-2';
+    if (count === 3) return 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3';
+    return 'grid-cols-1 sm:grid-cols-2';
+  }
+
   return (
     <div className="rounded-xl border border-slate-700/50 bg-slate-900 p-6">
+      {/* Header: title + view mode toggle + timeframe selector */}
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-        <h2 className="text-sm font-semibold text-white">Price History</h2>
-        <TimeframeToggle selected={timeframe} onChange={handleTimeframeChange} />
+        <div className="flex items-center gap-3">
+          <h2 className="text-sm font-semibold text-white">Price History</h2>
+
+          {/* Single / Multi view toggle */}
+          <div
+            role="group"
+            aria-label="Chart view mode"
+            className="flex rounded-lg border border-slate-700 bg-slate-800 p-0.5"
+          >
+            <button
+              onClick={() => handleViewModeChange('single')}
+              aria-pressed={viewMode === 'single'}
+              className={clsx(
+                'rounded px-2.5 py-1 text-[11px] font-semibold transition-colors focus:outline-none focus:ring-1 focus:ring-blue-500/50',
+                viewMode === 'single'
+                  ? 'bg-blue-600 text-white'
+                  : 'text-slate-400 hover:text-white'
+              )}
+            >
+              Single
+            </button>
+            <button
+              onClick={() => handleViewModeChange('multi')}
+              aria-pressed={viewMode === 'multi'}
+              className={clsx(
+                'rounded px-2.5 py-1 text-[11px] font-semibold transition-colors focus:outline-none focus:ring-1 focus:ring-blue-500/50',
+                viewMode === 'multi'
+                  ? 'bg-blue-600 text-white'
+                  : 'text-slate-400 hover:text-white'
+              )}
+            >
+              Multi
+            </button>
+          </div>
+        </div>
+
+        {viewMode === 'single' ? (
+          <TimeframeToggle selected={timeframe} onChange={handleTimeframeChange} />
+        ) : (
+          <TimeframeToggle
+            multiSelect
+            selected={selectedTimeframes}
+            onChange={handleMultiTimeframesChange}
+          />
+        )}
       </div>
 
-      {/* Comparison input — chips + text field */}
-      <CompareInput
-        symbols={compareSymbols}
-        colors={COMPARISON_PALETTE}
-        warnings={warnings}
-        onAdd={handleAddSymbol}
-        onRemove={handleRemoveSymbol}
-        loading={compareLoading}
-      />
-
-      {/* Loading state */}
-      {loading && (
-        <div className="flex items-center justify-center py-20">
-          <Loader2
-            className="h-6 w-6 animate-spin text-slate-400"
-            aria-hidden="true"
+      {/* ── Single mode ── */}
+      {viewMode === 'single' && (
+        <>
+          <CompareInput
+            symbols={compareSymbols}
+            colors={COMPARISON_PALETTE}
+            warnings={warnings}
+            onAdd={handleAddSymbol}
+            onRemove={handleRemoveSymbol}
+            loading={compareLoading}
           />
-          <span className="sr-only">Loading chart data…</span>
-        </div>
+
+          {loading && (
+            <div className="flex items-center justify-center py-20">
+              <Loader2 className="h-6 w-6 animate-spin text-slate-400" aria-hidden="true" />
+              <span className="sr-only">Loading chart data…</span>
+            </div>
+          )}
+
+          {!loading && error && (
+            <div
+              className="mt-4 rounded-lg border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-400"
+              role="alert"
+            >
+              {error}
+            </div>
+          )}
+
+          {!loading && !error && chartData.length === 0 && (
+            <p className="py-12 text-center text-sm text-slate-500">
+              No data available for this period
+            </p>
+          )}
+
+          {!loading && !error && chartData.length > 0 && (
+            <div className="mt-4">
+              <PriceChart
+                data={chartData}
+                height={320}
+                timeframe={timeframe}
+                primarySymbol={isComparing ? ticker : undefined}
+                compareOverlays={isComparing ? compareOverlays : undefined}
+              />
+            </div>
+          )}
+        </>
       )}
 
-      {/* Error state */}
-      {!loading && error && (
-        <div
-          className="mt-4 rounded-lg border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-400"
-          role="alert"
-        >
-          {error}
-        </div>
-      )}
+      {/* ── Multi mode ── */}
+      {viewMode === 'multi' && (
+        <div className="mt-2">
+          {selectedTimeframes.length === 0 ? (
+            <p className="py-12 text-center text-sm text-slate-500">
+              Select at least two timeframes above
+            </p>
+          ) : (
+            <div className={clsx('grid gap-4', multiGridClass(selectedTimeframes.length))}>
+              {selectedTimeframes.map((tf) => {
+                const entry = multiData[tf];
+                const isLoading = !entry || entry.loading;
 
-      {/* No data */}
-      {!loading && !error && chartData.length === 0 && (
-        <p className="py-12 text-center text-sm text-slate-500">
-          No data available for this period
-        </p>
-      )}
+                if (isLoading) {
+                  return (
+                    <div
+                      key={tf}
+                      className="flex min-h-[220px] items-center justify-center rounded-xl border border-slate-700/50 bg-slate-800/50"
+                      aria-label={`Loading ${tf} chart`}
+                    >
+                      <Loader2
+                        className="h-5 w-5 animate-spin text-slate-500"
+                        aria-hidden="true"
+                      />
+                      <span className="sr-only">Loading {tf} data…</span>
+                    </div>
+                  );
+                }
 
-      {/* Chart — single or comparison mode */}
-      {!loading && !error && chartData.length > 0 && (
-        <div className="mt-4">
-          <PriceChart
-            data={chartData}
-            height={320}
-            timeframe={timeframe}
-            primarySymbol={isComparing ? ticker : undefined}
-            compareOverlays={isComparing ? compareOverlays : undefined}
-          />
+                if (entry.error) {
+                  return (
+                    <div
+                      key={tf}
+                      className="flex min-h-[220px] flex-col items-center justify-center gap-1 rounded-xl border border-slate-700/50 bg-slate-800/50 p-4"
+                    >
+                      <p className="text-xs font-semibold text-slate-400">{tf}</p>
+                      <p className="text-xs text-red-400">{entry.error}</p>
+                    </div>
+                  );
+                }
+
+                if (entry.points.length === 0) {
+                  return (
+                    <div
+                      key={tf}
+                      className="flex min-h-[220px] flex-col items-center justify-center gap-1 rounded-xl border border-slate-700/50 bg-slate-800/50 p-4"
+                    >
+                      <p className="text-xs font-semibold text-slate-400">{tf}</p>
+                      <p className="text-xs text-slate-500">No data available</p>
+                    </div>
+                  );
+                }
+
+                return (
+                  <PriceChart
+                    key={tf}
+                    data={entry.points}
+                    title={tf}
+                    height={200}
+                    timeframe={tf}
+                  />
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
     </div>
   );
 }
+```
