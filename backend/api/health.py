@@ -299,18 +299,54 @@ def _check_ai_provider() -> Dict[str, Any]:
         return {'status': 'error', 'provider': None, 'error': str(exc)}
 
 
+def _check_job_health() -> Dict[str, Any]:
+    """Probe job execution health: last-run status per job_id from job_history.
+
+    Queries the 20 most recent rows ordered by executed_at DESC, then takes
+    the first (most recent) row per job_id.  A job whose most recent run has
+    a status other than 'success' causes overall status to become 'degraded'.
+    """
+    try:
+        with db_session() as conn:
+            rows = conn.execute(
+                "SELECT job_id, status, executed_at"
+                " FROM job_history"
+                " ORDER BY executed_at DESC"
+                " LIMIT 20"
+            ).fetchall()
+
+        jobs: Dict[str, Dict[str, Any]] = {}
+        for row in rows:
+            jid = row['job_id']
+            if jid not in jobs:
+                jobs[jid] = {
+                    'last_status': row['status'],
+                    'last_run_at': row['executed_at'],
+                }
+
+        has_failure = any(j['last_status'] != 'success' for j in jobs.values())
+        status = 'degraded' if has_failure else 'ok'
+        return {'status': status, 'jobs': jobs}
+    except Exception as exc:
+        logger.warning('_check_job_health: %s', exc)
+        return {'status': 'error', 'jobs': {}, 'error': str(exc)}
+
+
 def _derive_overall_status(
     db_status: str,
     scheduler_status: str,
     stale: bool = False,
     ws_status: str = 'not_configured',
+    job_health_status: str = 'ok',
 ) -> str:
     """Derive overall health from subsystem statuses.
 
     Returns 'degraded' when the DB is not ok, the scheduler has errored or
-    stopped, prices are stale, or the WebSocket manager has errored.
+    stopped, prices are stale, the WebSocket manager has errored, or any job
+    has a non-success last-run status.
     'not_configured' and unknown values are treated as ok.
     AI-provider status is informational only and never degrades overall health.
+    Job health probe errors ('error') are informational; only 'degraded' propagates.
     """
     if db_status != 'ok':
         return 'degraded'
@@ -319,6 +355,8 @@ def _derive_overall_status(
     if stale:
         return 'degraded'
     if ws_status == 'error':
+        return 'degraded'
+    if job_health_status == 'degraded':
         return 'degraded'
     return 'ok'
 
@@ -368,6 +406,7 @@ def health_check():
     data_provider_info = _check_data_provider_detail(app)
     freshness_info = _check_data_freshness()
     ws_info = _check_ws_manager(app)
+    job_health_info = _check_job_health()
     error_log_count = _get_error_log_count_1h()
     sse_count = _get_sse_client_count()
 
@@ -383,6 +422,7 @@ def health_check():
         scheduler_info['status'],
         stale=stale,
         ws_status=ws_info['status'],
+        job_health_status=job_health_info['status'],
     )
 
     # Merge DB connectivity and depth stats into a single services.db dict;
@@ -417,6 +457,9 @@ def health_check():
             },
             'ai_provider': ai_provider_info,
             'ws_manager': ws_info,
+            'job_health': {
+                'status': job_health_info['status'],
+            },
             'errors': {
                 'count_1h': error_log_count,
             },
@@ -428,6 +471,7 @@ def health_check():
             'agent_registry': agent_info,
             'data_providers': data_provider_info,
             'data_freshness': freshness_info,
+            'job_health': job_health_info,
         },
         'metrics': {
             'error_log_count_1h': error_log_count,
@@ -464,5 +508,62 @@ def health_live():
     """
     return jsonify({
         'alive': True,
+        'ts': datetime.utcnow().isoformat() + 'Z',
+    })
+
+
+@health_bp.route('/health/status', methods=['GET'])
+@handle_api_errors
+def health_status():
+    """Slim health status optimised for frontend polling (target: <5 ms).
+
+    Combines job health (single DB query), scheduler (sys.modules read), and
+    AI provider (Config attribute read) without pool-stat or file-stat I/O.
+
+    Response shape::
+
+        {
+            "status":     "ok" | "degraded",
+            "db":         "ok" | "error",
+            "scheduler":  "ok" | "error" | "not_configured",
+            "job_health": "ok" | "degraded" | "error",
+            "ai_provider": "ok" | "unconfigured" | "error",
+            "ts":          "<ISO-8601 UTC>"
+        }
+    """
+    import sys
+
+    # Single DB query covers both connectivity and job last-run status.
+    job_health_info = _check_job_health()
+    db_status = 'ok' if job_health_info['status'] != 'error' else 'error'
+
+    # Scheduler — sys.modules read only, no I/O.
+    scheduler_status = 'not_configured'
+    try:
+        sm_mod = sys.modules.get('backend.scheduler')
+        if sm_mod is not None:
+            manager = getattr(sm_mod, 'scheduler_manager', None)
+            if manager is not None:
+                info = manager.get_status()
+                scheduler_status = 'ok' if info.get('running') else 'error'
+    except Exception as exc:
+        logger.warning('health_status: scheduler check: %s', exc)
+        scheduler_status = 'error'
+
+    # AI provider — Config attribute reads, no I/O.
+    ai_status = _check_ai_provider()['status']
+
+    overall = _derive_overall_status(
+        db_status,
+        scheduler_status,
+        job_health_status=job_health_info['status'],
+    )
+
+    return jsonify({
+        'status': overall,
+        'db': db_status,
+        'scheduler': scheduler_status,
+        'job_health': job_health_info['status'],
+        'ai_provider': ai_status,
         'ts': datetime.utcnow().isoformat() + 'Z',
     })

@@ -18,6 +18,7 @@ import {
   getMetricsTimeseries,
   getJobMetrics,
   getSystemMetrics,
+  fetchHealthStatus,
 } from '@/lib/api';
 
 // ---------------------------------------------------------------------------
@@ -52,11 +53,12 @@ export default function MetricsPage() {
   const [metric, setMetric]         = useState<MetricId>('cost');
   const [refreshKey, setRefreshKey] = useState(0);
 
-  const summaryResult    = useApi(() => getMetricsSummary(days),            [days, refreshKey]);
-  const agentsResult     = useApi(() => getAgentMetrics(days),              [days, refreshKey]);
-  const timeseriesResult = useApi(() => getMetricsTimeseries(days, metric), [days, metric, refreshKey]);
-  const jobsResult       = useApi(() => getJobMetrics(days),                [days, refreshKey]);
-  const systemResult     = useApi(() => getSystemMetrics(),                 [refreshKey], { enabled: tab === 'system' });
+  const summaryResult      = useApi(() => getMetricsSummary(days),            [days, refreshKey]);
+  const agentsResult       = useApi(() => getAgentMetrics(days),              [days, refreshKey]);
+  const timeseriesResult   = useApi(() => getMetricsTimeseries(days, metric), [days, metric, refreshKey]);
+  const jobsResult         = useApi(() => getJobMetrics(days),                [days, refreshKey]);
+  const systemResult       = useApi(() => getSystemMetrics(),                 [refreshKey], { enabled: tab === 'system' });
+  const healthStatusResult = useApi(() => fetchHealthStatus(),                [refreshKey], { enabled: tab === 'system', refreshInterval: 30_000 });
 
   const agents     = agentsResult.data?.agents    ?? [];
   const timeseries = timeseriesResult.data?.data  ?? [];
@@ -157,6 +159,7 @@ export default function MetricsPage() {
             data={systemResult.data}
             loading={systemResult.loading}
             error={systemResult.error}
+            healthStatus={healthStatusResult.data}
           />
         )}
 

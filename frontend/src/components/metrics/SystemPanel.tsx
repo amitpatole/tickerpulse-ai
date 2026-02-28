@@ -1,12 +1,13 @@
 'use client';
 
 import React, { useMemo } from 'react';
-import type { SystemMetricsResponse, SystemMetricsSnapshot } from '@/lib/types';
+import type { HealthStatusResponse, SystemMetricsResponse, SystemMetricsSnapshot } from '@/lib/types';
 
 interface Props {
   data: SystemMetricsResponse | null;
   loading: boolean;
   error: string | null;
+  healthStatus?: HealthStatusResponse | null;
 }
 
 // Render integer values with an explicit ".0" so table cells display
@@ -129,10 +130,40 @@ function Sparkline({ snapshots }: SparklineProps) {
 }
 
 // ---------------------------------------------------------------------------
+// Service health status row
+// ---------------------------------------------------------------------------
+
+const SERVICE_LABELS: Record<string, string> = {
+  db: 'Database',
+  scheduler: 'Scheduler',
+  job_health: 'Jobs',
+  ai_provider: 'AI Provider',
+};
+
+function ServiceChip({ label, value }: { label: string; value: string }) {
+  const isOk = value === 'ok';
+  const isWarn = value === 'degraded' || value === 'unconfigured' || value === 'not_configured';
+  const colorClass = isOk
+    ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
+    : isWarn
+      ? 'bg-amber-500/15 text-amber-400 border-amber-500/30'
+      : 'bg-red-500/15 text-red-400 border-red-500/30';
+
+  return (
+    <div className="flex items-center gap-2 rounded-lg border border-slate-700/50 bg-slate-800/40 px-3 py-2">
+      <span className="text-xs text-slate-400">{label}</span>
+      <span className={`rounded-full border px-2 py-0.5 text-xs font-medium ${colorClass}`}>
+        {value}
+      </span>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Main component
 // ---------------------------------------------------------------------------
 
-export default React.memo(function SystemPanel({ data, loading, error }: Props) {
+export default React.memo(function SystemPanel({ data, loading, error, healthStatus }: Props) {
   if (loading) {
     return (
       <div className="space-y-4">
@@ -199,6 +230,27 @@ export default React.memo(function SystemPanel({ data, loading, error }: Props) 
         </div>
 
       </div>
+
+      {/* ── Service health status chips ──────────────────────────────── */}
+      {healthStatus && (
+        <div className="rounded-xl border border-slate-700/50 bg-slate-800/40 p-4">
+          <div className="mb-3 flex items-center justify-between">
+            <h3 className="text-sm font-medium text-slate-400">Service Status</h3>
+            <span className="text-[10px] text-slate-500">
+              {healthStatus.ts ? new Date(healthStatus.ts).toLocaleTimeString() : ''}
+            </span>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {(Object.keys(SERVICE_LABELS) as (keyof typeof SERVICE_LABELS)[]).map((key) => (
+              <ServiceChip
+                key={key}
+                label={SERVICE_LABELS[key]}
+                value={healthStatus[key as keyof HealthStatusResponse] as string}
+              />
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* ── CPU / Memory history sparkline ───────────────────────────── */}
       <div className="rounded-xl border border-slate-700/50 bg-slate-800/40 p-4">

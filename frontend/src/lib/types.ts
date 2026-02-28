@@ -649,6 +649,26 @@ export interface HealthCheck {
   [key: string]: unknown;
 }
 
+export interface JobHealthEntry {
+  last_status: string;
+  last_run_at: string;
+}
+
+export interface JobHealthProbe {
+  status: 'ok' | 'degraded' | 'error';
+  jobs: Record<string, JobHealthEntry>;
+  error?: string;
+}
+
+export interface HealthStatusResponse {
+  status: 'ok' | 'degraded';
+  db: string;
+  scheduler: string;
+  job_health: string;
+  ai_provider: string;
+  ts: string;
+}
+
 export interface HealthResponse {
   status: 'ok' | 'degraded';
   version: string;
@@ -665,6 +685,7 @@ export interface HealthResponse {
     scheduler: HealthCheck & { running: boolean | null; job_count: number | null; timezone: string | null };
     ai_provider: HealthCheck & { provider: string | null };
     ws_manager: HealthCheck & { client_count: number | null };
+    job_health: HealthCheck;
     errors: { count_1h: number };
   };
   services: {
@@ -678,6 +699,7 @@ export interface HealthResponse {
       earnings_updated_at: string | null;
       stale: boolean;
     };
+    job_health: JobHealthProbe;
   };
   metrics: {
     error_log_count_1h: number;

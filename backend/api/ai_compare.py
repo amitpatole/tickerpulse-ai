@@ -18,6 +18,7 @@ from flask import Blueprint, jsonify, request
 
 from backend.database import db_session
 from backend.core.ai_providers import AIProviderFactory
+from backend.core.error_handlers import handle_api_errors, ValidationError, DatabaseError
 from backend.config import Config
 
 logger = logging.getLogger(__name__)
@@ -352,6 +353,7 @@ def _persist_run(
 # ---------------------------------------------------------------------------
 
 @ai_compare_bp.route('/compare', methods=['POST'])
+@handle_api_errors
 def run_comparison():
     """Fan out a stock analysis to multiple AI providers simultaneously.
 
@@ -370,16 +372,16 @@ def run_comparison():
 
     ticker = (body.get('ticker') or '').strip().upper()
     if not ticker:
-        return jsonify({'error': 'ticker is required'}), 400
+        raise ValidationError('ticker is required')
 
     providers = body.get('providers')
     if not isinstance(providers, list) or not providers:
-        return jsonify({'error': 'providers must be a non-empty array'}), 400
+        raise ValidationError('providers must be a non-empty array')
     if len(providers) > _MAX_PROVIDERS:
-        return jsonify({'error': f'at most {_MAX_PROVIDERS} providers per request'}), 400
+        raise ValidationError(f'at most {_MAX_PROVIDERS} providers per request')
     for p in providers:
         if not isinstance(p, dict) or not p.get('provider'):
-            return jsonify({'error': 'each provider entry must have a "provider" field'}), 400
+            raise ValidationError('each provider entry must have a "provider" field')
 
     template = (body.get('template') or 'custom').strip()
     if template not in _VALID_TEMPLATES:
@@ -439,6 +441,7 @@ def run_comparison():
 
 
 @ai_compare_bp.route('/compare/history', methods=['GET'])
+@handle_api_errors
 def comparison_history():
     """Return recent comparison runs.
 
@@ -451,7 +454,7 @@ def comparison_history():
     try:
         limit = int(request.args.get('limit', 20))
     except (ValueError, TypeError):
-        return jsonify({'error': 'limit must be an integer'}), 400
+        raise ValidationError('limit must be an integer')
     limit = max(1, min(limit, 100))
 
     try:
@@ -483,9 +486,10 @@ def comparison_history():
                     'created_at': run['created_at'],
                     'results': [dict(r) for r in result_rows],
                 })
+    except (ValidationError, DatabaseError):
+        raise
     except Exception as exc:
-        logger.error("comparison_history: %s", exc)
-        return jsonify({'error': 'Failed to fetch history'}), 500
+        raise DatabaseError('Failed to fetch comparison history') from exc
 
     response: dict = {'runs': runs}
     if ticker:

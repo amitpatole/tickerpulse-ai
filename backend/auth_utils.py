@@ -71,11 +71,17 @@ def login_required(f):
     """Decorator that returns a JSON 401 for unauthenticated API requests.
 
     Unlike ``flask_login.login_required`` (which redirects to a login page),
-    this returns a machine-readable error response suitable for API clients.
+    this returns a machine-readable error response in the standard VO-474
+    envelope: { success, error, error_code, retryable }.
     """
     @wraps(f)
     def decorated(*args, **kwargs):
         if not current_user.is_authenticated:
-            return jsonify({'error': 'Authentication required'}), 401
+            return jsonify({
+                'success': False,
+                'error': 'Authentication required',
+                'error_code': 'UNAUTHORIZED',
+                'retryable': False,
+            }), 401
         return f(*args, **kwargs)
     return decorated
