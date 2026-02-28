@@ -56,3 +56,13 @@ body {
 .font-mono {
   font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', 'Cascadia Code', 'Consolas', monospace;
 }
+
+/* Price flash animation: brief highlight when a live price updates */
+@keyframes price-flash {
+  0% { background-color: rgba(250, 204, 21, 0.18); }
+  100% { background-color: transparent; }
+}
+
+.animate-price-flash {
+  animation: price-flash 0.8s ease-out;
+}

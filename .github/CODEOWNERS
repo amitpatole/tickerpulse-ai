@@ -1,0 +1,18 @@
+# Default owner for everything in the repository.
+# The core team reviews all PRs unless a more specific rule below matches.
+* @tickerpulse/core
+
+# GitHub Actions workflows and CI/CD configuration
+.github/ @tickerpulse/core
+
+# Python backend
+backend/ @tickerpulse/core
+
+# React/Next.js frontend
+frontend/ @tickerpulse/core
+
+# Electron desktop wrapper
+electron/ @tickerpulse/core
+
+# Documentation
+docs/ @tickerpulse/core

@@ -1,3 +1,4 @@
+```python
 """
 TickerPulse AI v3.0 - Agents API Routes
 Blueprint for agent management, execution, run history, and cost tracking.
@@ -11,6 +12,7 @@ are mapped to their canonical registry names via AGENT_ID_MAP so the UI
 contract is preserved without breaking existing bookmarks or API consumers.
 """
 
+import math
 import sqlite3
 import logging
 from datetime import datetime, timedelta
@@ -415,17 +417,23 @@ def trigger_agent_run(name):
 
 @agents_bp.route('/agents/runs', methods=['GET'])
 def list_recent_runs():
-    """List recent agent runs across all agents.
+    """List recent agent runs across all agents with cursor-based pagination.
 
     Query Parameters:
-        limit (int, optional): Maximum number of runs to return. Default 50, max 200.
+        limit (int, optional): Number of runs per page. Default 50, max 200.
+        page (int, optional): 1-based page number. Default 1.
         agent (str, optional): Filter by agent name (stub aliases accepted).
         status (str, optional): Filter by run status (running, success, error).
 
     Returns:
         JSON object with:
-        - runs: Array of run summary objects.
-        - total: Total count of runs returned.
+        - runs: Array of run summary objects for the requested page.
+        - total: Total count of matching runs in the database.
+        - page: Current 1-based page number.
+        - pages: Total number of pages.
+        - has_next: Whether a subsequent page exists.
+        - has_prev: Whether a previous page exists.
+        - filters: Echo of the active filter/pagination parameters.
     """
     raw_limit = request.args.get('limit', '50')
     try:
@@ -436,6 +444,17 @@ def list_recent_runs():
         return jsonify({'error': 'limit must be a positive integer'}), 400
     limit = min(limit, 200)
 
+    raw_page = request.args.get('page', '1')
+    try:
+        page = int(raw_page)
+    except ValueError:
+        return jsonify({'error': 'page must be a positive integer'}), 400
+    if page <= 0:
+        return jsonify({'error': 'page must be a positive integer'}), 400
+
+    # Correct 1-based offset: page 1 → offset 0, page 2 → offset limit, …
+    offset = (page - 1) * limit
+
     agent_filter = request.args.get('agent')
 
     _VALID_STATUSES = {'running', 'success', 'error'}
@@ -445,26 +464,34 @@ def list_recent_runs():
             'error': f"Invalid status. Must be one of: {', '.join(sorted(_VALID_STATUSES))}"
         }), 400
 
+    runs = []
+    total = 0
     try:
         conn = sqlite3.connect(Config.DB_PATH)
         conn.row_factory = sqlite3.Row
 
-        query = 'SELECT * FROM agent_runs WHERE 1=1'
-        params = []
+        where = 'WHERE 1=1'
+        filter_params: list = []
 
         if agent_filter:
             # Resolve stub alias → real name; fall back to the value as-is
             real_name = AGENT_ID_MAP.get(agent_filter, agent_filter)
-            query += ' AND agent_name = ?'
-            params.append(real_name)
+            where += ' AND agent_name = ?'
+            filter_params.append(real_name)
         if status_filter:
-            query += ' AND status = ?'
-            params.append(status_filter)
+            where += ' AND status = ?'
+            filter_params.append(status_filter)
 
-        query += ' ORDER BY started_at DESC LIMIT ?'
-        params.append(limit)
+        # True total count so pagination metadata is accurate regardless of limit
+        total = conn.execute(
+            f'SELECT COUNT(*) FROM agent_runs {where}',
+            filter_params,
+        ).fetchone()[0]
 
-        rows = conn.execute(query, params).fetchall()
+        rows = conn.execute(
+            f'SELECT * FROM agent_runs {where} ORDER BY started_at DESC LIMIT ? OFFSET ?',
+            filter_params + [limit, offset],
+        ).fetchall()
         conn.close()
 
         runs = [{
@@ -481,11 +508,16 @@ def list_recent_runs():
         } for r in rows]
     except Exception as e:
         logger.error("Failed to query agent runs: %s", e)
-        runs = []
+
+    pages = math.ceil(total / limit) if total > 0 else 1
 
     return jsonify({
         'runs': runs,
-        'total': len(runs),
+        'total': total,
+        'page': page,
+        'pages': pages,
+        'has_next': page < pages,
+        'has_prev': page > 1,
         'filters': {
             'limit': limit,
             'agent': agent_filter,
@@ -616,3 +648,4 @@ def _get_agent_tools(agent_name: str) -> list:
         ],
     }
     return tool_map.get(agent_name, [])
+```
