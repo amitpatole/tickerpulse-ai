@@ -1,1 +1,1 @@
-*(stripped markdown code fences)*
+Pure SVG bar chart (no external deps, consistent with `TimeseriesChart`). Shows daily cost bars with date labels and run-count annotations above tall bars.

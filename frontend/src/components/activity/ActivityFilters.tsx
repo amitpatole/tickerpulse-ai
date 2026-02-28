@@ -1,1 +1,1 @@
-*(stripped markdown code fences)*
+Type (All/Agents/Jobs/Errors) and Period (1d/7d/30d) button-group selectors, following the same pill-style pattern as the metrics page.

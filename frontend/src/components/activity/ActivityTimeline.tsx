@@ -1,1 +1,1 @@
-*(stripped markdown code fences)*
+Scrollable event list with type icons (Bot/Briefcase/AlertCircle), status badges (success/error/pending), duration, cost, and relative timestamp.

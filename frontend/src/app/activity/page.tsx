@@ -1,1 +1,1 @@
-*(stripped markdown code fences — content identical to what was inside the fences)*
+Full page with 4 summary cards (cost, runs, errors, success rate), the cost bar chart, filter controls (type + period persisted via `usePersistedState`), and the event timeline. Auto-refreshes every 60s.
