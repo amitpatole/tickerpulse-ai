@@ -1,3 +1,4 @@
+```python
 """
 TickerPulse AI v3.0 - News API Routes
 Blueprint for news articles, alerts, and statistics endpoints.
@@ -7,7 +8,7 @@ from flask import Blueprint, jsonify, request
 import html
 import logging
 
-from backend.database import get_db_connection
+from backend.database import pooled_session
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +37,22 @@ def _parse_pagination(args):
     return page, page_size, None
 
 
+def _serialize_article(article: object) -> dict:
+    """Convert a sqlite3.Row news record to a JSON-safe dict."""
+    return {
+        'id': article['id'],
+        'ticker': article['ticker'],
+        'title': article['title'],
+        'description': article['description'],
+        'url': article['url'],
+        'source': article['source'],
+        'published_date': article['published_date'],
+        'sentiment_score': article['sentiment_score'],
+        'sentiment_label': article['sentiment_label'],
+        'created_at': article['created_at'],
+    }
+
+
 @news_bp.route('/news', methods=['GET'])
 def get_news():
     """Get recent news articles with optional ticker filter.
@@ -55,48 +72,55 @@ def get_news():
 
     offset = (page - 1) * page_size
 
-    conn = get_db_connection()
-    try:
-        conn.execute('BEGIN DEFERRED')
-        cursor = conn.cursor()
-
+    with pooled_session() as conn:
         if ticker:
-            cursor.execute('SELECT COUNT(*) FROM news WHERE ticker = ?', (ticker,))
-            total = cursor.fetchone()[0]
-            cursor.execute(
+            total = conn.execute(
+                'SELECT COUNT(*) FROM news WHERE ticker = ?', (ticker,)
+            ).fetchone()[0]
+            news = conn.execute(
                 'SELECT * FROM news WHERE ticker = ? ORDER BY created_at DESC LIMIT ? OFFSET ?',
                 (ticker, page_size, offset)
-            )
+            ).fetchall()
         else:
-            cursor.execute('SELECT COUNT(*) FROM news')
-            total = cursor.fetchone()[0]
-            cursor.execute(
+            total = conn.execute('SELECT COUNT(*) FROM news').fetchone()[0]
+            news = conn.execute(
                 'SELECT * FROM news ORDER BY created_at DESC LIMIT ? OFFSET ?',
                 (page_size, offset)
-            )
-
-        news = cursor.fetchall()
-    finally:
-        conn.close()
+            ).fetchall()
 
     return jsonify({
-        'data': [{
-            'id': article['id'],
-            'ticker': article['ticker'],
-            'title': article['title'],
-            'description': article['description'],
-            'url': article['url'],
-            'source': article['source'],
-            'published_date': article['published_date'],
-            'sentiment_score': article['sentiment_score'],
-            'sentiment_label': article['sentiment_label'],
-            'created_at': article['created_at']
-        } for article in news],
+        'data': [_serialize_article(a) for a in news],
         'page': page,
         'page_size': page_size,
         'total': total,
         'has_next': (page * page_size) < total,
     })
+
+
+@news_bp.route('/news/<int:article_id>', methods=['GET'])
+def get_news_article(article_id: int):
+    """Fetch a single news article by ID.
+
+    Used by the keyboard-navigation flow: when the user presses Enter on a
+    focused feed item the frontend resolves the full record without needing to
+    know which page it lives on.
+
+    Path Parameters:
+        article_id (int): Primary key of the news article.
+
+    Returns:
+        200 JSON article object, or 404 if not found.
+    """
+    with pooled_session() as conn:
+        row = conn.execute(
+            'SELECT * FROM news WHERE id = ?', (article_id,)
+        ).fetchone()
+
+    if row is None:
+        logger.debug("news article %d not found", article_id)
+        return jsonify({'error': 'article not found'}), 404
+
+    return jsonify(_serialize_article(row))
 
 
 @news_bp.route('/alerts', methods=['GET'])
@@ -106,21 +130,14 @@ def get_alerts():
     Returns:
         JSON array of alert objects joined with their associated news articles.
     """
-    conn = get_db_connection()
-    try:
-        cursor = conn.cursor()
-
-        cursor.execute('''
+    with pooled_session() as conn:
+        alerts = conn.execute('''
             SELECT a.*, n.title, n.url, n.source, n.sentiment_score
             FROM alerts a
             LEFT JOIN news n ON a.news_id = n.id
             ORDER BY a.created_at DESC
             LIMIT 50
-        ''')
-
-        alerts = cursor.fetchall()
-    finally:
-        conn.close()
+        ''').fetchall()
 
     return jsonify([{
         'id': alert['id'],
@@ -146,14 +163,9 @@ def get_stats():
         JSON object with 'stocks' array (per-ticker stats) and 'total_alerts_24h' count.
     """
     market = request.args.get('market', None)
-    conn = get_db_connection()
-    try:
-        conn.execute('BEGIN DEFERRED')
-        cursor = conn.cursor()
-
-        # Get stats for each stock with market filter
+    with pooled_session() as conn:
         if market and market != 'All':
-            cursor.execute('''
+            stats = conn.execute('''
                 SELECT
                     n.ticker,
                     COUNT(*) as total_articles,
@@ -166,9 +178,9 @@ def get_stats():
                 WHERE n.created_at > datetime('now', '-24 hours')
                     AND s.market = ?
                 GROUP BY n.ticker
-            ''', (market,))
+            ''', (market,)).fetchall()
         else:
-            cursor.execute('''
+            stats = conn.execute('''
                 SELECT
                     ticker,
                     COUNT(*) as total_articles,
@@ -179,15 +191,11 @@ def get_stats():
                 FROM news
                 WHERE created_at > datetime('now', '-24 hours')
                 GROUP BY ticker
-            ''')
+            ''').fetchall()
 
-        stats = cursor.fetchall()
-
-        # Get total alerts count — same snapshot as the stats query above
-        cursor.execute('SELECT COUNT(*) as count FROM alerts WHERE created_at > datetime("now", "-24 hours")')
-        alert_count = cursor.fetchone()['count']
-    finally:
-        conn.close()
+        alert_count = conn.execute(
+            'SELECT COUNT(*) as count FROM alerts WHERE created_at > datetime("now", "-24 hours")'
+        ).fetchone()['count']
 
     return jsonify({
         'stocks': [{
@@ -200,3 +208,4 @@ def get_stats():
         } for stat in stats],
         'total_alerts_24h': alert_count
     })
+```

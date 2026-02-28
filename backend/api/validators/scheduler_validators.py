@@ -1,3 +1,4 @@
+```python
 """
 Input validation for scheduler API endpoints.
 
@@ -80,6 +81,12 @@ def validate_cron_args(args: dict):
     unknown = set(args) - _CRON_ALLOWED_KEYS
     if unknown:
         return False, f"Unknown cron field(s): {', '.join(sorted(unknown))}."
+
+    if not args:
+        return False, (
+            "Cron trigger requires at least 'hour' or 'minute'. "
+            "An empty trigger_args would schedule the job to fire every second."
+        )
 
     for field, (lo, hi) in _CRON_INT_RANGES.items():
         if field not in args:
@@ -184,3 +191,4 @@ def validate_trigger_args(trigger: str, args: dict):
         return validate_date_args(args)
     # Caller is responsible for rejecting unknown trigger types before calling here.
     return False, f"Unknown trigger type: '{trigger}'."
+```
