@@ -273,7 +273,7 @@ def run_price_refresh() -> None:
     --------------
     1. Read interval from DB; skip if manual mode (interval == 0).
     2. Load all active watchlist tickers.
-    3. Fetch live prices for each ticker in parallel via ThreadPoolExecutor.
+    3. Fetch live prices for all tickers in a single batch yf.download() call.
     4. Persist price columns to ai_ratings (AI fields unchanged).
     5. Broadcast via WebSocket (price_batch per subscribed client).
     6. Broadcast via SSE (price_update event per ticker).
@@ -295,8 +295,8 @@ def run_price_refresh() -> None:
 
     logger.info("price_refresh: fetching prices for %d tickers", len(tickers))
 
-    # 3. Fetch prices in parallel (ThreadPoolExecutor + individual _fetch_price calls)
-    prices = _fetch_prices_parallel(tickers)
+    # 3. Fetch prices in a single batch call (cuts N round-trips to one yf.download() call)
+    prices = _fetch_prices_batch(tickers)
 
     if not prices:
         logger.warning("price_refresh: no price data returned for any ticker")
