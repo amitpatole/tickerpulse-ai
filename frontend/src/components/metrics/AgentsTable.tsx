@@ -1,11 +1,10 @@
-```typescript
 'use client';
 
 import React from 'react';
-import type { AgentMetric } from '@/lib/types';
+import type { AgentMetrics } from '@/lib/types';
 
 interface Props {
-  agents: AgentMetric[];
+  agents: AgentMetrics[];
   loading: boolean;
 }
 
@@ -99,4 +98,3 @@ export default React.memo(function AgentsTable({ agents, loading }: Props) {
     </div>
   );
 });
-```

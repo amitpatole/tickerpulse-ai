@@ -1,4 +1,3 @@
-```python
 """
 TickerPulse AI v3.0 - Health Check API
 
@@ -16,6 +15,7 @@ from typing import Any, Dict, Optional
 from flask import Blueprint, current_app, jsonify
 
 from backend.config import Config
+from backend.core.error_handlers import handle_api_errors
 from backend.database import db_session, _get_pool
 
 logger = logging.getLogger(__name__)
@@ -283,6 +283,7 @@ def _derive_overall_status(
 
 
 @health_bp.route('/health', methods=['GET'])
+@handle_api_errors
 def health_check():
     """Return detailed service health.
 
@@ -355,6 +356,7 @@ def health_check():
 
 
 @health_bp.route('/health/ready', methods=['GET'])
+@handle_api_errors
 def health_ready():
     """Minimal readiness probe for load balancers and Kubernetes.
 
@@ -368,4 +370,3 @@ def health_ready():
         'db': db_info['status'],
         'ts': datetime.utcnow().isoformat() + 'Z',
     }), (200 if ready else 503)
-```

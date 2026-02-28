@@ -1,4 +1,3 @@
-```python
 """
 TickerPulse AI v3.0 - In-memory API Latency Buffer
 
@@ -19,6 +18,9 @@ from typing import Any, Dict, List
 _lock = threading.Lock()
 # Key: (endpoint, method, status_class) → {day: [latency_ms, ...]}
 _buffer: Dict[tuple, Dict[str, List[float]]] = defaultdict(lambda: defaultdict(list))
+
+# Public alias for test introspection
+_BUFFER = _buffer
 
 
 def record(endpoint: str, method: str, status_code: int, latency_ms: float) -> None:
@@ -57,4 +59,3 @@ def flush() -> List[Dict[str, Any]]:
                 'log_date': day,
             })
     return rows
-```

@@ -1,4 +1,3 @@
-```python
 """
 TickerPulse AI v3.0 - Database Connection Manager
 Thread-safe SQLite helper with context-manager support and table initialisation.
@@ -706,14 +705,18 @@ _NEW_TABLES_SQL = [
     """,
     """
     CREATE TABLE IF NOT EXISTS comparison_results (
-        id            INTEGER PRIMARY KEY AUTOINCREMENT,
-        run_id        TEXT NOT NULL REFERENCES comparison_runs(id) ON DELETE CASCADE,
-        provider_name TEXT NOT NULL,
-        model         TEXT,
-        response      TEXT,
-        tokens_used   INTEGER NOT NULL DEFAULT 0,
-        latency_ms    INTEGER NOT NULL DEFAULT 0,
-        error         TEXT
+        id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+        run_id               TEXT NOT NULL REFERENCES comparison_runs(id) ON DELETE CASCADE,
+        provider_name        TEXT NOT NULL,
+        model                TEXT,
+        response             TEXT,
+        tokens_used          INTEGER NOT NULL DEFAULT 0,
+        latency_ms           INTEGER NOT NULL DEFAULT 0,
+        error                TEXT,
+        extracted_rating     TEXT,
+        extracted_score      REAL,
+        extracted_confidence REAL,
+        extracted_summary    TEXT
     )
     """,
     """
@@ -730,7 +733,7 @@ _NEW_TABLES_SQL = [
     """
     CREATE TABLE IF NOT EXISTS agent_schedules (
         id           INTEGER PRIMARY KEY AUTOINCREMENT,
-        job_id       TEXT NOT NULL UNIQUE,
+        job_id       TEXT NOT NULL,
         label        TEXT NOT NULL,
         description  TEXT,
         trigger      TEXT NOT NULL,
@@ -738,6 +741,28 @@ _NEW_TABLES_SQL = [
         enabled      INTEGER NOT NULL DEFAULT 1,
         created_at   TEXT NOT NULL DEFAULT (datetime('now')),
         updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS ai_comparison_runs (
+        id         TEXT PRIMARY KEY,
+        ticker     TEXT NOT NULL,
+        providers  TEXT NOT NULL DEFAULT '[]',
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS ai_comparison_results (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        run_id      TEXT NOT NULL REFERENCES ai_comparison_runs(id) ON DELETE CASCADE,
+        provider    TEXT NOT NULL,
+        model       TEXT,
+        rating      TEXT,
+        score       INTEGER,
+        confidence  INTEGER,
+        summary     TEXT,
+        duration_ms INTEGER,
+        error       TEXT
     )
     """,
 ]
@@ -788,6 +813,8 @@ _INDEXES_SQL = [
     "CREATE INDEX IF NOT EXISTS idx_agent_schedules_enabled     ON agent_schedules (enabled)",
     # Covering index for /api/metrics/agents hot path: WHERE started_at >= ? GROUP BY agent_name
     "CREATE INDEX IF NOT EXISTS idx_agent_runs_agent_started    ON agent_runs (agent_name, started_at DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_ai_comparison_runs_ticker   ON ai_comparison_runs (ticker, created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_ai_comparison_results_run   ON ai_comparison_results (run_id)",
 ]
 
 
@@ -973,6 +1000,60 @@ def _migrate_comparison_runs(cursor) -> None:
         logger.info("Migration applied: added template to comparison_runs table")
 
 
+def _migrate_agent_schedules(cursor) -> None:
+    """Remove UNIQUE constraint from agent_schedules.job_id (schema v3.5).
+
+    SQLite does not support ALTER TABLE DROP CONSTRAINT, so the table must be
+    recreated.  All existing rows are preserved.
+    """
+    row = cursor.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='agent_schedules'"
+    ).fetchone()
+    if not row:
+        return  # Table doesn't exist yet; CREATE TABLE IF NOT EXISTS handles it
+
+    table_sql: str = row[0] or ''
+    if 'UNIQUE' not in table_sql.upper():
+        return  # Constraint already removed
+
+    cursor.execute("ALTER TABLE agent_schedules RENAME TO _agent_schedules_old")
+    cursor.execute("""
+        CREATE TABLE agent_schedules (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            job_id       TEXT NOT NULL,
+            label        TEXT NOT NULL,
+            description  TEXT,
+            trigger      TEXT NOT NULL,
+            trigger_args TEXT NOT NULL DEFAULT '{}',
+            enabled      INTEGER NOT NULL DEFAULT 1,
+            created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+    """)
+    cursor.execute("INSERT INTO agent_schedules SELECT * FROM _agent_schedules_old")
+    cursor.execute("DROP TABLE _agent_schedules_old")
+    logger.info("Migration applied: removed UNIQUE constraint from agent_schedules.job_id")
+
+
+def _migrate_comparison_results(cursor) -> None:
+    """Add extracted structured-data columns to comparison_results if missing (schema v3.4)."""
+    cols = {row[1] for row in cursor.execute("PRAGMA table_info(comparison_results)").fetchall()}
+    if not cols:
+        return
+    migrations = []
+    if 'extracted_rating' not in cols:
+        migrations.append("ALTER TABLE comparison_results ADD COLUMN extracted_rating TEXT")
+    if 'extracted_score' not in cols:
+        migrations.append("ALTER TABLE comparison_results ADD COLUMN extracted_score REAL")
+    if 'extracted_confidence' not in cols:
+        migrations.append("ALTER TABLE comparison_results ADD COLUMN extracted_confidence REAL")
+    if 'extracted_summary' not in cols:
+        migrations.append("ALTER TABLE comparison_results ADD COLUMN extracted_summary TEXT")
+    for sql in migrations:
+        cursor.execute(sql)
+        logger.info("Migration applied: %s", sql)
+
+
 def init_all_tables(db_path: str | None = None) -> None:
     """Create every table (existing + new v3.0) and apply indexes.
 
@@ -1001,6 +1082,8 @@ def init_all_tables(db_path: str | None = None) -> None:
             _migrate_error_log(cursor)
             _migrate_earnings_events(cursor)
             _migrate_comparison_runs(cursor)
+            _migrate_comparison_results(cursor)
+            _migrate_agent_schedules(cursor)
 
             for sql in _NEW_TABLES_SQL:
                 cursor.execute(sql)
@@ -1022,4 +1105,3 @@ def init_all_tables(db_path: str | None = None) -> None:
     except Exception:
         logger.exception("Failed to initialise database tables")
         raise
-```

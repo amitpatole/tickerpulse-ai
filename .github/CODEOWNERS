@@ -1,0 +1,28 @@
+# TickerPulse AI — Code Owners
+#
+# Each line specifies a pattern and the owners responsible for reviewing
+# changes to matching files. Order matters: the last matching rule wins.
+
+# Default — core team reviews everything unless overridden below
+*                               @tickerpulse-ai/core-team
+
+# Backend Python source
+/backend/                       @tickerpulse-ai/backend-team
+
+# Frontend Next.js application
+/frontend/                      @tickerpulse-ai/frontend-team
+
+# Electron desktop application
+/electron/                      @tickerpulse-ai/desktop-team
+
+# CI/CD and GitHub configuration — DevOps team must review
+/.github/                       @tickerpulse-ai/devops-team
+
+# Database migrations and schema
+/backend/database.py            @tickerpulse-ai/backend-team @tickerpulse-ai/core-team
+
+# AI provider integrations
+/backend/core/ai_providers.py   @tickerpulse-ai/backend-team @tickerpulse-ai/core-team
+
+# Configuration files
+/backend/config.py              @tickerpulse-ai/core-team

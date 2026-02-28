@@ -1,4 +1,3 @@
-```typescript
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
@@ -7,6 +6,7 @@ import KeyboardShortcutsProvider from "@/components/layout/KeyboardShortcutsProv
 import SSEAccessibilityAnnouncer from "@/components/accessibility/SSEAccessibilityAnnouncer";
 import { SidebarStateProvider } from "@/components/layout/SidebarStateProvider";
 import { ApiErrorProvider } from "@/lib/apiErrorContext";
+import ErrorBanner from "@/components/layout/ErrorBanner";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -35,6 +35,7 @@ export default function RootLayout({
       >
         <SSEAccessibilityAnnouncer />
         <ApiErrorProvider>
+          <ErrorBanner />
           <SidebarStateProvider>
             <div className="flex min-h-screen">
               <Sidebar />
@@ -50,4 +51,3 @@ export default function RootLayout({
     </html>
   );
 }
-```

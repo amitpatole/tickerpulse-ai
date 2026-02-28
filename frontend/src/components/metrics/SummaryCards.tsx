@@ -1,4 +1,3 @@
-```typescript
 'use client';
 
 import React from 'react';
@@ -144,4 +143,3 @@ export default React.memo(function SummaryCards({ summary, loading, poolStats }:
     </div>
   );
 });
-```

@@ -1,4 +1,3 @@
-```python
 """
 TickerPulse AI v3.0 - Typed API Error Hierarchy and Handler Decorator
 Provides a uniform exception-to-JSON-response pipeline for all API blueprints.
@@ -180,4 +179,3 @@ def handle_api_errors(fn):
             return ApiError(str(exc)).to_response()
 
     return wrapper
-```

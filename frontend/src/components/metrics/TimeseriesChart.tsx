@@ -1,11 +1,10 @@
-```typescript
 'use client';
 
 import React, { useMemo } from 'react';
-import type { MetricsTimeseriesPoint } from '@/lib/types';
+import type { TimeseriesDataPoint } from '@/lib/types';
 
 interface Props {
-  data: MetricsTimeseriesPoint[];
+  data: TimeseriesDataPoint[];
   metric: string;
   loading: boolean;
 }
@@ -253,4 +252,3 @@ export default React.memo(function TimeseriesChart({ data, metric, loading }: Pr
     </div>
   );
 });
-```

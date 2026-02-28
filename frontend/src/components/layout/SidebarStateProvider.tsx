@@ -1,4 +1,3 @@
-```typescript
 'use client';
 
 import { createContext, useContext, useCallback, useRef, useEffect, useState } from 'react';
@@ -64,4 +63,3 @@ export function SidebarStateProvider({ children }: { children: ReactNode }) {
 export function useSidebarState(): SidebarContextValue {
   return useContext(SidebarContext);
 }
-```

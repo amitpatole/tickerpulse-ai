@@ -1,4 +1,3 @@
-```python
 """
 APScheduler configuration and management for TickerPulse AI.
 Sets up job store (SQLite), job defaults, and exposes helpers.
@@ -376,6 +375,10 @@ class SchedulerManager:
                 logger.error("Failed to reschedule job %s: %s", job_id, exc)
                 return False
 
+    def is_running(self) -> bool:
+        """Return True if the underlying APScheduler instance is running."""
+        return bool(self.scheduler and self.scheduler.running)
+
     def is_market_hours(self, market: str = 'US') -> bool:
         """Check if currently within market hours.
 
@@ -416,4 +419,3 @@ class SchedulerManager:
 
 # Module-level singleton -- populated by backend.jobs.register_all_jobs()
 scheduler_manager = SchedulerManager()
-```

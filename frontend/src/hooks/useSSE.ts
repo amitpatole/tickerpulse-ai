@@ -1,10 +1,15 @@
-```typescript
 'use client';
 
 import { useEffect, useState, useRef, useCallback } from 'react';
-import type { SSEEvent, SSEEventType, AgentStatusEvent, AlertEvent, JobCompleteEvent, PriceUpdateEvent } from '@/lib/types';
-import type { AlertSoundSettings } from '@/lib/types';
-import { getAlertSoundSettings } from '@/lib/api';
+import type {
+  SSEEvent,
+  SSEEventType,
+  AgentStatusEvent,
+  AlertEvent,
+  JobCompleteEvent,
+  PriceUpdateEvent,
+} from '@/lib/types';
+import { useSSEAlerts } from './useSSEAlerts';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? '';
 const RECONNECT_DELAY = 5000;
@@ -20,18 +25,9 @@ interface SSEState {
   announcement: { assertive: string; polite: string };
 }
 
-function playAlertSound(settings: AlertSoundSettings): void {
-  if (!settings.enabled) return;
-  if (settings.mute_when_active && document.hasFocus()) return;
-
-  const audio = new Audio(`/sounds/${settings.sound_type}.mp3`);
-  audio.volume = settings.volume / 100;
-  audio.play().catch(() => {
-    // Ignore autoplay errors (e.g. browser policy requires user gesture)
-  });
-}
-
 export function useSSE() {
+  const { recentAlerts, handleAlertEvent } = useSSEAlerts();
+
   const [state, setState] = useState<SSEState>({
     connected: false,
     lastEvent: null,
@@ -46,27 +42,17 @@ export function useSSE() {
   const eventSourceRef = useRef<EventSource | null>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mountedRef = useRef(true);
-  const soundSettingsRef = useRef<AlertSoundSettings>({
-    enabled: true,
-    sound_type: 'chime',
-    volume: 70,
-    mute_when_active: false,
-  });
   const lastAnnouncementRef = useRef<{ text: string; ts: number }>({ text: '', ts: 0 });
   const prevConnectedRef = useRef<boolean | null>(null);
-  // Stable ref so memoized callbacks can always call the latest announce
   const announceRef = useRef<(text: string, channel: 'assertive' | 'polite') => void>(() => {});
 
-  // Fetch sound settings once on mount and keep the ref updated
-  useEffect(() => {
-    getAlertSoundSettings()
-      .then((settings) => {
-        soundSettingsRef.current = settings;
-      })
-      .catch(() => {
-        // Keep defaults on error
-      });
-  }, []);
+  // Stable refs so memoised callbacks always use the latest versions
+  const handleAlertEventRef = useRef(handleAlertEvent);
+  handleAlertEventRef.current = handleAlertEvent;
+
+  // Stable refs to break the connect <-> scheduleReconnect circular dependency
+  const connectRef = useRef<() => void>(() => {});
+  const scheduleReconnectRef = useRef<() => void>(() => {});
 
   const announce = useCallback((text: string, channel: 'assertive' | 'polite') => {
     const now = Date.now();
@@ -75,76 +61,18 @@ export function useSSE() {
     setState((prev) => ({ ...prev, announcement: { ...prev.announcement, [channel]: text } }));
   }, []);
 
-  // Keep ref pointing to the latest announce so memoized callbacks stay current
   announceRef.current = announce;
 
-  const connect = useCallback(() => {
-    if (eventSourceRef.current) {
-      eventSourceRef.current.close();
-    }
-
-    try {
-      const es = new EventSource(`${API_BASE}/api/stream`);
-      eventSourceRef.current = es;
-
-      es.onopen = () => {
-        if (mountedRef.current) {
-          setState((prev) => ({ ...prev, connected: true }));
-          if (prevConnectedRef.current === false) {
-            announceRef.current('Market data stream connected', 'polite');
-          }
-          prevConnectedRef.current = true;
-        }
-      };
-
-      es.onmessage = (event) => {
-        if (!mountedRef.current) return;
-        try {
-          const parsed = JSON.parse(event.data) as SSEEvent;
-          handleEvent(parsed);
-        } catch {
-          // Ignore malformed events
-        }
-      };
-
-      // Listen for specific named events
-      const eventTypes: SSEEventType[] = [
-        'agent_status', 'alert', 'job_complete', 'heartbeat',
-        'news', 'rating_update', 'snapshot', 'price_update',
-      ];
-      eventTypes.forEach((type) => {
-        es.addEventListener(type, (event: MessageEvent) => {
-          if (!mountedRef.current) return;
-          try {
-            const data = JSON.parse(event.data);
-            handleEvent({ type, data, timestamp: new Date().toISOString() });
-          } catch {
-            // Ignore malformed events
-          }
-        });
-      });
-
-      es.onerror = () => {
-        if (!mountedRef.current) return;
-        es.close();
-        if (prevConnectedRef.current === true) {
-          announceRef.current('Market data stream reconnecting', 'polite');
-        }
-        prevConnectedRef.current = false;
-        setState((prev) => ({ ...prev, connected: false }));
-        scheduleReconnect();
-      };
-    } catch {
-      scheduleReconnect();
-    }
-  }, []);
-
   const handleEvent = useCallback((event: SSEEvent) => {
-    // Fire announcements synchronously before state update so React 18 batches them together
     switch (event.type) {
       case 'alert': {
-        const alertEvent = event.data as unknown as AlertEvent;
-        announceRef.current(`Price alert: ${alertEvent.ticker} ${alertEvent.message}`, 'assertive');
+        const alertEvent = handleAlertEventRef.current(event.data);
+        if (alertEvent) {
+          announceRef.current(
+            `Price alert: ${alertEvent.ticker} ${alertEvent.message}`,
+            'assertive',
+          );
+        }
         break;
       }
       case 'news': {
@@ -169,25 +97,12 @@ export function useSSE() {
 
     setState((prev) => {
       const newLog = [event, ...prev.eventLog].slice(0, 100);
-      const next: SSEState = {
-        ...prev,
-        lastEvent: event,
-        eventLog: newLog,
-      };
+      const next: SSEState = { ...prev, lastEvent: event, eventLog: newLog };
 
       switch (event.type) {
         case 'agent_status': {
           const agentEvent = event.data as unknown as AgentStatusEvent;
-          next.agentStatus = {
-            ...prev.agentStatus,
-            [agentEvent.agent_name]: agentEvent,
-          };
-          break;
-        }
-        case 'alert': {
-          const alertEvent = event.data as unknown as AlertEvent;
-          next.recentAlerts = [alertEvent, ...prev.recentAlerts].slice(0, 50);
-          playAlertSound(soundSettingsRef.current);
+          next.agentStatus = { ...prev.agentStatus, [agentEvent.agent_name]: agentEvent };
           break;
         }
         case 'job_complete': {
@@ -197,10 +112,7 @@ export function useSSE() {
         }
         case 'price_update': {
           const priceEvent = event.data as unknown as PriceUpdateEvent;
-          next.priceUpdates = {
-            ...prev.priceUpdates,
-            [priceEvent.ticker]: priceEvent,
-          };
+          next.priceUpdates = { ...prev.priceUpdates, [priceEvent.ticker]: priceEvent };
           break;
         }
         default:
@@ -212,15 +124,72 @@ export function useSSE() {
   }, []);
 
   const scheduleReconnect = useCallback(() => {
-    if (reconnectTimerRef.current) {
-      clearTimeout(reconnectTimerRef.current);
-    }
+    if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
     reconnectTimerRef.current = setTimeout(() => {
-      if (mountedRef.current) {
-        connect();
-      }
+      if (mountedRef.current) connectRef.current();
     }, RECONNECT_DELAY);
-  }, [connect]);
+  }, []);
+
+  scheduleReconnectRef.current = scheduleReconnect;
+
+  const connect = useCallback(() => {
+    if (eventSourceRef.current) eventSourceRef.current.close();
+
+    try {
+      const es = new EventSource(`${API_BASE}/api/stream`);
+      eventSourceRef.current = es;
+
+      es.onopen = () => {
+        if (!mountedRef.current) return;
+        setState((prev) => ({ ...prev, connected: true }));
+        if (prevConnectedRef.current === false) {
+          announceRef.current('Market data stream connected', 'polite');
+        }
+        prevConnectedRef.current = true;
+      };
+
+      es.onmessage = (event) => {
+        if (!mountedRef.current) return;
+        try {
+          const parsed = JSON.parse(event.data) as SSEEvent;
+          handleEvent(parsed);
+        } catch {
+          // Ignore malformed events
+        }
+      };
+
+      const eventTypes: SSEEventType[] = [
+        'agent_status', 'alert', 'job_complete', 'heartbeat',
+        'news', 'rating_update', 'snapshot', 'price_update',
+      ];
+      eventTypes.forEach((type) => {
+        es.addEventListener(type, (event: MessageEvent) => {
+          if (!mountedRef.current) return;
+          try {
+            const data = JSON.parse(event.data);
+            handleEvent({ type, data, timestamp: new Date().toISOString() });
+          } catch {
+            // Ignore malformed events
+          }
+        });
+      });
+
+      es.onerror = () => {
+        if (!mountedRef.current) return;
+        es.close();
+        if (prevConnectedRef.current === true) {
+          announceRef.current('Market data stream reconnecting', 'polite');
+        }
+        prevConnectedRef.current = false;
+        setState((prev) => ({ ...prev, connected: false }));
+        scheduleReconnectRef.current();
+      };
+    } catch {
+      scheduleReconnectRef.current();
+    }
+  }, [handleEvent]);
+
+  connectRef.current = connect;
 
   useEffect(() => {
     mountedRef.current = true;
@@ -228,15 +197,11 @@ export function useSSE() {
 
     return () => {
       mountedRef.current = false;
-      if (eventSourceRef.current) {
-        eventSourceRef.current.close();
-      }
-      if (reconnectTimerRef.current) {
-        clearTimeout(reconnectTimerRef.current);
-      }
+      if (eventSourceRef.current) eventSourceRef.current.close();
+      if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
     };
   }, [connect]);
 
-  return state;
+  // Overlay recentAlerts managed by useSSEAlerts (which owns sound + alert state)
+  return { ...state, recentAlerts };
 }
-```

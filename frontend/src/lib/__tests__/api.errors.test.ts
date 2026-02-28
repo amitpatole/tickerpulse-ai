@@ -1,4 +1,3 @@
-```typescript
 /**
  * Tests for apiFetch error handling in frontend/src/lib/api.ts
  *
@@ -212,4 +211,3 @@ describe('apiFetch - success', () => {
     expect(result).toEqual(payload);
   });
 });
-```

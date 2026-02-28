@@ -1,11 +1,10 @@
-```typescript
 'use client';
 
 import React from 'react';
-import type { JobMetric } from '@/lib/types';
+import type { JobMetrics } from '@/lib/types';
 
 interface Props {
-  jobs: JobMetric[];
+  jobs: JobMetrics[];
   loading: boolean;
 }
 
@@ -94,4 +93,3 @@ export default React.memo(function JobsTable({ jobs, loading }: Props) {
     </div>
   );
 });
-```

@@ -1,4 +1,3 @@
-```typescript
 /**
  * TickerPulse AI v3.0 - API Client
  * Typed fetch wrappers for all backend REST endpoints.
@@ -369,4 +368,3 @@ export async function getModelComparisonHistory(
     `/api/ai/compare/history?ticker=${encodeURIComponent(ticker)}&limit=${limit}`,
   );
 }
-```

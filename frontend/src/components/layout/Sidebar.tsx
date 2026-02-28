@@ -1,4 +1,3 @@
-```typescript
 'use client';
 
 import Link from 'next/link';
@@ -16,6 +15,7 @@ import {
   History,
   Zap,
   X,
+  Layers,
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { useSidebarState } from './SidebarStateProvider';
@@ -24,6 +24,7 @@ const NAV_ITEMS = [
   { href: '/',          label: 'Dashboard', icon: LayoutDashboard },
   { href: '/agents',    label: 'Agents',    icon: Bot             },
   { href: '/research',  label: 'Research',  icon: FileSearch      },
+  { href: '/compare',   label: 'Compare',   icon: Layers          },
   { href: '/activity',  label: 'Activity',  icon: History         },
   { href: '/scheduler', label: 'Scheduler', icon: Calendar        },
   { href: '/settings',  label: 'Settings',  icon: Settings        },
@@ -135,4 +136,3 @@ export default function Sidebar() {
     </>
   );
 }
-```

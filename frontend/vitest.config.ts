@@ -1,4 +1,3 @@
-```ts
 import path from 'path'
 import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vitest/config'
@@ -22,6 +21,12 @@ export default defineConfig({
         'src/**/*.{spec,test}.{ts,tsx}',
         'src/setupTests.ts',
       ],
+      thresholds: {
+        lines: 70,
+        functions: 70,
+        branches: 70,
+        statements: 70,
+      },
     },
   },
   resolve: {
@@ -30,4 +35,3 @@ export default defineConfig({
     },
   },
 })
-```

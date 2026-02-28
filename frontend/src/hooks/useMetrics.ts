@@ -1,4 +1,3 @@
-```typescript
 'use client';
 
 import { useState, useEffect } from 'react';
@@ -114,4 +113,3 @@ export function _resetForTesting(): void {
   _refCount = 0;
   _fetchInFlight = false;
 }
-```

@@ -1,4 +1,3 @@
-```toml
 # TickerPulse AI v3.0 — Python tooling configuration
 
 [tool.ruff]
@@ -21,4 +20,3 @@ exclude = [
     "*.pyc",
     "backend/tests",
 ]
-```

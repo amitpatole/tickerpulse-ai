@@ -4,6 +4,7 @@ AI-Powered Stock Analytics
 Analyzes technical indicators, news sentiment, and social media to provide stock ratings
 """
 
+import re
 import sqlite3
 import requests
 import logging
@@ -14,6 +15,57 @@ import json
 from backend.config import Config
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Reusable structured-response parser
+# ---------------------------------------------------------------------------
+
+def parse_structured_response(text: str) -> dict | None:
+    """Extract structured rating/score/confidence/summary from an LLM response.
+
+    Tries, in order:
+      1. Direct JSON parse of the full text
+      2. First ```json ... ``` code block
+      3. First inline JSON object containing a ``"rating"`` key
+
+    Returns a dict with keys ``rating``, ``score``, ``confidence``, ``summary``
+    or ``None`` if no valid structured data can be extracted.
+    """
+    if not text:
+        return None
+
+    def _validate(data: dict) -> dict:
+        rating = str(data.get('rating', '')).upper()
+        if rating not in ('BUY', 'HOLD', 'SELL'):
+            raise ValueError(f"invalid rating: {rating!r}")
+        return {
+            'rating': rating,
+            'score': max(0.0, min(100.0, float(data.get('score', 50)))),
+            'confidence': max(0.0, min(100.0, float(data.get('confidence', 50)))),
+            'summary': str(data.get('summary', '')).strip()[:1000],
+        }
+
+    try:
+        return _validate(json.loads(text.strip()))
+    except (json.JSONDecodeError, ValueError):
+        pass
+
+    block = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', text, re.DOTALL)
+    if block:
+        try:
+            return _validate(json.loads(block.group(1)))
+        except (json.JSONDecodeError, ValueError):
+            pass
+
+    obj = re.search(r'\{[^{}]*"rating"[^{}]*\}', text, re.DOTALL)
+    if obj:
+        try:
+            return _validate(json.loads(obj.group(0)))
+        except (json.JSONDecodeError, ValueError):
+            pass
+
+    return None
 
 
 class StockAnalytics:

@@ -1,4 +1,3 @@
-```typescript
 'use client';
 
 import React from 'react';
@@ -25,14 +24,15 @@ function GaugeBar({ value, color }: { value: number; color: string }) {
   );
 }
 
-function StatusBadge({ statusClass }: { statusClass: '2xx' | '4xx' | '5xx' }) {
+function StatusBadge({ statusClass }: { statusClass: string }) {
   const styles: Record<string, string> = {
     '2xx': 'bg-emerald-500/15 text-emerald-400',
     '4xx': 'bg-amber-500/15  text-amber-400',
     '5xx': 'bg-red-500/15    text-red-400',
   };
+  const style = styles[statusClass] ?? 'bg-slate-500/15 text-slate-400';
   return (
-    <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${styles[statusClass]}`}>
+    <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${style}`}>
       {statusClass}
     </span>
   );
@@ -149,4 +149,3 @@ export default React.memo(function SystemPanel({ data, loading, error }: Props) 
     </div>
   );
 });
-```

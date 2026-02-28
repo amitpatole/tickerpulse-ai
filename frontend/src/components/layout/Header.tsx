@@ -1,4 +1,3 @@
-```typescript
 'use client';
 
 import { Bell, Menu, Search, Wifi, WifiOff, X, AlertTriangle } from 'lucide-react';
@@ -108,4 +107,3 @@ export default function Header({ title, subtitle }: HeaderProps) {
     </div>
   );
 }
-```

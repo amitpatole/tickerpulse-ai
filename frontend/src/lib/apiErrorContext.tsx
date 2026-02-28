@@ -1,4 +1,3 @@
-```typescript
 'use client';
 
 import {
@@ -49,4 +48,3 @@ export function ApiErrorProvider({ children }: { children: ReactNode }) {
 export function useApiErrorContext(): ApiErrorContextValue {
   return useContext(ApiErrorContext);
 }
-```

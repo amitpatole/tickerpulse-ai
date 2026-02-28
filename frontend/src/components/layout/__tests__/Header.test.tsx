@@ -1,4 +1,3 @@
-```typescript
 /**
  * Tests for Header component — persistent error banner.
  *
@@ -147,4 +146,3 @@ describe('Header - connection status', () => {
     expect(screen.getByText('Live')).toBeInTheDocument();
   });
 });
-```

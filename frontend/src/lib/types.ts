@@ -1,4 +1,3 @@
-```typescript
 // TickerPulse AI v3.0 - Shared TypeScript Types
 
 export type TimezoneMode = 'ET' | 'local';
@@ -489,6 +488,14 @@ export interface KnownAgent {
   enabled?: boolean;
 }
 
+export interface ScheduleFormValues {
+  job_id: string;
+  label: string;
+  description: string;
+  trigger: 'cron' | 'interval';
+  trigger_args: Record<string, unknown>;
+}
+
 // ---------------------------------------------------------------------------
 // Stock types
 // ---------------------------------------------------------------------------
@@ -548,6 +555,8 @@ export interface ExportCapabilities {
 // Multi-model comparison types
 // ---------------------------------------------------------------------------
 
+export type ComparisonTemplate = 'custom' | 'bull_bear_thesis' | 'risk_summary' | 'price_target';
+
 export interface ComparisonProviderRequest {
   provider: string;
   model: string;
@@ -555,16 +564,39 @@ export interface ComparisonProviderRequest {
 
 export interface ComparisonResult {
   provider: string;
-  model: string;
-  rating?: 'BUY' | 'HOLD' | 'SELL';
-  score?: number;
-  confidence?: number;
-  summary?: string;
-  tokens_used?: number;
-  duration_ms?: number;
-  error?: string;
+  model: string | null;
+  rating?: 'BUY' | 'HOLD' | 'SELL' | null;
+  score?: number | null;
+  confidence?: number | null;
+  summary?: string | null;
+  tokens_used?: number | null;
+  duration_ms?: number | null;
+  error?: string | null;
 }
 
+/** Response from POST /api/comparison/run (202) */
+export interface ComparisonRunStartResponse {
+  id: string;
+  status: string;
+  created_at: string;
+}
+
+/** Response from GET /api/comparison/run/<id> */
+export interface ComparisonRunResponse {
+  id: string;
+  ticker: string | null;
+  status: 'pending' | 'complete' | 'error';
+  template: ComparisonTemplate;
+  created_at: string;
+  results: ComparisonResult[];
+}
+
+/** Response from GET /api/comparison/runs */
+export interface ComparisonRunsResponse {
+  runs: ComparisonRunResponse[];
+}
+
+// Legacy types kept for ai_compare_bp (/api/ai/compare) compatibility
 export interface ModelComparisonMarketContext {
   price: number;
   rsi: number;
@@ -589,4 +621,3 @@ export interface ModelComparisonHistoryResponse {
   ticker: string;
   runs: ModelComparisonRun[];
 }
-```

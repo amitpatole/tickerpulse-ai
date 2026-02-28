@@ -1,4 +1,3 @@
-```python
 """
 TickerPulse AI v3.0 - Central Configuration
 All settings are driven by environment variables with sensible defaults.
@@ -193,4 +192,3 @@ class Config:
     # Each worker calls _fetch_price() for one ticker; keep <= DB_POOL_SIZE
     # to avoid pool contention when persisting results.
     PRICE_REFRESH_WORKERS: int = int(os.getenv('PRICE_REFRESH_WORKERS', 10))
-```

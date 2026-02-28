@@ -1,4 +1,3 @@
-```typescript
 'use client';
 
 import React from 'react';
@@ -39,4 +38,3 @@ export default function PeriodSelector({ value, onChange }: Props) {
     </div>
   );
 }
-```

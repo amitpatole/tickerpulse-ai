@@ -1,4 +1,3 @@
-```python
 """
 TickerPulse AI v3.0 - Activity Feed API
 Unified timeline of agent runs, job executions, and errors with daily cost aggregation.
@@ -250,4 +249,3 @@ def get_activity_feed():
             'success_rate': success_rate,
         },
     })
-```

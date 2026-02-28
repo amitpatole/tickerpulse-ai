@@ -1,4 +1,3 @@
-```typescript
 /**
  * TickerPulse AI v3.0 - useApiError hook
  *
@@ -100,4 +99,3 @@ export function useApiError(error: ApiError | null | undefined): ApiErrorInfo | 
 export function getErrorCopy(error_code: string): string {
   return ERROR_COPY[error_code] ?? FALLBACK_COPY;
 }
-```

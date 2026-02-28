@@ -1,4 +1,3 @@
-```typescript
 /**
  * Tests for useApiError hook and getErrorCopy utility.
  *
@@ -163,4 +162,3 @@ describe('getErrorCopy', () => {
     expect(getErrorCopy('BOGUS_CODE')).toBeTruthy();
   });
 });
-```
