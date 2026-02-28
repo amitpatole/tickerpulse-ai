@@ -1,3 +1,4 @@
+```tsx
 'use client';
 
 import { createContext, useCallback, useContext, useRef, useState } from 'react';
@@ -57,3 +58,4 @@ export default function KeyboardShortcutsProvider({
     </KeyboardShortcutsContext.Provider>
   );
 }
+```

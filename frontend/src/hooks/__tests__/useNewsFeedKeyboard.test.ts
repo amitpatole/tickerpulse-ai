@@ -220,5 +220,145 @@ describe('useNewsFeedKeyboard Hook', () => {
     });
     expect(result.current.focusedIndex).toBe(1);
   });
+
+  // Home key: Jump to first article immediately
+  it('jumps to first article when Home key is pressed', () => {
+    const { result } = createHook(10);
+
+    // Setup mock items
+    act(() => {
+      for (let i = 0; i < 10; i++) {
+        result.current.itemRefs.current[i] = createMockElement();
+      }
+    });
+
+    // Activate panel and navigate to middle
+    act(() => {
+      result.current.activatePanel();
+    });
+    for (let i = 0; i < 5; i++) {
+      act(() => {
+        const event = { key: 'ArrowDown', preventDefault: jest.fn() };
+        result.current.handleKeyDown(event as any);
+      });
+    }
+    expect(result.current.focusedIndex).toBe(5);
+
+    // Press Home - should jump to first item
+    act(() => {
+      const event = { key: 'Home', preventDefault: jest.fn() };
+      result.current.handleKeyDown(event as any);
+    });
+    expect(result.current.focusedIndex).toBe(0);
+  });
+
+  // End key: Jump to last article immediately
+  it('jumps to last article when End key is pressed', () => {
+    const { result } = createHook(10);
+
+    // Setup mock items
+    act(() => {
+      for (let i = 0; i < 10; i++) {
+        result.current.itemRefs.current[i] = createMockElement();
+      }
+    });
+
+    // Activate panel (starts at first item)
+    act(() => {
+      result.current.activatePanel();
+    });
+    expect(result.current.focusedIndex).toBe(0);
+
+    // Press End - should jump to last item
+    act(() => {
+      const event = { key: 'End', preventDefault: jest.fn() };
+      result.current.handleKeyDown(event as any);
+    });
+    expect(result.current.focusedIndex).toBe(9);
+  });
+
+  // PageDown: Move forward by PAGE_SIZE (5 items)
+  it('moves forward by PAGE_SIZE (5) items when PageDown is pressed', () => {
+    const { result } = createHook(15);
+
+    // Setup mock items
+    act(() => {
+      for (let i = 0; i < 15; i++) {
+        result.current.itemRefs.current[i] = createMockElement();
+      }
+    });
+
+    // Activate panel at first item
+    act(() => {
+      result.current.activatePanel();
+    });
+    expect(result.current.focusedIndex).toBe(0);
+
+    // Press PageDown - should move to index 5
+    act(() => {
+      const event = { key: 'PageDown', preventDefault: jest.fn() };
+      result.current.handleKeyDown(event as any);
+    });
+    expect(result.current.focusedIndex).toBe(5);
+
+    // Press PageDown again - should move to index 10
+    act(() => {
+      const event = { key: 'PageDown', preventDefault: jest.fn() };
+      result.current.handleKeyDown(event as any);
+    });
+    expect(result.current.focusedIndex).toBe(10);
+
+    // Press PageDown at boundary - should clamp to last item
+    act(() => {
+      const event = { key: 'PageDown', preventDefault: jest.fn() };
+      result.current.handleKeyDown(event as any);
+    });
+    expect(result.current.focusedIndex).toBe(14);
+  });
+
+  // PageUp: Move backward by PAGE_SIZE (5 items)
+  it('moves backward by PAGE_SIZE (5) items when PageUp is pressed', () => {
+    const { result } = createHook(15);
+
+    // Setup mock items
+    act(() => {
+      for (let i = 0; i < 15; i++) {
+        result.current.itemRefs.current[i] = createMockElement();
+      }
+    });
+
+    // Navigate to near the end
+    act(() => {
+      result.current.activatePanel();
+    });
+    for (let i = 0; i < 12; i++) {
+      act(() => {
+        const event = { key: 'ArrowDown', preventDefault: jest.fn() };
+        result.current.handleKeyDown(event as any);
+      });
+    }
+    expect(result.current.focusedIndex).toBe(12);
+
+    // Press PageUp - should move back by 5 to index 7
+    act(() => {
+      const event = { key: 'PageUp', preventDefault: jest.fn() };
+      result.current.handleKeyDown(event as any);
+    });
+    expect(result.current.focusedIndex).toBe(7);
+
+    // Press PageUp again - should move back by 5 to index 2
+    act(() => {
+      const event = { key: 'PageUp', preventDefault: jest.fn() };
+      result.current.handleKeyDown(event as any);
+    });
+    expect(result.current.focusedIndex).toBe(2);
+
+    // Press PageUp at boundary - should clamp to first item
+    act(() => {
+      const event = { key: 'PageUp', preventDefault: jest.fn() };
+      result.current.handleKeyDown(event as any);
+    });
+    expect(result.current.focusedIndex).toBe(0);
+  });
 });
 ```
