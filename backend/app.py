@@ -1,4 +1,3 @@
-```python
 """
 TickerPulse AI v3.0 - Flask Application Factory
 Creates and configures the Flask app, registers blueprints, sets up SSE,
@@ -6,12 +5,14 @@ initialises the database and scheduler.
 """
 
 import json
+import os
 import queue
 import logging
 import threading
-from datetime import datetime
+from datetime import datetime, timezone
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
+from typing import Any
 
 from flask import Flask, Response, jsonify, send_from_directory
 
@@ -46,6 +47,7 @@ _SWAGGER_TEMPLATE: dict = {
         {'name': 'Analysis', 'description': 'AI ratings and chart data'},
         {'name': 'Agents',   'description': 'Agent management, execution, and cost tracking'},
         {'name': 'System',   'description': 'Health check and real-time SSE stream'},
+        {'name': 'Earnings', 'description': 'Earnings calendar — upcoming and past events with EPS/revenue estimates'},
     ],
     'definitions': {
         'Error': {
@@ -111,7 +113,7 @@ def _build_snapshot(db_path: str | None = None) -> dict:
         'active_alerts': active_alerts,
         'last_regime': last_regime,
         'last_technical_signal': last_technical_signal,
-        'timestamp': datetime.utcnow().isoformat() + 'Z',
+        'timestamp': datetime.now(timezone.utc).isoformat(),
     }
 
 
@@ -120,6 +122,16 @@ def send_sse_event(event_type: str, data: dict) -> None:
 
     Validates event_type against an allowlist, rejects non-serializable or
     oversized payloads, and silently drops invalid events with an error log.
+
+    The payload is serialized to a JSON string *once* before being placed on
+    every client queue.  This prevents two classes of race condition:
+
+    1. Shared-mutable-dict race: if the caller mutates ``data`` after this
+       function returns, clients that have not yet dequeued and rendered the
+       item would otherwise observe the mutated value.
+    2. Redundant serialization: N clients would each call ``json.dumps``
+       independently; serializing once and sharing the immutable string is
+       both correct and more efficient.
     """
     if event_type not in _ALLOWED_EVENT_TYPES:
         logger.error("SSE blocked: unknown event_type %r", event_type)
@@ -136,7 +148,10 @@ def send_sse_event(event_type: str, data: dict) -> None:
         dead_clients: list[queue.Queue] = []
         for client_queue in sse_clients:
             try:
-                client_queue.put_nowait((event_type, data))
+                # Queue the pre-serialized string, not the raw dict, so that
+                # (a) all clients receive identical bytes and (b) post-call
+                # mutations to ``data`` cannot affect what clients read.
+                client_queue.put_nowait((event_type, serialized))
             except queue.Full:
                 dead_clients.append(client_queue)
         # Remove any clients whose queues overflowed
@@ -153,6 +168,43 @@ def send_sse_event(event_type: str, data: dict) -> None:
                 invalidate_ticker(ticker)
             except Exception as exc:
                 logger.debug("Sentiment cache invalidation skipped: %s", exc)
+
+
+def _ws_handle_manual_refresh(tickers: set[str], manager: Any) -> None:
+    """Fetch live prices for *tickers* and broadcast to WS subscribers and SSE.
+
+    Called when a WebSocket client sends ``{"type": "refresh"}``.  Keeps both
+    channels in sync: WS subscribers receive a ``price_update`` message;
+    SSE clients receive the same data via the existing ``send_sse_event`` path.
+    Import of ``_fetch_price`` is deferred to avoid a circular import at module
+    load time (price_refresh imports ``send_sse_event`` from this module).
+    """
+    if not tickers:
+        return
+    try:
+        from backend.jobs.price_refresh import _fetch_price
+    except ImportError as exc:
+        logger.warning("_ws_handle_manual_refresh: cannot import _fetch_price: %s", exc)
+        return
+
+    timestamp = datetime.now(timezone.utc).isoformat()
+    for ticker in tickers:
+        price_data = _fetch_price(ticker)
+        if price_data is None:
+            logger.debug("_ws_handle_manual_refresh: no data for %s", ticker)
+            continue
+        ws_payload: dict = {
+            'type': 'price_update',
+            'ticker': ticker,
+            'price': price_data['price'],
+            'change': price_data['change'],
+            'change_pct': price_data['change_pct'],
+            'volume': price_data.get('volume', 0),
+            'timestamp': timestamp,
+        }
+        manager.broadcast_to_subscribers(ticker, ws_payload)
+        # Mirror to SSE so clients on both channels stay consistent.
+        send_sse_event('price_update', {k: v for k, v in ws_payload.items() if k != 'type'})
 
 
 # ---------------------------------------------------------------------------
@@ -174,6 +226,11 @@ def create_app() -> Flask:
     # -- Logging -------------------------------------------------------------
     _setup_logging(app)
 
+    # -- Request tracing & global error handlers -----------------------------
+    from backend.middleware.request_logging import init_request_logging
+    init_request_logging(app)
+    logger.info("Request tracing middleware registered")
+
     # -- CORS ----------------------------------------------------------------
     try:
         from flask_cors import CORS
@@ -183,6 +240,15 @@ def create_app() -> Flask:
             "flask-cors is not installed -- CORS headers will NOT be added. "
             "Install with: pip install flask-cors"
         )
+
+    # -- Rate limiter --------------------------------------------------------
+    try:
+        from backend.extensions import limiter as _limiter
+        if _limiter is not None:
+            _limiter.init_app(app)
+            logger.info("Rate limiter initialized (in-memory storage)")
+    except (ImportError, Exception) as exc:
+        logger.warning("Rate limiter not initialized: %s", exc)
 
     # -- Swagger / OpenAPI (Flasgger) ----------------------------------------
     if Config.SWAGGER_ENABLED:
@@ -231,7 +297,7 @@ def create_app() -> Flask:
                 'to_provider': to_display,
                 'tier': tier,
                 'reason': reason,
-                'timestamp': datetime.utcnow().isoformat() + 'Z',
+                'timestamp': datetime.now(timezone.utc).isoformat(),
             })
 
         data_registry.on_fallback = _on_provider_fallback
@@ -266,10 +332,13 @@ def create_app() -> Flask:
                     logger.warning("event_stream: snapshot build failed: %s", exc)
                 while True:
                     try:
-                        event_type, data = q.get(timeout=15)
+                        # Dequeue the pre-serialized string placed by send_sse_event.
+                        # No re-serialization needed — the string is already valid JSON
+                        # and was validated for size before being enqueued.
+                        event_type, serialized = q.get(timeout=15)
                         yield (
                             f"event: {event_type}\n"
-                            f"data: {json.dumps(data)}\n\n"
+                            f"data: {serialized}\n\n"
                         )
                     except queue.Empty:
                         # Send a heartbeat so proxies / browsers don't drop
@@ -291,11 +360,101 @@ def create_app() -> Flask:
             },
         )
 
+    # -- WebSocket endpoint (flask-sock) -------------------------------------
+    try:
+        from flask_sock import Sock
+        from backend.core.ws_manager import ws_manager as _ws_manager
+
+        sock = Sock(app)
+
+        @sock.route('/api/ws/prices')
+        def ws_prices(ws: Any) -> None:
+            """WebSocket endpoint for subscription-scoped real-time price updates.
+
+            Protocol (client → server):
+              {"type": "subscribe",   "tickers": ["AAPL", "MSFT"]}
+              {"type": "unsubscribe", "tickers": ["AAPL"]}
+              {"type": "refresh"}   -- immediate price fetch for subscribed tickers
+              {"type": "ping"}
+
+            Protocol (server → client):
+              {"type": "connected",    "client_id": "<uuid>"}
+              {"type": "subscribed",   "tickers": [...]}
+              {"type": "unsubscribed", "tickers": [...]}
+              {"type": "price_update", "ticker": "AAPL", "price": ..., ...}
+              {"type": "pong"}
+              {"type": "error",        "message": "..."}
+            """
+            client_id = _ws_manager.register(ws)
+            logger.info("WS client connected: %s", client_id)
+            try:
+                ws.send(json.dumps({"type": "connected", "client_id": client_id}))
+                while True:
+                    raw = ws.receive()
+                    if raw is None:
+                        break
+                    try:
+                        msg = json.loads(raw)
+                    except (json.JSONDecodeError, ValueError):
+                        ws.send(json.dumps({"type": "error", "message": "Invalid JSON"}))
+                        continue
+                    if not isinstance(msg, dict):
+                        ws.send(json.dumps({"type": "error", "message": "Expected a JSON object"}))
+                        continue
+
+                    msg_type = msg.get("type", "")
+
+                    if msg_type == "subscribe":
+                        tickers = msg.get("tickers", [])
+                        if isinstance(tickers, list):
+                            _ws_manager.subscribe(client_id, tickers)
+                        ws.send(json.dumps({
+                            "type": "subscribed",
+                            "tickers": sorted(_ws_manager.get_subscriptions(client_id)),
+                        }))
+
+                    elif msg_type == "unsubscribe":
+                        tickers = msg.get("tickers", [])
+                        if isinstance(tickers, list):
+                            _ws_manager.unsubscribe(client_id, tickers)
+                        ws.send(json.dumps({
+                            "type": "unsubscribed",
+                            "tickers": [t.upper() for t in tickers if isinstance(t, str)],
+                        }))
+
+                    elif msg_type == "refresh":
+                        subscribed = _ws_manager.get_subscriptions(client_id)
+                        _ws_handle_manual_refresh(subscribed, _ws_manager)
+
+                    elif msg_type == "ping":
+                        ws.send(json.dumps({"type": "pong"}))
+
+                    else:
+                        ws.send(json.dumps({
+                            "type": "error",
+                            "message": f"Unknown message type: {msg_type!r}",
+                        }))
+
+            except Exception as exc:
+                logger.debug("WS connection %s closed: %s", client_id, exc)
+            finally:
+                _ws_manager.unregister(client_id)
+                logger.info("WS client disconnected: %s", client_id)
+
+        logger.info("WebSocket endpoint available at /api/ws/prices")
+
+    except ImportError:
+        logger.warning(
+            "flask-sock is not installed -- WebSocket endpoint disabled. "
+            "Install with: pip install flask-sock"
+        )
+
     # -- Health check --------------------------------------------------------
     @app.route('/api/health')
     def health():
-        """Simple health-check endpoint for load balancers / monitoring."""
+        """Health-check endpoint with per-subsystem status for monitoring."""
         import sqlite3
+
         db_status = 'error'
         try:
             conn = sqlite3.connect(Config.DB_PATH)
@@ -305,11 +464,38 @@ def create_app() -> Flask:
         except Exception:
             pass
 
+        scheduler_status = 'error'
+        try:
+            sched = getattr(app, 'scheduler', None)
+            if sched is None:
+                # Scheduler not initialised (e.g. flask-apscheduler not installed);
+                # treat as ok since it's optional.
+                scheduler_status = 'ok'
+            elif sched.running:
+                scheduler_status = 'ok'
+        except Exception:
+            pass
+
+        error_log_count_1h = 0
+        try:
+            with db_session() as conn:
+                row = conn.execute(
+                    "SELECT COUNT(*) FROM error_log"
+                    " WHERE created_at >= datetime('now', '-1 hours')"
+                ).fetchone()
+                error_log_count_1h = row[0] if row else 0
+        except Exception:
+            pass
+
+        overall = 'ok' if db_status == 'ok' else 'degraded'
+
         return jsonify({
-            'status': 'ok',
+            'status': overall,
             'version': '3.0.0',
             'timestamp': datetime.utcnow().isoformat() + 'Z',
-            'database': db_status,
+            'db': db_status,
+            'scheduler': scheduler_status,
+            'error_log_count_1h': error_log_count_1h,
         })
 
     # -- Legacy dashboard fallback -------------------------------------------
@@ -332,11 +518,27 @@ def create_app() -> Flask:
 # ---------------------------------------------------------------------------
 
 def _setup_logging(app: Flask) -> None:
-    """Configure application-wide logging with rotating file handler."""
+    """Configure application-wide logging with rotating file handler.
+
+    Also installs a ``sys.excepthook`` so that any Python exception that
+    escapes the web-framework (e.g. from a background job thread) is written
+    to the structured log file rather than silently printed to stderr.
+    """
+    import sys
+
     log_dir = Path(Config.LOG_DIR)
     log_dir.mkdir(parents=True, exist_ok=True)
 
     log_level = getattr(logging, Config.LOG_LEVEL.upper(), logging.INFO)
+
+    if Config.LOG_FORMAT_JSON:
+        try:
+            from backend.middleware.request_logging import JsonFormatter
+            formatter: logging.Formatter = JsonFormatter()
+        except ImportError:
+            formatter = logging.Formatter(Config.LOG_FORMAT)
+    else:
+        formatter = logging.Formatter(Config.LOG_FORMAT)
 
     # Rotating file handler
     file_handler = RotatingFileHandler(
@@ -345,12 +547,12 @@ def _setup_logging(app: Flask) -> None:
         backupCount=Config.LOG_BACKUP_COUNT,
     )
     file_handler.setLevel(log_level)
-    file_handler.setFormatter(logging.Formatter(Config.LOG_FORMAT))
+    file_handler.setFormatter(formatter)
 
     # Console handler
     console_handler = logging.StreamHandler()
     console_handler.setLevel(log_level)
-    console_handler.setFormatter(logging.Formatter(Config.LOG_FORMAT))
+    console_handler.setFormatter(formatter)
 
     # Apply to root logger so all modules pick it up
     root_logger = logging.getLogger()
@@ -359,6 +561,19 @@ def _setup_logging(app: Flask) -> None:
     root_logger.addHandler(console_handler)
 
     app.logger.setLevel(log_level)
+
+    # Catch exceptions that escape the web framework (background threads, etc.)
+    _original_excepthook = sys.excepthook
+
+    def _uncaught_exception_handler(exc_type, exc_value, exc_tb):
+        if not issubclass(exc_type, KeyboardInterrupt):
+            logging.getLogger(__name__).critical(
+                "Uncaught exception",
+                exc_info=(exc_type, exc_value, exc_tb),
+            )
+        _original_excepthook(exc_type, exc_value, exc_tb)
+
+    sys.excepthook = _uncaught_exception_handler
 
 
 def _register_blueprints(app: Flask) -> None:
@@ -385,6 +600,10 @@ def _register_blueprints(app: Flask) -> None:
         'backend.api.providers':        'providers_bp',
         'backend.api.compare':          'compare_bp',
         'backend.api.watchlist':        'watchlist_bp',
+        'backend.api.errors':           'errors_bp',
+        'backend.api.error_stats':      'error_stats_bp',
+        'backend.api.portfolio':        'portfolio_bp',
+        'backend.api.comparison':       'comparison_bp',
     }
 
     for module_path, bp_name in blueprint_map.items():
@@ -451,4 +670,3 @@ if __name__ == '__main__':
         port=Config.FLASK_PORT,
         debug=Config.FLASK_DEBUG,
     )
-```

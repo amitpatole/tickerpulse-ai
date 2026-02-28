@@ -1,8 +1,10 @@
+```tsx
 'use client';
 
 import { useEffect, useId, useRef } from 'react';
 import { createChart, AreaSeries, ColorType, TickMarkType, type IChartApi, type Time, type UTCTimestamp } from 'lightweight-charts';
 import { ChartDataSummary } from './ChartDataSummary';
+import type { Timeframe } from '@/lib/types';
 
 interface PriceDataPoint {
   time: string | number;
@@ -14,7 +16,11 @@ interface PriceChartProps {
   title?: string;
   height?: number;
   color?: string;
-  timeframe?: '1D' | '1W' | '1M' | '3M' | '1Y' | 'All';
+  timeframe?: Timeframe;
+  /** Accepted but not rendered — reserved for future comparison overlay support. */
+  primarySymbol?: string;
+  /** Accepted but not rendered — reserved for future comparison overlay support. */
+  compareOverlays?: unknown[];
 }
 
 export default function PriceChart({
@@ -157,3 +163,4 @@ export default function PriceChart({
     </div>
   );
 }
+```
