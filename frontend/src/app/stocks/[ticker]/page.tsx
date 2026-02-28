@@ -1,3 +1,4 @@
+```tsx
 'use client';
 
 import { use, useCallback, useEffect, useMemo, useState } from 'react';
@@ -13,6 +14,7 @@ import {
   Clock,
   Activity,
   Newspaper,
+  BarChart2,
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import Header from '@/components/layout/Header';
@@ -25,12 +27,13 @@ import ComparisonChart from '@/components/stocks/ComparisonChart';
 import AIAnalysisPanel from '@/components/stocks/AIAnalysisPanel';
 import { useApi } from '@/hooks/useApi';
 import { useStockDetail } from '@/hooks/useStockDetail';
-import { getCompareData } from '@/lib/api';
+import { getCompareData, patchState } from '@/lib/api';
 import type {
   StockDetailNewsItem,
   StockDetailIndicators,
   ComparisonSeries,
   ComparisonTicker,
+  Timeframe,
 } from '@/lib/types';
 
 interface StockDetailPageProps {
@@ -122,7 +125,7 @@ function NewsCard({ news, loading }: NewsCardProps) {
                   rel="noopener noreferrer"
                   className="group flex items-start gap-1.5"
                 >
-                  <p className="flex-1 text-sm text-slate-200 line-clamp-2 transition-colors group-hover:text-blue-400">
+                  <p className="flex-1 line-clamp-2 text-sm text-slate-200 transition-colors group-hover:text-blue-400">
                     {item.title}
                   </p>
                   <ExternalLink
@@ -131,7 +134,7 @@ function NewsCard({ news, loading }: NewsCardProps) {
                   />
                 </a>
               ) : (
-                <p className="text-sm text-slate-200 line-clamp-2">{item.title}</p>
+                <p className="line-clamp-2 text-sm text-slate-200">{item.title}</p>
               )}
 
               <div className="mt-1.5 flex flex-wrap items-center gap-2">
@@ -226,6 +229,12 @@ export default function StockDetailPage({ params }: StockDetailPageProps) {
     }
   }, [isInvalidTicker, router]);
 
+  // Persist the last-viewed ticker so it can be restored across restarts.
+  useEffect(() => {
+    if (!upperTicker) return;
+    patchState({ navigation: { last_viewed_ticker: upperTicker } }).catch(() => {});
+  }, [upperTicker]);
+
   // Stock detail data via dedicated hook (includes SSE overlay)
   const { data, loading, error, livePrice: livePriceData, aiRating } = useStockDetail(
     isInvalidTicker ? '' : upperTicker,
@@ -235,6 +244,7 @@ export default function StockDetailPage({ params }: StockDetailPageProps) {
 
   const [comparisonEnabled, setComparisonEnabled] = useState(false);
   const [comparisonTickers, setComparisonTickers] = useState<ComparisonTicker[]>([]);
+  const [compareTimeframe, setCompareTimeframe] = useState<Timeframe>('1M');
 
   function handleComparisonAdd(ct: ComparisonTicker) {
     setComparisonTickers((prev) => [...prev, ct]);
@@ -251,13 +261,13 @@ export default function StockDetailPage({ params }: StockDetailPageProps) {
   }, [comparisonEnabled, comparisonTickers, upperTicker]);
 
   const compareFetcher = useCallback(
-    () => getCompareData(compareSymbolsKey.split(',').filter(Boolean), '1M'),
-    [compareSymbolsKey],
+    () => getCompareData(compareSymbolsKey.split(',').filter(Boolean), compareTimeframe),
+    [compareSymbolsKey, compareTimeframe],
   );
 
   const { data: compareData, loading: compareLoading } = useApi(
     compareFetcher,
-    [compareSymbolsKey],
+    [compareSymbolsKey, compareTimeframe],
     { enabled: comparisonEnabled && comparisonTickers.length > 0 },
   );
 
@@ -425,31 +435,52 @@ export default function StockDetailPage({ params }: StockDetailPageProps) {
           </div>
         </div>
 
-        {/* Comparison mode */}
-        <div className="rounded-xl border border-slate-700/50 bg-slate-900 p-5">
-          <ComparisonModePanel
-            primaryTicker={upperTicker}
-            comparisonTickers={comparisonTickers}
-            onAdd={handleComparisonAdd}
-            onRemove={handleComparisonRemove}
-            onToggle={setComparisonEnabled}
-            enabled={comparisonEnabled}
-          />
-        </div>
-
-        {comparisonEnabled && comparisonTickers.length > 0 && (
-          <div className="rounded-xl border border-slate-700/50 bg-slate-900 p-5">
-            {compareLoading ? (
-              <div className="flex items-center justify-center py-10">
-                <Loader2 className="h-5 w-5 animate-spin text-slate-400" aria-hidden="true" />
-                <span className="sr-only">Loading comparison…</span>
-              </div>
-            ) : comparisonChartSeries.length > 0 ? (
-              <ComparisonChart series={comparisonChartSeries} timeframe="1M" />
-            ) : null}
+        {/* Performance Comparison */}
+        <div className="rounded-xl border border-slate-700/50 bg-slate-900">
+          <div className="flex items-center gap-2 border-b border-slate-700/50 px-5 py-3">
+            <BarChart2 className="h-3.5 w-3.5 text-blue-400" aria-hidden="true" />
+            <h2 className="text-sm font-semibold text-white">Performance Comparison</h2>
           </div>
-        )}
+
+          <div className="p-5">
+            <ComparisonModePanel
+              primaryTicker={upperTicker}
+              comparisonTickers={comparisonTickers}
+              onAdd={handleComparisonAdd}
+              onRemove={handleComparisonRemove}
+              onToggle={setComparisonEnabled}
+              enabled={comparisonEnabled}
+            />
+
+            {comparisonEnabled && comparisonTickers.length === 0 && (
+              <div className="mt-4 flex flex-col items-center gap-2 rounded-lg border border-dashed border-slate-700 py-10 text-center">
+                <BarChart2 className="h-8 w-8 text-slate-700" aria-hidden="true" />
+                <p className="text-sm text-slate-500">
+                  Search for a ticker above to start comparing
+                </p>
+              </div>
+            )}
+
+            {comparisonEnabled && comparisonTickers.length > 0 && (
+              <div className="mt-4">
+                {compareLoading ? (
+                  <div className="flex items-center justify-center py-10">
+                    <Loader2 className="h-5 w-5 animate-spin text-slate-400" aria-hidden="true" />
+                    <span className="sr-only">Loading comparison…</span>
+                  </div>
+                ) : comparisonChartSeries.length > 0 ? (
+                  <ComparisonChart
+                    series={comparisonChartSeries}
+                    timeframe={compareTimeframe}
+                    onTimeframeChange={setCompareTimeframe}
+                  />
+                ) : null}
+              </div>
+            )}
+          </div>
+        </div>
       </div>
     </div>
   );
 }
+```
