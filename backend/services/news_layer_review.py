@@ -141,11 +141,11 @@ def format_news_layer_report(result: Mapping[str, object]) -> str:
         f"Generated: {result.get('generated_at', '')}",
         f"Source status: {result.get('source_status', 'unknown')}",
     ]
+    lines.extend(_market_tape_lines(_mapping(result.get("market_tape"))))
     lines.extend(_ranked_twitter_following_lines(accounts, generated_at=generated_at))
     lines.extend(_top_news_and_ticker_lines(accounts, searches, generated_at=generated_at))
     lines.extend(_vol_structure_lines(_mapping(result.get("vol_structure_monitor"))))
     lines.extend(_gamma_exposure_lines(_mapping(result.get("gamma_exposure_monitor"))))
-    lines.extend(_market_tape_lines(_mapping(result.get("market_tape"))))
     lines.extend(_ai_infra_lines(_mapping(result.get("ai_infra_update"))))
     lines.extend(_executive_summary_lines(summary))
     lines.extend(_topic_lines(summary.get("top_topics")))
