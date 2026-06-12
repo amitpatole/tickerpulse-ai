@@ -835,7 +835,7 @@ class NewsWireFusionTest(unittest.TestCase):
     def test_tickers_for_post_unions_ticker_seeds(self):
         from backend.services.news_story_cards import tickers_for_post
 
-        self.assertEqual(tickers_for_post(self._news_post()), ["NVDA"])
+        self.assertEqual(tickers_for_post(self._news_post()), ["$NVDA"])
 
     def test_wire_and_followed_posts_cluster_into_one_story(self):
         from backend.services.news_story_cards import build_story_cards
@@ -880,7 +880,10 @@ def tickers_for_post(post: Mapping[str, object]) -> list[str]:
     tags = {match.upper() for match in CASHTAG_RE.findall(post_text(post))}
     seeds = post.get("ticker_seeds")
     if isinstance(seeds, (list, tuple)):
-        tags.update(str(seed).strip().upper() for seed in seeds if str(seed).strip())
+        tags.update(
+            "$" + str(seed).strip().upper().lstrip("$")
+            for seed in seeds if str(seed).strip()
+        )
     return sorted(tags)
 ```
 
@@ -1122,7 +1125,7 @@ class MorningDigestLanesTest(unittest.TestCase):
         merged = [card for card in cards if any(s["grade"] == "news wire headline" for s in card["sources"])]
         self.assertTrue(merged)
         self.assertTrue(any(s["grade"] == "followed account original post" for s in merged[0]["sources"]))
-        self.assertIn("NVDA", summary["top_news_and_tickers"]["top_tickers"])
+        self.assertIn("$NVDA", summary["top_news_and_tickers"]["top_tickers"])
         self.assertEqual(summary["market_tape"]["rows"][0]["symbol"], "SPY")
         self.assertTrue(summary["ai_infra_update"]["staleness"]["stale"])
         self.assertEqual(len(summary["news_wire"]["posts"]), 1)

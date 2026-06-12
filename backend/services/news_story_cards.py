@@ -173,7 +173,10 @@ def tickers_for_post(post: Mapping[str, object]) -> list[str]:
     tags = {match.upper() for match in CASHTAG_RE.findall(post_text(post))}
     seeds = post.get("ticker_seeds")
     if isinstance(seeds, (list, tuple)):
-        tags.update(str(seed).strip().upper() for seed in seeds if str(seed).strip())
+        tags.update(
+            "$" + str(seed).strip().upper().lstrip("$")
+            for seed in seeds if str(seed).strip()
+        )
     return sorted(tags)
 
 

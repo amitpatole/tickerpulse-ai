@@ -46,7 +46,7 @@ class NewsWireFusionTest(unittest.TestCase):
     def test_tickers_for_post_unions_ticker_seeds(self):
         from backend.services.news_story_cards import tickers_for_post
 
-        self.assertEqual(tickers_for_post(self._news_post()), ["NVDA"])
+        self.assertEqual(tickers_for_post(self._news_post()), ["$NVDA"])
 
     def test_wire_and_followed_posts_cluster_into_one_story(self):
         from backend.services.news_story_cards import build_story_cards
