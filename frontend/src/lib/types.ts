@@ -104,6 +104,8 @@ export interface CostSummary {
   range_label?: string;
   total_runs?: number;
   total_tokens?: number;
+  total_tokens_input?: number;
+  total_tokens_output?: number;
 }
 
 export interface DailyCost {
@@ -127,6 +129,35 @@ export interface HealthCheck {
   uptime?: number;
   database?: string;
   agents?: Record<string, string>;
+}
+
+export interface AIInfraItem {
+  source: string;
+  score: number;
+  title: string;
+  url?: string;
+  metadata: {
+    gpu?: string;
+    date?: string;
+    median_usd_per_gpu_hr?: number;
+    offers?: number;
+    price_change_7d_pct?: number;
+    price_change_30d_pct?: number;
+    offer_change_7d?: number;
+    offer_change_30d?: number;
+    price_read_7d?: string;
+    price_read_30d?: string;
+    related_tickers?: string[];
+  };
+}
+
+export interface AIInfraUpdate {
+  source_status: string;
+  report_timestamp_utc?: string;
+  report_path?: string;
+  summary?: string[];
+  items: AIInfraItem[];
+  errors?: { message: string }[];
 }
 
 export interface ResearchBrief {

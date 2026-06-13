@@ -1,0 +1,395 @@
+# Human notes for watchlist entries that need context beyond ticker/name.
+updated_at: "2026-06-09"
+
+symbol_mappings:
+  "9984": 9984.T
+  CITI: C
+  "AMERICA AIRLINE": AAL
+  DODGE: DOGE-USD
+  HYPE: HYPE32196-USD
+  SIVE: SIVE.ST
+  "HPS/A": HPS-A.TO
+  LPK: LPK.F
+  "SPACE X": SPCX
+  SPACEX: SPCX
+
+events:
+  - ticker: CBRS
+    title: Cerebras IPO price watch and staged lock-up unlocks
+    event_date: "2026-08-19"
+    review_window_start: "2026-06-09"
+    review_window_end: "2026-11-09"
+    stance_before_event: Watch each tranche; do not wait blindly for November 9. If CBRS sells off into August, September, or October, the buy signal is the unlock failing to create a new low, not the date itself.
+    user_note_basis: >
+      User-supplied setup: watch Cerebras if price dips below $200, then especially
+      if it tests the $185 IPO price. Current research source is the final 424B4
+      prospectus dated May 13, 2026, which confirms a staged lock-up schedule
+      rather than a single August cliff. Revalidate current quote, borrow/options,
+      earnings timing, and actual Form 144/insider flow before making any trading
+      decision.
+    process:
+      - "Price trigger 1: below $200, start full research refresh; do not buy only because the round-number level breaks."
+      - "Price trigger 2: near or below the $185 IPO price, look for capitulation, stabilization, and whether selling is event-driven or thesis-driven."
+      - "Buying rule: watch every tranche separately; a potential buy requires the unlock to fail to create a new low or to reclaim the broken level after the supply event."
+      - "If CBRS sells off before a tranche, wait 5-10 sessions after the unlock for no lower low, fading sell volume, or a reclaim of $185/$200 before considering a starter."
+      - "If CBRS holds up or rallies into a tranche, assume supply risk is not fully priced and avoid buying ahead of the event."
+      - "Lock-up: first fixed-date tranche is 2026-08-19 at 6:00 a.m. ET, up to about 14.6M shares."
+      - "Additional fixed tranches: 2026-09-02 and 2026-09-16 at about 14.6M shares each; 2026-09-30, 2026-10-14, and 2026-10-28 at about 19.4M shares each."
+      - "Earnings-triggered tranches: Q1 2026 earnings + second trading day released up to about 27.7M shares if the second-trading-day trigger was met, or about 30.2M if not; Q2 2026 earnings + second trading day releases about 36.4M shares."
+      - "Final remaining lock-up: earlier of Q3 2026 earnings + second trading day or 180 days after the May 13, 2026 prospectus date, which is 2026-11-09."
+    avoid:
+      - Treating August 19 as the final lock-up expiration.
+      - Buying only because price is below $200 or below the $185 IPO price.
+      - Ignoring Q2/Q3 earnings timing, Rule 144 limits, Form 144/insider filings, or underwriter lock-up release waivers.
+    sources:
+      - https://www.sec.gov/Archives/edgar/data/2021728/000162828026035214/cerebras-424b4.htm
+      - https://www.cerebras.ai/press-release/cerebras-systems-announces-pricing-of-initial-public-offering
+      - https://stockanalysis.com/stocks/cbrs/
+  - ticker: CBRS
+    title: Cerebras fixed lock-up tranche no-new-low check
+    event_date: "2026-09-02"
+    review_window_start: "2026-08-28"
+    review_window_end: "2026-09-11"
+    stance_before_event: Watch whether the Sep 2 unlock fails to create a new low after any pre-event selloff.
+    user_note_basis: >
+      Follow-up CBRS lock-up tranche. Treat the date as a supply absorption test,
+      not as an automatic buy date.
+    process:
+      - "Check whether the post-unlock low stays above the pre-unlock selloff low."
+      - "Potential buy signal only if the unlock fails to create a new low, sell volume fades, or price reclaims $185/$200."
+      - "If price keeps making lower lows 5-10 sessions after the unlock, no bottom yet."
+    avoid:
+      - Buying just because the tranche date arrived.
+      - Waiting blindly for the November 9 backstop if earlier tranches already show supply absorption.
+    sources:
+      - https://www.sec.gov/Archives/edgar/data/2021728/000162828026035214/cerebras-424b4.htm
+  - ticker: CBRS
+    title: Cerebras fixed lock-up tranche no-new-low check
+    event_date: "2026-09-16"
+    review_window_start: "2026-09-11"
+    review_window_end: "2026-09-25"
+    stance_before_event: Watch whether the Sep 16 unlock fails to create a new low after any pre-event selloff.
+    user_note_basis: >
+      Follow-up CBRS lock-up tranche. Treat the date as a supply absorption test,
+      not as an automatic buy date.
+    process:
+      - "Check whether the post-unlock low stays above the pre-unlock selloff low."
+      - "Potential buy signal only if the unlock fails to create a new low, sell volume fades, or price reclaims $185/$200."
+      - "If price keeps making lower lows 5-10 sessions after the unlock, no bottom yet."
+    avoid:
+      - Buying just because the tranche date arrived.
+      - Waiting blindly for the November 9 backstop if earlier tranches already show supply absorption.
+    sources:
+      - https://www.sec.gov/Archives/edgar/data/2021728/000162828026035214/cerebras-424b4.htm
+  - ticker: CBRS
+    title: Cerebras larger lock-up tranche no-new-low check
+    event_date: "2026-09-30"
+    review_window_start: "2026-09-25"
+    review_window_end: "2026-10-09"
+    stance_before_event: Watch whether the Sep 30 larger unlock fails to create a new low after any pre-event selloff.
+    user_note_basis: >
+      Follow-up CBRS lock-up tranche. Treat the date as a supply absorption test,
+      not as an automatic buy date.
+    process:
+      - "Check whether the post-unlock low stays above the pre-unlock selloff low."
+      - "Potential buy signal only if the unlock fails to create a new low, sell volume fades, or price reclaims $185/$200."
+      - "If price keeps making lower lows 5-10 sessions after the unlock, no bottom yet."
+    avoid:
+      - Buying just because the tranche date arrived.
+      - Waiting blindly for the November 9 backstop if earlier tranches already show supply absorption.
+    sources:
+      - https://www.sec.gov/Archives/edgar/data/2021728/000162828026035214/cerebras-424b4.htm
+  - ticker: CBRS
+    title: Cerebras larger lock-up tranche no-new-low check
+    event_date: "2026-10-14"
+    review_window_start: "2026-10-09"
+    review_window_end: "2026-10-23"
+    stance_before_event: Watch whether the Oct 14 larger unlock fails to create a new low after any pre-event selloff.
+    user_note_basis: >
+      Follow-up CBRS lock-up tranche. Treat the date as a supply absorption test,
+      not as an automatic buy date.
+    process:
+      - "Check whether the post-unlock low stays above the pre-unlock selloff low."
+      - "Potential buy signal only if the unlock fails to create a new low, sell volume fades, or price reclaims $185/$200."
+      - "If price keeps making lower lows 5-10 sessions after the unlock, no bottom yet."
+    avoid:
+      - Buying just because the tranche date arrived.
+      - Waiting blindly for the November 9 backstop if earlier tranches already show supply absorption.
+    sources:
+      - https://www.sec.gov/Archives/edgar/data/2021728/000162828026035214/cerebras-424b4.htm
+  - ticker: CBRS
+    title: Cerebras larger lock-up tranche no-new-low check
+    event_date: "2026-10-28"
+    review_window_start: "2026-10-23"
+    review_window_end: "2026-11-06"
+    stance_before_event: Watch whether the Oct 28 larger unlock fails to create a new low after any pre-event selloff.
+    user_note_basis: >
+      Follow-up CBRS lock-up tranche. Treat the date as a supply absorption test,
+      not as an automatic buy date.
+    process:
+      - "Check whether the post-unlock low stays above the pre-unlock selloff low."
+      - "Potential buy signal only if the unlock fails to create a new low, sell volume fades, or price reclaims $185/$200."
+      - "If price keeps making lower lows 5-10 sessions after the unlock, no bottom yet."
+    avoid:
+      - Buying just because the tranche date arrived.
+      - Waiting blindly for the November 9 backstop if earlier tranches already show supply absorption.
+    sources:
+      - https://www.sec.gov/Archives/edgar/data/2021728/000162828026035214/cerebras-424b4.htm
+  - ticker: CBRS
+    title: Cerebras final lock-up backstop and absorption check
+    event_date: "2026-11-09"
+    review_window_start: "2026-11-04"
+    review_window_end: "2026-11-20"
+    stance_before_event: Treat November 9 as the final backstop, not the first buy date; only buy if supply has already been absorbed or the final unlock fails to break price lower.
+    user_note_basis: >
+      Final CBRS lock-up backstop based on 180 days after the May 13, 2026
+      prospectus date, unless the Q3 2026 earnings-triggered release occurs
+      earlier.
+    process:
+      - "Do not wait blindly for this date if Aug/Sep/Oct tranches already show a failed breakdown and reclaim."
+      - "If price is still making lower lows 5-10 sessions after November 9, no bottom yet."
+      - "Potential buy signal is supply absorption: failed new low, fading sell volume, and reclaim of $185/$200."
+    avoid:
+      - Treating November 9 as an automatic all-clear.
+      - Ignoring earlier tranche behavior.
+    sources:
+      - https://www.sec.gov/Archives/edgar/data/2021728/000162828026035214/cerebras-424b4.htm
+  - ticker: AAOI
+    title: CPO/SIC pullback basket strategy
+    event_date: "2026-06-09"
+    review_window_start: "2026-06-09"
+    review_window_end: "2026-08-12"
+    stance_before_event: Strategy tracker; buy only major pullbacks that stop making new lows or reclaim key levels.
+    user_note_basis: >
+      User strategy 1: buy CPO and SiC names on major pullbacks. Core tickers
+      are AAOI, LITE, SIVE.ST, and WOLF. AAOI/LITE/SIVE.ST are treated as the
+      CPO/optical-interconnect basket; WOLF is tracked separately as a SiC
+      turnaround/high-beta special situation.
+    process:
+      - "Entry rule: do not buy the first red candle blindly; wait for a washout that stops making new lows, reclaims the prior breakdown level, or forms a higher low."
+      - "Starter size: 0.25%-0.5% per name or basket starter after the failed-breakdown signal; max basket size should be earned by evidence."
+      - "Core CPO names: AAOI, LITE, SIVE.ST; monitor adjacent optics/interconnect names COHR, CRDO, CIEN, MRVL, and AVGO for confirmation."
+      - "WOLF rule: keep smaller and separate from CPO; it is SiC/turnaround balance-sheet risk, not the same trade as optical interconnect."
+      - "Avoid adding if the group keeps making lower lows after earnings, if AI-infra tape weakens, or if the move is pure short squeeze with no fresh demand evidence."
+    avoid:
+      - Treating CPO and WOLF as the same risk bucket.
+      - Averaging down before a failed breakdown, reclaim, or higher-low signal.
+      - Letting a watchlist idea become a full-size position without written exit and capital source.
+    sources:
+      - https://www.nvidia.com/en-us/networking/products/silicon-photonics/
+      - https://investors.ao-inc.com/news-releases/news-release-details/aoi-showcases-25dbm-ultra-high-power-elsfp-foundation-next-gen
+      - https://www.lumentum.com/en/products/data-center
+  - ticker: SIVE.ST
+    title: Sivers CPO pullback earnings checkpoint
+    event_date: "2026-08-06"
+    review_window_start: "2026-08-01"
+    review_window_end: "2026-08-13"
+    stance_before_event: Recheck CPO thesis, price action, and whether the pullback is being absorbed before adding.
+    user_note_basis: >
+      Bloomberg-cache expected report date candidate; verify against company IR
+      near the event.
+    process:
+      - "Check whether price held/reclaimed the pullback level into earnings."
+      - "Do not add before earnings if position is already full or if price is still making lower lows."
+      - "After earnings, buy only if guidance/order commentary supports the CPO thesis and price absorbs the event."
+    avoid:
+      - Buying only because the stock is below its recent high.
+    sources:
+      - D:\Crypto Data\Analysis\20260607 - Bloomberg financial analysis cache template\bloomberg_financial_analysis_cache_template_values_20260607_200005.xlsx
+  - ticker: AAOI
+    title: Applied Optoelectronics CPO pullback earnings checkpoint
+    event_date: "2026-08-07"
+    review_window_start: "2026-08-02"
+    review_window_end: "2026-08-14"
+    stance_before_event: Recheck CPO thesis, price action, and whether the pullback is being absorbed before adding.
+    user_note_basis: >
+      Bloomberg-cache expected report date candidate; verify against company IR
+      near the event.
+    process:
+      - "Check customer/design-win commentary, AI data-center demand, and margin quality."
+      - "Potential add only after failed breakdown, reclaim, or earnings gap that holds for several sessions."
+      - "If earnings cause new lows that persist 5-10 sessions, no bottom yet."
+    avoid:
+      - Chasing a rebound before the post-earnings low is defined.
+    sources:
+      - D:\Crypto Data\Analysis\20260607 - Bloomberg financial analysis cache template\bloomberg_financial_analysis_cache_template_values_20260607_200005.xlsx
+  - ticker: LITE
+    title: Lumentum CPO pullback earnings checkpoint
+    event_date: "2026-08-12"
+    review_window_start: "2026-08-07"
+    review_window_end: "2026-08-19"
+    stance_before_event: Recheck CPO thesis, optical component demand, and whether the pullback is being absorbed before adding.
+    user_note_basis: >
+      Bloomberg-cache expected report date candidate; verify against company IR
+      near the event.
+    process:
+      - "Check data-center optical demand, CPO/high-power laser commentary, and margin/guide quality."
+      - "Potential add only if earnings reaction holds above the event low or reclaims the failed-breakdown level."
+      - "If price keeps lower-lowing after earnings, wait."
+    avoid:
+      - Treating valuation pullback alone as thesis confirmation.
+    sources:
+      - D:\Crypto Data\Analysis\20260607 - Bloomberg financial analysis cache template\bloomberg_financial_analysis_cache_template_values_20260607_200005.xlsx
+  - ticker: SPCX
+    title: SpaceX short campaign entry window - squeeze entry preferred, hard fallback July 17
+    event_date: "2026-07-17"
+    review_window_start: "2026-06-16"
+    review_window_end: "2026-07-17"
+    stance_before_event: Daily watch. No position yet. Preferred entry is put spreads bought INTO a squeeze; if no squeeze by 2026-07-17 (T-15 before estimated August unlock), enter at market anyway at reduced size.
+    user_note_basis: >
+      SPCX IPO'd 2026-06-12 at $135 (all-primary, float ~4-5% of 13.1B shares),
+      opened $151.74. Campaign: short the lock-up supply ladder over 3-6 months
+      via defined-risk put spreads. Day-1 long was deliberately skipped. Key
+      mechanic: 5-of-10 closes at or above $175.50 (130% of IPO) arms an extra
+      +10% early insider unlock (~1.3B shares, ~2.4x float), so a squeeze
+      manufactures its own future supply - squeeze top is the best put entry.
+      AI-demand kicker: user tracks model-company token usage; xAI renting out
+      Colossus reads as demand below capacity, pressuring the AI premium in the
+      ~95x sales valuation. Starlink remains the value anchor bulls retreat to.
+    process:
+      - "Daily: check trigger tally (closes >= $175.50) and borrow fee on the monitor dashboard at D:\\Crypto Data\\Analysis\\20260611 - SPCX IPO short monitor\\dashboard.md (auto-refreshes 05:30 local)."
+      - "2026-06-15/16: options listing and IBKR borrow data appear; confirm ATM IV, 90% put skew, and borrow fee start flowing on the dashboard."
+      - "Squeeze entry (preferred): price above ~$190-200, or borrow > 150% with tally at 3+/10 closes - buy put spreads INTO the spike; skew flattens on rips so puts are relatively cheap at the top."
+      - "Fallback entry: no squeeze by 2026-07-17 - enter at market regardless, smaller size. The unlock does not wait; squeeze is bonus entry, not precondition."
+      - "Premium budget <= 2% NAV (~$7-8K) split across two expiries: Oct leg for the August unlock, Dec/Jan leg for the day-135/day-180 supply tail."
+      - "Index adds (MSCI ~Jun 25-26, NDX fast entry ~Jul 3) are front-run non-events; entry is price-conditional, not calendar-conditional."
+      - "Crowding gauge before sizing: borrow > 100% in late July means consensus trade - cut size or wait for post-unlock breakdown confirmation."
+      - "Fill sizing fields (starter size, max size, capital source) in the operating system doc before the first order."
+    avoid:
+      - "SNK 2x-short ETF as the core position: swap financing passes through ~2x borrow cost plus daily-rebalance decay (~25%/month bleed at 100% borrow and 100% IV); tactical 1-3 day bursts only."
+      - Naked stock short pre-unlock (borrow 50-300%+, recall and squeeze risk on a 4-5% float cult stock).
+      - Waiting for a squeeze past the July 17 fallback deadline and missing the campaign.
+      - "Hyperliquid SPCX perp as a borrow-fee escape: hard-to-short funding is borrow cost by another name; use only as a small breakdown-chase sleeve, and check funding first."
+    sources:
+      - https://www.sec.gov/Archives/edgar/data/1181412/000162828026040364/spaceexplorationtechnologib.htm
+      - "D:\\Crypto Data\\Analysis\\20260611 - SPCX IPO short monitor\\dashboard.md"
+  - ticker: SPCX
+    title: SpaceX final prospectus and lock-up calendar confirmation
+    event_date: "2026-06-16"
+    review_window_start: "2026-06-12"
+    review_window_end: "2026-06-26"
+    stance_before_event: IPO priced 2026-06-12 at $135; verify the final 424B4 and confirm the provisional release calendar before the put leg is positioned.
+    user_note_basis: >
+      Prospectus date is now 2026-06-12 (IPO priced and traded). Provisional
+      calendar from the S-1/A structure stands unless the final 424B4 differs.
+      First public earnings date is still UNANNOUNCED - it drives the main 20%
+      unlock (earnings + 2nd trading day) and must be captured the moment
+      SpaceX schedules it.
+    process:
+      - "Verify final 424B4 against S-1/A: day 70/90/105/120/135/180/366 releases from the 2026-06-12 prospectus date."
+      - "Provisional fixed dates: 2026-08-21, 2026-09-10, 2026-09-25, 2026-10-10, 2026-10-25, 2026-12-09, and 2027-06-13 (Musk and majors, day 366)."
+      - "Confirm trigger threshold: $175.50 = 130% of the $135 IPO price; 5-of-10 closes at or above it arms +10% extra early unlock."
+      - "Watch for the first-earnings date announcement (placeholder ~2026-08-15); update the main unlock event date to earnings + 2 trading days when known."
+    avoid:
+      - Treating the ~2026-08-15 earnings placeholder as confirmed.
+      - Building the put/short leg without the final release calendar.
+    sources:
+      - https://www.sec.gov/Archives/edgar/data/1181412/000162828026040364/spaceexplorationtechnologib.htm
+  - ticker: RKLB
+    title: Rocket Lab SpaceX proxy instrument check
+    event_date: "2026-06-12"
+    review_window_start: "2026-06-09"
+    review_window_end: "2026-06-20"
+    stance_before_event: Proxy candidate only; use RKLB bearish exposure only if SpaceX sympathy correlation is visible and options/borrow are liquid.
+    user_note_basis: >
+      RKLB is a possible public-market proxy for SpaceX IPO risk, but it is not
+      the same business or supply event. Instrument choice must be decided after
+      seeing price action, borrow, and options liquidity.
+    process:
+      - "Compare RKLB reaction to SpaceX opening move and space-sector ETFs before using it as a proxy."
+      - "Preferred proxy instrument: RKLB put spread if options are liquid and IV is not prohibitive; outright short only with borrow/cost/stop checked."
+      - "Avoid leveraged ETFs unless the ETF holdings and liquidity map cleanly to the SpaceX sympathy trade."
+    avoid:
+      - Shorting RKLB just because SpaceX is expensive.
+      - Using RKLB proxy exposure if it is moving on Rocket Lab-specific news.
+    sources:
+      - https://www.sec.gov/Archives/edgar/data/1181412/000162828026040364/spaceexplorationtechnologib.htm
+  - ticker: SPCX
+    title: SpaceX first-earnings 20% unlock (4x float) - main short event [date UNCONFIRMED]
+    event_date: "2026-08-17"
+    review_window_start: "2026-08-03"
+    review_window_end: "2026-08-31"
+    stance_before_event: Main supply event of the campaign. Placeholder date = ~2026-08-15 earnings + 2 trading days; recompute the moment SpaceX announces its first earnings date.
+    user_note_basis: >
+      First public earnings + 2nd trading day releases 20% of insider stock,
+      about 2.5B shares against a ~4-5% float - roughly 4x float, outside every
+      academic lock-up sample. Plus another ~1.3B shares if the $175.50 trigger
+      armed earlier. Modern lock-up literature says selling front-runs the date,
+      so position must already be on (see entry-window event).
+    process:
+      - "Update this event_date to actual earnings + 2 trading days as soon as SpaceX announces; the whole leg shifts with it."
+      - "Sell HALF the put spreads the day before the unlock (front-run effect already captured by then)."
+      - "Hold the other half through the event: 4x-float supply has no precedent; target -20% to -35% base case, -50% tail."
+      - "Post-unlock: when IBKR borrow fee drops below 10%, outright stock short becomes the clean 3-6 month vehicle; spreads bridge until then."
+      - "Absorption test (CBRS-style): if the unlock fails to break support and sell volume fades within 5-10 sessions, the supply thesis is weakening - do not add."
+      - "KILL SWITCH: unlock absorbed without breaking support, or Starlink acceleration + GAAP-profit guidance - cover everything (Meta-2013 analog)."
+    avoid:
+      - Treating the 2026-08-17 placeholder as a confirmed date.
+      - Holding the full position through the unlock out of greed.
+      - Adding to shorts after an absorbed unlock.
+    sources:
+      - https://www.sec.gov/Archives/edgar/data/1181412/000162828026040364/spaceexplorationtechnologib.htm
+      - "D:\\Crypto Data\\Analysis\\20260611 - SPCX IPO short monitor\\dashboard.md"
+  - ticker: SPCX
+    title: SpaceX 7% tranche ladder complete (day 135) - supply absorption check
+    event_date: "2026-10-25"
+    review_window_start: "2026-10-20"
+    review_window_end: "2026-11-06"
+    stance_before_event: Mid-campaign checkpoint; manage the Dec/Jan spread leg on how the tranche ladder is being absorbed.
+    user_note_basis: >
+      Fixed tranches (provisional, from the 2026-06-12 prospectus date):
+      2026-08-21, 2026-09-10, 2026-09-25, 2026-10-10, 2026-10-25 - day 70
+      through day 135. Same absorption logic as the CBRS tranche watches,
+      but from the short side: absorbed tranches weaken the short thesis.
+    process:
+      - "Per tranche: check whether the post-unlock low breaks the pre-unlock low; new lows = supply pressure intact, keep the Dec/Jan leg."
+      - "If tranches keep getting absorbed (no new low, fading sell volume, reclaim of broken levels), scale the Dec/Jan leg down - the kill-switch logic applies cumulatively."
+      - "If cumulative -20% to -35% target already hit, take profit on schedule; do not overstay for the tail."
+    avoid:
+      - Shorting more into tranches that are being absorbed.
+      - Ignoring extra supply timing if the $175.50 trigger armed (early +10% release shifts the ladder forward).
+    sources:
+      - https://www.sec.gov/Archives/edgar/data/1181412/000162828026040364/spaceexplorationtechnologib.htm
+  - ticker: SPCX
+    title: SpaceX day-180 remainder unlock - campaign wind-down checkpoint
+    event_date: "2026-12-09"
+    review_window_start: "2026-12-02"
+    review_window_end: "2026-12-18"
+    stance_before_event: Final fixed supply event of the 3-6 month campaign; decide final exit here.
+    user_note_basis: >
+      Day-180 releases the remaining locked shares except Musk and major
+      holders (day 366 = 2027-06-13, beyond campaign horizon). A +28%
+      release tied to Q3 earnings + 2nd trading day lands before this -
+      date TBD when SpaceX schedules Q3 results.
+    process:
+      - "Before this date, capture the Q3-earnings +28% release date when announced and treat it as the larger supply event of the two."
+      - "Wind down: after day 180 the lock-up edge is spent; close or roll any remaining short exposure on absorption evidence, not calendar hope."
+      - "Post-campaign review: log realized vs -20-35% base case in the operating system doc."
+    avoid:
+      - Overstaying after the supply calendar is exhausted.
+      - Carrying short exposure into 2027 on lock-up logic alone (only Musk day-366 remains).
+    sources:
+      - https://www.sec.gov/Archives/edgar/data/1181412/000162828026040364/spaceexplorationtechnologib.htm
+  - ticker: GENB
+    title: Generate Biomedicines IPO lock-up overhang
+    event_date: "2026-08-26"
+    review_window_start: "2026-08-26"
+    review_window_end: "2026-09-15"
+    stance_before_event: Watchlist only, or tiny tracking size only if needed for attention.
+    user_note_basis: >
+      User-supplied setup: GENB was below its $16 IPO price at about $12.90 when
+      checked, with roughly $1.65B market cap. The key issue is potential supply:
+      103.1M restricted shares may become sellable after the August 2026 lock-up,
+      versus 25M initially liquid IPO shares, plus 94.3M registration-rights shares.
+      Revalidate current price, float, registration status, and lock-up timing before
+      making any trading decision.
+    process:
+      - "Now to 2026-08-26: watchlist only; no meaningful size."
+      - "2026-08-26 to 2026-09-15: watch volume, block-sale/news flow, resale-registration panic, and whether price stops making new lows."
+      - "After the review window: consider only if the thesis still holds and there is a real catalyst or research reason."
+    avoid:
+      - Buying only because NVIDIA disclosed a small position.
+      - Buying only because the IPO price is above the current price.
+    sources:
+      - https://www.marketbeat.com/stocks/NASDAQ/GENB/
+      - https://www.sec.gov/Archives/edgar/data/2100782/000119312526210059/ck0002100782-20260331.htm

@@ -7,6 +7,10 @@ from flask import Blueprint, jsonify, request
 import logging
 
 from backend.core.stock_manager import get_all_stocks, add_stock, remove_stock, search_stock_ticker
+from backend.services.dashboard_watchlist import (
+    remove_dashboard_watchlist_item,
+    upsert_dashboard_watchlist_item,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +79,8 @@ def add_stock_endpoint():
 
     market = data.get('market', 'US')
     success = add_stock(ticker, name, market)
+    if success:
+        upsert_dashboard_watchlist_item(ticker, name, market)
     return jsonify({'success': success, 'ticker': ticker, 'name': name, 'market': market})
 
 
@@ -89,6 +95,8 @@ def remove_stock_endpoint(ticker):
         JSON object with 'success' boolean.
     """
     success = remove_stock(ticker)
+    if success:
+        remove_dashboard_watchlist_item(ticker)
     return jsonify({'success': success})
 
 

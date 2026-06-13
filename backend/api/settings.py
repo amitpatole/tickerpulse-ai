@@ -13,10 +13,104 @@ from backend.core.settings_manager import (
     delete_ai_provider,
 )
 from backend.core.ai_providers import test_provider_connection
+from backend.config import Config
 
 logger = logging.getLogger(__name__)
 
 settings_bp = Blueprint('settings', __name__, url_prefix='/api')
+
+SUPPORTED_PROVIDERS = {
+    'anthropic': {
+        'display_name': 'Anthropic',
+        'models': ['claude-sonnet-4-5-20250929', 'claude-haiku-4-5-20251001', 'claude-opus-4-6'],
+    },
+    'openai': {
+        'display_name': 'OpenAI',
+        'models': ['gpt-4o', 'gpt-4.1', 'gpt-4o-mini'],
+    },
+    'deepseek': {
+        'display_name': 'DeepSeek',
+        'models': ['deepseek-v4-flash', 'deepseek-v4-pro'],
+    },
+    'opencode': {
+        'display_name': 'OpenCode',
+        'models': ['deepseek-v4-flash', 'deepseek-v4-pro', 'kimi-k2.6', 'kimi-k2.5', 'glm-5.1', 'glm-5'],
+    },
+    'openai_compatible': {
+        'display_name': 'OpenAI-Compatible',
+        'models': ['provider/free-model'],
+    },
+    'google': {
+        'display_name': 'Google AI',
+        'models': ['gemini-2.5-flash', 'gemini-2.5-pro'],
+    },
+    'xai': {
+        'display_name': 'xAI',
+        'models': ['grok-4', 'grok-4-vision'],
+    },
+}
+
+
+def _env_ai_provider(provider_name: str):
+    """Return env-backed provider config for Settings without exposing keys."""
+    provider_name = provider_name.lower()
+    env_config = {
+        'anthropic': (Config.ANTHROPIC_API_KEY, Config.DEFAULT_MODELS['anthropic']),
+        'openai': (Config.OPENAI_API_KEY, Config.DEFAULT_MODELS['openai']),
+        'google': (Config.GOOGLE_AI_KEY, Config.DEFAULT_MODELS['google']),
+        'xai': (Config.XAI_API_KEY, Config.DEFAULT_MODELS['xai']),
+        'deepseek': (Config.DEEPSEEK_API_KEY, Config.DEEPSEEK_MODEL),
+        'opencode': (Config.OPENCODE_API_KEY, Config.OPENCODE_FLASH_MODEL),
+        'openai_compatible': (
+            Config.OPENAI_COMPATIBLE_API_KEY,
+            Config.OPENAI_COMPATIBLE_MODEL,
+        ),
+    }
+    api_key, model = env_config.get(provider_name, ('', ''))
+    if not api_key:
+        return None
+    return {
+        'provider_name': provider_name,
+        'api_key': api_key,
+        'model': model,
+        'is_active': provider_name == _active_env_provider_name(),
+    }
+
+
+def _active_env_provider_name() -> str:
+    if Config.DEFAULT_AI_PROVIDER:
+        api_key = {
+            'anthropic': Config.ANTHROPIC_API_KEY,
+            'deepseek': Config.DEEPSEEK_API_KEY,
+            'opencode': Config.OPENCODE_API_KEY,
+            'openai_compatible': Config.OPENAI_COMPATIBLE_API_KEY,
+            'openai': Config.OPENAI_API_KEY,
+            'google': Config.GOOGLE_AI_KEY,
+            'xai': Config.XAI_API_KEY,
+        }.get(Config.DEFAULT_AI_PROVIDER, '')
+        return Config.DEFAULT_AI_PROVIDER if api_key else ''
+
+    for provider_name in (
+        'anthropic',
+        'opencode',
+        'deepseek',
+        'openai_compatible',
+        'openai',
+        'google',
+        'xai',
+    ):
+        api_key = {
+            'anthropic': Config.ANTHROPIC_API_KEY,
+            'opencode': Config.OPENCODE_API_KEY,
+            'deepseek': Config.DEEPSEEK_API_KEY,
+            'openai_compatible': Config.OPENAI_COMPATIBLE_API_KEY,
+            'openai': Config.OPENAI_API_KEY,
+            'google': Config.GOOGLE_AI_KEY,
+            'xai': Config.XAI_API_KEY,
+        }[provider_name]
+        if api_key:
+            return provider_name
+    return ''
 
 
 # ---------------------------------------------------------------------------
@@ -31,26 +125,6 @@ def get_ai_providers_endpoint():
         JSON array of provider objects with name, display_name, configured,
         models list, and default_model. API keys are never exposed.
     """
-    # All supported providers with their available models
-    SUPPORTED_PROVIDERS = {
-        'anthropic': {
-            'display_name': 'Anthropic',
-            'models': ['claude-sonnet-4-5-20250929', 'claude-haiku-4-5-20251001', 'claude-opus-4-6'],
-        },
-        'openai': {
-            'display_name': 'OpenAI',
-            'models': ['gpt-4o', 'gpt-4.1', 'gpt-4o-mini'],
-        },
-        'google': {
-            'display_name': 'Google AI',
-            'models': ['gemini-2.5-flash', 'gemini-2.5-pro'],
-        },
-        'xai': {
-            'display_name': 'xAI',
-            'models': ['grok-4', 'grok-4-vision'],
-        },
-    }
-
     # Get configured providers from DB
     configured_rows = get_all_ai_providers()
     configured_map = {row['provider_name']: row for row in configured_rows}
@@ -58,7 +132,7 @@ def get_ai_providers_endpoint():
     # Build response with all providers
     result = []
     for provider_id, info in SUPPORTED_PROVIDERS.items():
-        db_row = configured_map.get(provider_id)
+        db_row = configured_map.get(provider_id) or _env_ai_provider(provider_id)
         result.append({
             'name': provider_id,
             'display_name': info['display_name'],
@@ -146,10 +220,18 @@ def test_stored_ai_provider(provider_name):
             break
 
     if not stored:
-        return jsonify({
-            'success': False,
-            'error': f'Provider "{provider_name}" is not configured. Add an API key first.'
-        })
+        env_provider = _env_ai_provider(provider_name)
+        if not env_provider:
+            return jsonify({
+                'success': False,
+                'error': f'Provider "{provider_name}" is not configured. Add an API key first.'
+            })
+        result = test_provider_connection(
+            provider_name,
+            env_provider['api_key'],
+            env_provider['model'],
+        )
+        return jsonify(result)
 
     # Get the full provider record (with API key) from DB
     import sqlite3

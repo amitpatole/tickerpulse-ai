@@ -1,0 +1,353 @@
+version: 1
+created_at: "2026-06-05"
+owner: "Ming"
+collector: "twscrape"
+description: >
+  Curated X/Twitter watchlists for market-moving monitoring. The seed list came
+  from Ming. Expanded accounts are selected to extend the same signal surface:
+  policy shocks, macro headlines, AI/semi supply-chain bottlenecks, Asia tech,
+  crypto liquidity, and ETF/on-chain flow.
+
+collection_defaults:
+  enabled: true
+  include_replies: false
+  include_retweets: true
+  max_posts_per_account: 25
+  poll_minutes: 20
+  stale_after_hours: 48
+  language: "mixed"
+
+quality_filters:
+  drop_obvious_promo: true
+  drop_giveaways: true
+  drop_telegram_signal_ads: true
+  require_source_for_high_severity: true
+  downgrade_uncited_claims: true
+  promote_when_contains:
+    - "guidance"
+    - "forecast"
+    - "supply"
+    - "shortage"
+    - "capacity"
+    - "export control"
+    - "tariff"
+    - "earnings"
+    - "backlog"
+    - "capex"
+    - "wafer"
+    - "HBM"
+    - "CoWoS"
+    - "advanced packaging"
+    - "power"
+    - "data center"
+    - "ETF"
+    - "liquidation"
+
+watchlists:
+  user_seed_core:
+    priority: highest
+    accounts:
+      - handle: "realDonaldTrump"
+        url: "https://x.com/realDonaldTrump"
+        lane: "policy_geopolitics"
+        reason: "Direct policy/geopolitical shock source; watch tariffs, China, energy, defense, elections."
+        alert_keywords: ["tariff", "China", "export", "Venezuela", "airspace", "Iran", "Russia", "election"]
+      - handle: "zephyr_z9"
+        url: "https://x.com/zephyr_z9"
+        lane: "ai_semis_supply_chain"
+        reason: "AI/chips supply-chain commentary; recent sample emphasized memory procurement, MLCC materials, 300mm wafers, humanoids, PCB policy."
+        alert_keywords: ["memory", "HBM", "NAND", "DRAM", "MLCC", "wafer", "PCB", "DeepSeek", "humanoid"]
+      - handle: "ShanghaoJin"
+        url: "https://x.com/ShanghaoJin"
+        lane: "asia_macro_crypto_ai"
+        reason: "Asia FICC/crypto/AI cycle framing; useful for connecting liquidity, AI capex, and crypto beta."
+        alert_keywords: ["BTC", "crypto", "AI", "liquidity", "cycle", "NVDA", "AVGO", "PLTR", "TSLA"]
+      - handle: "jukan05"
+        url: "https://x.com/jukan05"
+        lane: "ai_hardware_semis"
+        reason: "Hardware and semis details; recent sample surfaced NVIDIA switch trays, SK hynix NAND capacity, AI infrastructure."
+        alert_keywords: ["NVIDIA", "AMD", "EPYC", "SK hynix", "NAND", "HBM", "server", "switch"]
+      - handle: "aleabitoreddit"
+        url: "https://x.com/aleabitoreddit"
+        user_id: "1940360837547565056"
+        lane: "ai_semi_bottlenecks"
+        reason: "AI/semi supply-chain analyst focused on unknown bottlenecks."
+        reliability_score: 7.0
+        reliability_started_at: "2026-06-10"
+        reliability_basis: "CRDO follow-list study rank #7: strong AI capex/connectivity basket framing, less company-specific than the top fundamental sources."
+        alert_keywords: ["bottleneck", "supply chain", "substrate", "packaging", "CoWoS", "HBM", "capacity"]
+      - handle: "zerohedge"
+        url: "https://x.com/zerohedge"
+        lane: "macro_fast_headlines"
+        reason: "Fast macro/headline feed; useful for event detection, but downgrade unless confirmed by primary or high-quality source."
+        alert_keywords: ["Fed", "Treasury", "auction", "oil", "jobs", "CPI", "tariff", "China", "war"]
+      - handle: "tig88411109"
+        url: "https://x.com/tig88411109"
+        lane: "macro_tech_cycles"
+        reason: "Macro and tech-cycle longform with buy-side framing."
+        alert_keywords: ["AI", "semis", "cycle", "macro", "capex", "valuation", "liquidity"]
+
+  expanded_high_signal:
+    priority: high
+    accounts:
+      - handle: "citrini"
+        url: "https://x.com/citrini"
+        user_id: "1365809270034477069"
+        lane: "ai_infrastructure_research"
+        reason: "Highest-quality early CRDO source from Ming's 2026-06-10 follow-list reliability seed; monitor thematic AI infrastructure calls."
+        reliability_score: 9.0
+        reliability_started_at: "2026-06-10"
+        reliability_basis: "CRDO follow-list study rank #1: earliest AI-infra basket signal and best timing; partly retrospective public evidence."
+        alert_keywords: ["AI", "data center", "semis", "CRDO", "capex", "infrastructure"]
+      - handle: "TheValueist"
+        url: "https://x.com/TheValueist"
+        user_id: "1838186195508969472"
+        lane: "ai_semis_fundamental_research"
+        reason: "CRDO reliability seed top source for estimate, revenue, EBITDA, SerDes, Weaver, and AI networking detail."
+        reliability_score: 8.5
+        reliability_started_at: "2026-06-10"
+        reliability_basis: "CRDO follow-list study rank #2: strongest CRDO-specific fundamental and estimate-detail signal, though later than Citrini."
+        alert_keywords: ["CRDO", "EBITDA", "revenue", "SerDes", "Weaver", "DSP", "data center"]
+      - handle: "JonahLupton"
+        url: "https://x.com/JonahLupton"
+        user_id: "14579415"
+        lane: "growth_equity_fundamental_research"
+        reason: "CRDO reliability seed top source for earnings, guidance, valuation, forward EBITDA, and disclosed portfolio positioning."
+        reliability_score: 8.0
+        reliability_started_at: "2026-06-10"
+        reliability_basis: "CRDO follow-list study rank #3: high-quality model and portfolio framing, mostly after broad discovery."
+        alert_keywords: ["CRDO", "earnings", "guidance", "EBITDA", "position", "growth"]
+      - handle: "CKCapitalxx"
+        url: "https://x.com/CKCapitalxx"
+        user_id: "1264320021481873408"
+        lane: "ai_infra_tactical_research"
+        reason: "CRDO reliability seed top source for actionable post-drawdown AI infrastructure setups."
+        reliability_score: 7.8
+        reliability_started_at: "2026-06-10"
+        reliability_basis: "CRDO follow-list study rank #4: actionable numerate post-drawdown call with revenue, margin, EPS, and guidance evidence."
+        alert_keywords: ["CRDO", "long", "drawdown", "earnings", "guidance", "AI data center"]
+      - handle: "BenBajarin"
+        url: "https://x.com/BenBajarin"
+        user_id: "14546264"
+        lane: "hardware_semis_industry_research"
+        reason: "CRDO reliability seed top source for MSFT/Meta AEC demand, AI networking bottlenecks, and industry context."
+        reliability_score: 7.5
+        reliability_started_at: "2026-06-10"
+        reliability_basis: "CRDO follow-list study rank #5: strong industry-context validation, less valuation or sizing detail."
+        alert_keywords: ["CRDO", "AEC", "ALC", "optical", "data center", "networking"]
+      - handle: "labubu_trader"
+        url: "https://x.com/labubu_trader"
+        user_id: "54811865"
+        lane: "ai_semis_tactical_trading"
+        reason: "CRDO reliability seed top source for early tactical bullishness on CRDO/ALAB/CLS and dip-add behavior."
+        reliability_score: 7.2
+        reliability_started_at: "2026-06-10"
+        reliability_basis: "CRDO follow-list study rank #6: early explicit bullishness and useful tactical entries, with thinner formal evidence."
+        alert_keywords: ["CRDO", "ALAB", "CLS", "bullish", "dip", "FUD", "AI"]
+      - handle: "FundaAI"
+        url: "https://x.com/FundaAI"
+        lane: "ai_fundamental_research"
+        reason: "Ming-added AI/fundamental research account; monitor for AI infrastructure, semiconductor, and ticker-specific thesis updates."
+        reliability_score: 0.0
+        reliability_started_at: "2026-06-10"
+        reliability_basis: "Added by Ming to the X follow list; no scored reliability history yet."
+        alert_keywords: ["AI", "semis", "data center", "infrastructure", "earnings", "guidance"]
+      - handle: "FredaDuan"
+        url: "https://x.com/FredaDuan"
+        lane: "ai_fundamental_research"
+        reason: "Ming-added AI/fundamental research account; monitor for AI infrastructure, semiconductor, and ticker-specific thesis updates."
+        reliability_score: 0.0
+        reliability_started_at: "2026-06-10"
+        reliability_basis: "Added by Ming to the X follow list; no scored reliability history yet."
+        alert_keywords: ["AI", "semis", "data center", "infrastructure", "earnings", "guidance"]
+      - handle: "dnystedt"
+        url: "https://x.com/dnystedt"
+        lane: "taiwan_semis"
+        reason: "Taiwan semis and TSMC supply-chain signal."
+      - handle: "TrendForce"
+        url: "https://x.com/TrendForce"
+        lane: "memory_supply_chain"
+        reason: "Primary market-research feed for memory, HBM, NAND, panels, AI infrastructure."
+      - handle: "SemiAnalysis_"
+        url: "https://x.com/SemiAnalysis_"
+        lane: "ai_infrastructure_research"
+        reason: "AI infrastructure and semiconductor research."
+      - handle: "dylan522p"
+        url: "https://x.com/dylan522p"
+        lane: "ai_infrastructure_research"
+        reason: "SemiAnalysis analyst; high signal on AI compute, networks, power, and hyperscaler capex."
+      - handle: "teortaxesTex"
+        url: "https://x.com/teortaxesTex"
+        lane: "ai_architecture_china_compute"
+        reason: "AI model architecture, China compute, and accelerator constraints."
+      - handle: "qinbafrank"
+        url: "https://x.com/qinbafrank"
+        lane: "china_ai_semis_interconnect"
+        reason: "Chinese AI/semi investment commentary; surfaced Bernstein CPO/LPO/NPO timing before the SemiAnalysis 800VDC/CPO delay tape."
+        alert_keywords: ["CPO", "800V", "800VDC", "LPO", "NPO", "光模块", "硅光", "中际旭创", "AI", "算力"]
+      - handle: "lithos_graphein"
+        url: "https://x.com/lithos_graphein"
+        lane: "semiconductor_process"
+        reason: "Semiconductor process and device-level details."
+      - handle: "ServeTheHome"
+        url: "https://x.com/ServeTheHome"
+        lane: "datacenter_hardware"
+        reason: "Data-center hardware, servers, networking, accelerators."
+      - handle: "IanCutress"
+        url: "https://x.com/IanCutress"
+        lane: "hardware_semis"
+        reason: "Hardware and semiconductor analysis."
+      - handle: "KairosPraxis"
+        url: "https://x.com/KairosPraxis"
+        lane: "ai_semis_investment"
+        reason: "Seed-network account; recent sample linked AMZN memory pressure to AWS/cloud migration."
+      - handle: "PhotonCap"
+        url: "https://x.com/PhotonCap"
+        user_id: "1917312438858588161"
+        lane: "optical_semis_technical_research"
+        reason: "CRDO reliability seed top source for PAM-4 DSP, optical modules, and hyperscaler-alternative technical context."
+        reliability_score: 6.5
+        reliability_started_at: "2026-06-10"
+        reliability_basis: "CRDO follow-list study rank #10: useful technical landscape, more educational than a direct buy call."
+        alert_keywords: ["CRDO", "PAM-4", "DSP", "optical", "transceiver", "Broadcom", "Marvell"]
+
+  macro_headlines_and_policy:
+    priority: high
+    accounts:
+      - handle: "KobeissiLetter"
+        url: "https://x.com/KobeissiLetter"
+        lane: "macro_market_commentary"
+        reason: "Macro markets, yields, jobs, CPI, liquidity, positioning."
+      - handle: "DeItaone"
+        url: "https://x.com/DeItaone"
+        lane: "fast_headlines"
+        reason: "Fast financial headline detection."
+      - handle: "FirstSquawk"
+        url: "https://x.com/FirstSquawk"
+        lane: "fast_headlines"
+        reason: "Fast financial headline detection."
+      - handle: "financialjuice"
+        url: "https://x.com/financialjuice"
+        lane: "fast_headlines"
+        reason: "Fast macro and market headline detection."
+      - handle: "Sino_Market"
+        url: "https://x.com/Sino_Market"
+        lane: "china_markets"
+        reason: "China business and market headlines."
+
+  crypto_liquidity_and_etf:
+    priority: medium
+    accounts:
+      - handle: "WuBlockchain"
+        url: "https://x.com/WuBlockchain"
+        lane: "crypto_asia"
+        reason: "Asia-led crypto regulatory, exchange, and market news."
+      - handle: "tier10k"
+        url: "https://x.com/tier10k"
+        lane: "crypto_fast_headlines"
+        reason: "Fast market-moving crypto headlines."
+      - handle: "lookonchain"
+        url: "https://x.com/lookonchain"
+        lane: "onchain_flow"
+        reason: "On-chain whale and smart-money flow."
+      - handle: "EricBalchunas"
+        url: "https://x.com/EricBalchunas"
+        lane: "etf_flows"
+        reason: "ETF flow, launch, and approval commentary."
+      - handle: "JSeyff"
+        url: "https://x.com/JSeyff"
+        lane: "etf_crypto_etf"
+        reason: "ETF and crypto ETF research."
+
+  discovery_seed_network:
+    priority: low
+    accounts:
+      - handle: "knockouttrader"
+        url: "https://x.com/knockouttrader"
+        lane: "ai_semis_discovery"
+        reason: "Seed-network source for second-order AI calls; promote only after repeated sourced posts."
+      - handle: "wallstengine"
+        url: "https://x.com/wallstengine"
+        lane: "tech_ai_discovery"
+        reason: "Seed-network account; monitor for AI/company catalyst links."
+      - handle: "nrehiew_"
+        url: "https://x.com/nrehiew_"
+        lane: "ai_model_discovery"
+        reason: "Seed-network account for AI model and benchmark chatter."
+      - handle: "chetaslua"
+        url: "https://x.com/chetaslua"
+        lane: "ai_model_discovery"
+        reason: "Seed-network account for leaked/new model chatter; verify before alerting."
+      - handle: "firstadopter"
+        url: "https://x.com/firstadopter"
+        lane: "consumer_ai_hardware_discovery"
+        reason: "Seed-network account; lower priority unless linked to hardware demand."
+      - handle: "mindmoon_108"
+        url: "https://x.com/mindmoon_108"
+        lane: "user_requested_discovery"
+        reason: "User-requested account; monitor and classify after observing posts."
+      - handle: "RichTerry123"
+        url: "https://x.com/RichTerry123"
+        user_id: "1901844074250080256"
+        lane: "user_requested_discovery"
+        reason: "User-requested account; monitor and classify after observing posts."
+        reliability_score: 6.8
+        reliability_started_at: "2026-06-10"
+        reliability_basis: "CRDO follow-list study rank #8: good optical-cycle view on AEC demand, shortages, and orders into 2027; late but useful."
+      - handle: "ParadisLabs"
+        url: "https://x.com/ParadisLabs"
+        user_id: "2032976046023389184"
+        lane: "user_requested_discovery"
+        reason: "User-requested account; monitor and classify after observing posts."
+        reliability_score: 6.7
+        reliability_started_at: "2026-06-10"
+        reliability_basis: "CRDO follow-list study rank #9: good SiPho, DustPhotonics, CPO TAM, and vertical-integration framing; later, higher-entry-risk signal."
+      - handle: "himself65"
+        url: "https://x.com/himself65"
+        lane: "user_requested_discovery"
+        reason: "User-requested account; monitor and classify after observing posts."
+      - handle: "RYANHINGSHING"
+        url: "https://x.com/RYANHINGSHING"
+        lane: "user_requested_discovery"
+        reason: "User-requested account; monitor and classify after observing posts."
+
+search_queries:
+  - name: "bernstein_ai_semis"
+    query: "(Bernstein OR 伯恩斯坦 OR \"Sanford Bernstein\") (AI OR semiconductor OR semis OR CPO OR 800V OR 800VDC OR HBM OR HBM4 OR Rubin OR NVL72 OR \"data center\" OR 光模块 OR 硅光 OR 中际旭创)"
+    priority: high
+  - name: "ai_memory_and_packaging"
+    query: "(HBM OR HBM4 OR NAND OR DRAM OR memory shortage OR CoWoS OR advanced packaging OR 300mm wafer OR substrate OR MLCC) lang:en"
+    priority: high
+  - name: "ai_power_and_datacenter"
+    query: "(AI datacenter OR data center power OR liquid cooling OR grid interconnect OR nuclear power OR transformer shortage) lang:en"
+    priority: high
+  - name: "cpo_sic_pullback"
+    query: "(CPO OR \"co-packaged optics\" OR \"silicon photonics\" OR \"optical interconnect\" OR SiC OR Wolfspeed OR $AAOI OR $LITE OR $SIVE OR $SIVEF OR $WOLF OR $COHR OR $CRDO OR $CIEN) (pullback OR selloff OR \"new low\" OR earnings OR guidance OR \"data center\" OR AI) lang:en"
+    priority: high
+  - name: "spacex_ipo_trade"
+    query: "(SpaceX OR Starlink OR $SPCX OR SPCX OR \"SpaceX IPO\" OR $RKLB OR RKLB) (IPO OR float OR lockup OR \"lock-up\" OR unlock OR borrow OR options OR Nasdaq OR \"index inclusion\" OR blowoff OR squeeze) lang:en"
+    priority: high
+  - name: "policy_export_controls"
+    query: "(export controls OR tariff OR BIS OR Commerce Department OR China chips OR Taiwan semiconductors) lang:en"
+    priority: high
+  - name: "crypto_liquidity"
+    query: "(ETF inflow OR ETF outflow OR liquidation OR whale OR Coinbase OR Binance OR Hyperliquid OR BTC OR ETH) lang:en"
+    priority: medium
+  - name: "ticker_cashtags_core"
+    query: "($NVDA OR $AVGO OR $AMD OR $MRVL OR $MU OR $SMCI OR $VRT OR $RBRK OR $PLTR OR $COIN OR $MSTR OR $SOUN) lang:en"
+    priority: medium
+
+alert_policy:
+  high:
+    notify_when:
+      - "user_seed_core account posts original content with policy, supply-chain, earnings, or macro keywords"
+      - "expanded_high_signal account posts sourced supply-chain or capex claim"
+      - "Bernstein public-echo search surfaces AI, semiconductor, CPO, 800VDC, HBM, Rubin, or data-center capex research claims"
+      - "fast headline account reports Fed, CPI, jobs, tariff, China, energy, war, or exchange/regulatory event"
+  medium:
+    notify_when:
+      - "crypto_liquidity_and_etf account reports ETF flow, liquidation, exchange issue, or on-chain whale flow"
+      - "search query matches two or more independent accounts within 60 minutes"
+  low:
+    notify_when:
+      - "discovery account post is echoed by high-signal account or confirmed by news/filing"

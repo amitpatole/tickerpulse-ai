@@ -2,6 +2,7 @@ import json
 import sys
 import tempfile
 import unittest
+from types import SimpleNamespace
 from pathlib import Path
 from unittest.mock import patch
 
@@ -385,6 +386,168 @@ def test_x_collector_marks_empty_success_and_search_error_degraded() -> None:
     assert result["queries_checked"] == 2
     assert len(result["errors"]) == 1
     assert result["source_status"] == "degraded"
+
+
+def test_x_collector_warning_logs_summarize_traceback_errors() -> None:
+    from backend.services.x_watchlist import XAccount, XWatchlistCollector, XWatchlistConfig
+
+    class FailingRunner:
+        def user_by_login(self, handle: str) -> dict[str, object]:
+            return {"id_str": f"user-{handle}"}
+
+        def user_tweets(self, user_id: str, limit: int) -> list[dict[str, object]]:
+            raise RuntimeError("Traceback line 1\nTraceback line 2\nNoAccountError: No account available")
+
+        def search(self, query: str, limit: int) -> list[dict[str, object]]:
+            return []
+
+    config = XWatchlistConfig(
+        accounts=(XAccount(handle="IanCutress", lane="semis", priority="high", reason="Semi source"),),
+        search_queries=(),
+        promote_keywords=(),
+    )
+    collector = XWatchlistCollector(config=config, runner=FailingRunner())
+
+    with unittest.TestCase().assertLogs("backend.services.x_watchlist", level="WARNING") as logs:
+        result = collector.collect_accounts(max_accounts=1, posts_per_account=1)
+
+    rendered_logs = "\n".join(logs.output)
+    assert "NoAccountError: No account available" in rendered_logs
+    assert "Traceback line 1" not in rendered_logs
+    assert "Traceback line 1" in result["errors"][0]["message"]
+
+
+def test_x_watchlist_config_includes_crdo_top_source_reliability_seeds() -> None:
+    from backend.services.x_watchlist import XWatchlistConfig
+
+    config = XWatchlistConfig.load(REPO_ROOT / "config" / "x_watchlists.yaml")
+    accounts_by_handle = {account.handle: account for account in config.accounts}
+    handles = [account.handle for account in config.accounts]
+    expected_scores = {
+        "citrini": 9.0,
+        "TheValueist": 8.5,
+        "JonahLupton": 8.0,
+        "CKCapitalxx": 7.8,
+        "BenBajarin": 7.5,
+        "labubu_trader": 7.2,
+        "aleabitoreddit": 7.0,
+        "RichTerry123": 6.8,
+        "ParadisLabs": 6.7,
+        "PhotonCap": 6.5,
+    }
+
+    assert len(handles) == len(set(handles))
+    for handle, score in expected_scores.items():
+        assert handle in accounts_by_handle
+        account = accounts_by_handle[handle]
+        assert account.reliability_score == score
+        assert account.reliability_started_at == "2026-06-10"
+        assert "CRDO" in account.reliability_basis
+
+
+def test_x_collector_marks_all_searches_ok_but_zero_posts_degraded() -> None:
+    from backend.services.x_watchlist import XSearchQuery, XWatchlistCollector, XWatchlistConfig
+
+    class SilentEmptySearchRunner:
+        def user_by_login(self, handle: str) -> dict[str, object]:
+            return {"id_str": f"user-{handle}"}
+
+        def user_tweets(self, user_id: str, limit: int) -> list[dict[str, object]]:
+            return []
+
+        def search(self, query: str, limit: int) -> list[dict[str, object]]:
+            return []
+
+    config = XWatchlistConfig(
+        accounts=(),
+        search_queries=(
+            XSearchQuery(name="first", query="first lang:en", priority="medium"),
+            XSearchQuery(name="second", query="second lang:en", priority="medium"),
+        ),
+        promote_keywords=(),
+    )
+    collector = XWatchlistCollector(config=config, runner=SilentEmptySearchRunner())
+
+    result = collector.collect_searches(max_queries=2, posts_per_query=2)
+
+    assert result["source_status"] == "degraded"
+    assert len(result["errors"]) == 1
+    message = result["errors"][0]["message"]
+    assert "0 posts" in message
+    assert "session" in message.lower()
+
+
+def test_x_collector_marks_all_accounts_ok_but_zero_posts_degraded() -> None:
+    from backend.services.x_watchlist import XAccount, XWatchlistCollector, XWatchlistConfig
+
+    class SilentEmptyTimelineRunner:
+        def user_by_login(self, handle: str) -> dict[str, object]:
+            return {"id_str": f"user-{handle}"}
+
+        def user_tweets(self, user_id: str, limit: int) -> list[dict[str, object]]:
+            return []
+
+        def search(self, query: str, limit: int) -> list[dict[str, object]]:
+            return []
+
+    config = XWatchlistConfig(
+        accounts=(
+            XAccount(handle="seed", lane="ai_semis", priority="high", reason="Seed"),
+            XAccount(handle="macro", lane="macro", priority="high", reason="Macro"),
+        ),
+        search_queries=(),
+        promote_keywords=(),
+    )
+    collector = XWatchlistCollector(config=config, runner=SilentEmptyTimelineRunner())
+
+    result = collector.collect_accounts(max_accounts=2, posts_per_account=1)
+
+    assert result["source_status"] == "degraded"
+    assert len(result["errors"]) == 1
+    assert "0 posts" in result["errors"][0]["message"]
+
+
+def test_x_collector_zero_selected_sources_stay_ok() -> None:
+    from backend.services.x_watchlist import XWatchlistCollector, XWatchlistConfig
+
+    class NeverCalledRunner:
+        def user_by_login(self, handle: str) -> dict[str, object]:
+            raise AssertionError("must not be called")
+
+        def user_tweets(self, user_id: str, limit: int) -> list[dict[str, object]]:
+            raise AssertionError("must not be called")
+
+        def search(self, query: str, limit: int) -> list[dict[str, object]]:
+            raise AssertionError("must not be called")
+
+    config = XWatchlistConfig(accounts=(), search_queries=(), promote_keywords=())
+    collector = XWatchlistCollector(config=config, runner=NeverCalledRunner())
+
+    accounts = collector.collect_accounts(max_accounts=0, posts_per_account=1)
+    searches = collector.collect_searches(max_queries=0, posts_per_query=1)
+
+    assert accounts["source_status"] == "ok"
+    assert searches["source_status"] == "ok"
+    assert accounts["errors"] == []
+    assert searches["errors"] == []
+
+
+def test_twscrape_runner_ignores_non_json_stdout_lines() -> None:
+    from backend.services.x_watchlist import TwscrapeRunner
+
+    completed = SimpleNamespace(
+        returncode=0,
+        stdout=(
+            "2026-06-10 WARNING XClIdGen creation attempt failed\n"
+            f"{json.dumps({'id_str': 'tweet-1', 'rawContent': 'CRDO update'})}\n"
+        ),
+        stderr="",
+    )
+
+    with patch("backend.services.x_watchlist.subprocess.run", return_value=completed):
+        rows = TwscrapeRunner(repo_path=REPO_ROOT)._run_json_lines(["user_tweets", "123"])
+
+    assert rows == [{"id_str": "tweet-1", "rawContent": "CRDO update"}]
 
 
 if __name__ == "__main__":

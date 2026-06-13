@@ -1,0 +1,172 @@
+# User-curated dashboard watchlist seed.
+# Load these into the stocks table for the active dashboard/sweep watchlist.
+updated_at: "2026-06-11"
+items:
+  - ticker: 9984.T
+    name: SoftBank Group Corp
+    market: Japan
+    source_symbol: "9984"
+  - ticker: NVDA
+    name: NVIDIA Corporation
+    market: US
+  - ticker: AAPL
+    name: Apple Inc.
+    market: US
+  - ticker: GOOGL
+    name: Alphabet Inc.
+    market: US
+  - ticker: MSFT
+    name: Microsoft Corporation
+    market: US
+  - ticker: AMZN
+    name: Amazon.com Inc.
+    market: US
+  - ticker: AVGO
+    name: Broadcom Inc.
+    market: US
+  - ticker: META
+    name: Meta Platforms Inc.
+    market: US
+  - ticker: TSLA
+    name: Tesla Inc.
+    market: US
+  - ticker: MU
+    name: Micron Technology Inc.
+    market: US
+  - ticker: WMT
+    name: Walmart Inc.
+    market: US
+  - ticker: AMD
+    name: Advanced Micro Devices Inc.
+    market: US
+  - ticker: ORCL
+    name: Oracle Corporation
+    market: US
+  - ticker: INTC
+    name: Intel Corporation
+    market: US
+  - ticker: COST
+    name: Costco Wholesale Corporation
+    market: US
+  - ticker: ARM
+    name: Arm Holdings plc
+    market: US
+  - ticker: NFLX
+    name: Netflix Inc.
+    market: US
+  - ticker: PLTR
+    name: Palantir Technologies Inc.
+    market: US
+  - ticker: CRWD
+    name: CrowdStrike Holdings Inc.
+    market: US
+  - ticker: CRM
+    name: Salesforce Inc.
+    market: US
+  - ticker: NOW
+    name: ServiceNow Inc.
+    market: US
+  - ticker: BE
+    name: Bloom Energy Corporation
+    market: US
+  - ticker: HOOD
+    name: Robinhood Markets Inc.
+    market: US
+  - ticker: LITE
+    name: Lumentum Holdings Inc.
+    market: US
+  - ticker: NKE
+    name: NIKE Inc.
+    market: US
+  - ticker: NBIS
+    name: Nebius Group N.V.
+    market: US
+  - ticker: CRWV
+    name: CoreWeave Inc.
+    market: US
+  - ticker: SPCX
+    name: SpaceX (Space Exploration Technologies Corp.)
+    market: US
+    source_symbol: SPACE X
+  - ticker: IBIT
+    name: iShares Bitcoin Trust ETF
+    market: US
+  - ticker: CBRS
+    name: Cerebras Systems Inc.
+    market: US
+  - ticker: MSTR
+    name: Strategy Inc.
+    market: US
+  - ticker: COIN
+    name: Coinbase Global Inc.
+    market: US
+  - ticker: RDDT
+    name: Reddit Inc.
+    market: US
+  - ticker: SOUN
+    name: SoundHound AI Inc.
+    market: US
+  - ticker: SIVE.ST
+    name: Sivers Semiconductors AB
+    market: Sweden
+    source_symbol: SIVE
+  - ticker: CRCL
+    name: Circle Internet Group Inc.
+    market: US
+  - ticker: AAOI
+    name: Applied Optoelectronics Inc.
+    market: US
+  - ticker: WOLF
+    name: Wolfspeed Inc.
+    market: US
+  - ticker: RKLB
+    name: Rocket Lab USA Inc.
+    market: US
+  - ticker: POWL
+    name: Powell Industries Inc.
+    market: US
+  - ticker: AXTI
+    name: AXT Inc.
+    market: US
+  - ticker: HPS-A.TO
+    name: Hammond Power Solutions Inc. Class A
+    market: Canada
+    source_symbol: HPS/A
+  - ticker: LPK.F
+    name: LPKF Laser & Electronics SE
+    market: Germany
+    source_symbol: LPK
+  - ticker: JPM
+    name: JPMorgan Chase & Co.
+    market: US
+  - ticker: C
+    name: Citigroup Inc.
+    market: US
+    source_symbol: CITI
+  - ticker: AAL
+    name: American Airlines Group Inc.
+    market: US
+    source_symbol: AMERICA AIRLINE
+  - ticker: GENB
+    name: Generate Biomedicines Inc.
+    market: US
+  - ticker: BTC-USD
+    name: Bitcoin USD
+    market: Crypto
+    source_symbol: BTC
+  - ticker: ETH-USD
+    name: Ethereum USD
+    market: Crypto
+    source_symbol: ETH
+  - ticker: DOGE-USD
+    name: Dogecoin USD
+    market: Crypto
+    source_symbol: DODGE
+  - ticker: BNB-USD
+    name: BNB USD
+    market: Crypto
+    source_symbol: BNB
+  - ticker: HYPE32196-USD
+    name: Hyperliquid USD
+    market: Crypto
+    source_symbol: HYPE

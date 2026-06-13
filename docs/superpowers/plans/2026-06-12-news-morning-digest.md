@@ -1124,7 +1124,7 @@ class MorningDigestLanesTest(unittest.TestCase):
         cards = summary["executive_summary"]["top_stories"]
         merged = [card for card in cards if any(s["grade"] == "news wire headline" for s in card["sources"])]
         self.assertTrue(merged)
-        self.assertTrue(any(s["grade"] == "followed account original post" for s in merged[0]["sources"]))
+        self.assertTrue(any(str(s["grade"]).startswith("followed account") for s in merged[0]["sources"]))
         self.assertIn("$NVDA", summary["top_news_and_tickers"]["top_tickers"])
         self.assertEqual(summary["market_tape"]["rows"][0]["symbol"], "SPY")
         self.assertTrue(summary["ai_infra_update"]["staleness"]["stale"])

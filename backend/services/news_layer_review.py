@@ -746,7 +746,18 @@ def _gamma_exposure_lines(monitor: Mapping[str, object]) -> list[str]:
     lines = ["", "## Dealer Gamma Monitor"]
     status = str(monitor.get("status") or "not run")
     overall = str(monitor.get("overall_level") or "unknown")
-    lines.append(f"- Status: {status}; level: {overall}")
+    freshness = str(monitor.get("freshness") or "unknown")
+    lines.append(f"- Status: {status}; level: {overall}; data: {freshness}")
+    if freshness == "stale":
+        lines.append(
+            "- WARNING: option data is stale (feed lagging or frozen). Treat the flip "
+            "levels as unverified, not calm - do not act on them until data refreshes."
+        )
+    elif freshness == "prior_close":
+        lines.append(
+            "- Note: market closed; levels are computed from the prior settled session, "
+            "not a live intraday read."
+        )
     headline = str(monitor.get("headline") or "")
     if headline:
         lines.append(f"- {headline}")
@@ -760,11 +771,19 @@ def _gamma_exposure_lines(monitor: Mapping[str, object]) -> list[str]:
         flip_text = flip if flip is not None else "n/a (no zero-gamma crossing within +/-15%)"
         distance = info.get("distance_to_flip_pct")
         distance_text = f"{distance}%" if distance is not None else "n/a"
+        fresh_text = ""
+        if info.get("freshness"):
+            age = info.get("age_minutes")
+            age_text = f"{age}m" if age is not None else "?"
+            fresh_text = (
+                f"; data {info.get('freshness')} (as of {info.get('as_of') or '?'}, age {age_text})"
+            )
         lines.append(
             f"- {name}: spot {info.get('spot')}; zero-gamma flip {flip_text}; "
             f"distance {distance_text}; regime {info.get('regime')} gamma; "
             f"net GEX {info.get('net_gex_bn_per_pct')}bn per 1% move "
             f"(contracts used {info.get('contracts_used')}, skipped {info.get('contracts_skipped')})"
+            f"{fresh_text}"
         )
 
     signals = monitor.get("signals")
