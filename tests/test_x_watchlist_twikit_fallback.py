@@ -60,7 +60,20 @@ class _WorkingTwikitRunner:
 
     def search(self, query: str, limit: int) -> list[dict[str, object]]:
         self.calls.append(("search", query))
-        raise RuntimeError("Twikit account runner should not serve configured searches")
+        return [
+            {
+                "id_str": "twikit-search-1",
+                "rawContent": "Twikit authenticated search result",
+                "date": "2026-06-13T13:00:00+00:00",
+                "url": "https://x.com/search/status/twikit-search-1",
+                "likeCount": 0,
+                "retweetCount": 0,
+                "replyCount": 0,
+                "quoteCount": 0,
+                "bookmarkedCount": 0,
+                "source_backend": "twikit_account",
+            }
+        ][:limit]
 
 
 class _TwscrapeRunner:
@@ -205,7 +218,7 @@ class TwikitFallbackRunnerTest(unittest.TestCase):
 
         self.assertIsInstance(runner.primary, runner_class)
         self.assertIsInstance(runner.backup, TwscrapeRunner)
-        self.assertIs(runner.search_runner, runner.backup)
+        self.assertIs(runner.search_runner, runner.primary)
 
     def test_twikit_primary_handles_account_calls_without_twscrape(self) -> None:
         primary = _WorkingTwikitRunner()
@@ -241,14 +254,24 @@ class TwikitFallbackRunnerTest(unittest.TestCase):
         self.assertEqual(primary.calls, [("user_by_login", "limited"), ("user_by_login", "source")])
         self.assertEqual(backup.calls, [])
 
-    def test_account_primary_does_not_route_searches_to_twikit_account_runner(self) -> None:
+    def test_searches_route_to_twikit_primary(self) -> None:
         primary = _WorkingTwikitRunner()
+        backup = _TwscrapeRunner()
+        runner = FallbackXRunner(primary=primary, backup=backup)
+
+        self.assertEqual(runner.search("AI", 1)[0]["id_str"], "twikit-search-1")
+
+        self.assertEqual(primary.calls, [("search", "AI")])
+        self.assertEqual(backup.calls, [])
+
+    def test_search_falls_back_to_twscrape_when_twikit_search_breaks(self) -> None:
+        primary = _BrokenTwikitRunner()
         backup = _TwscrapeRunner()
         runner = FallbackXRunner(primary=primary, backup=backup)
 
         self.assertEqual(runner.search("AI", 1)[0]["id_str"], "search-1")
 
-        self.assertEqual(primary.calls, [])
+        self.assertEqual(primary.calls, [("search", "AI")])
         self.assertEqual(backup.calls, [("search", "AI")])
 
     def test_collector_uses_shared_watchlist_with_twikit_primary_runner(self) -> None:

@@ -2,6 +2,10 @@ version: 1
 created_at: "2026-06-05"
 owner: "Ming"
 collector: "twscrape"
+# Private X List mirroring the configured accounts (built by backend/scripts/sync_x_list.py).
+# Account lane fetches this list timeline (1 endpoint, 500/15min) instead of 46 per-user
+# timelines (50/15min) to avoid self-DOSing the rate limit.
+list_id: "2065703090779492503"
 description: >
   Curated X/Twitter watchlists for market-moving monitoring. The seed list came
   from Ming. Expanded accounts are selected to extend the same signal surface:

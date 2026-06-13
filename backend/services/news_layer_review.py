@@ -43,7 +43,9 @@ from backend.services.x_watchlist import XWatchlistCollector, XWatchlistConfig
 class NewsLayerCollectorProtocol(Protocol):
     config: XWatchlistConfig
 
-    def collect_accounts(self, max_accounts: int, posts_per_account: int) -> dict[str, object]:
+    def collect_accounts(
+        self, max_accounts: int, posts_per_account: int, topup_max_accounts: int = 12
+    ) -> dict[str, object]:
         raise NotImplementedError
 
     def collect_searches(self, max_queries: int, posts_per_query: int) -> dict[str, object]:
@@ -87,6 +89,7 @@ def run_news_layer_review(
     accounts = collector.collect_accounts(
         max_accounts=len(collector.config.accounts),
         posts_per_account=posts_per_account,
+        topup_max_accounts=len(collector.config.accounts),
     )
     searches = collector.collect_searches(
         max_queries=len(collector.config.search_queries),

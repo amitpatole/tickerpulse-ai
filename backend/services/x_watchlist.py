@@ -68,6 +68,7 @@ class XWatchlistConfig:
     search_queries: tuple[XSearchQuery, ...]
     promote_keywords: tuple[str, ...]
     warnings: tuple[str, ...] = ()
+    list_id: str = ""
 
     @classmethod
     def default_path(cls) -> Path:
@@ -135,11 +136,14 @@ class XWatchlistConfig:
                 )
             )
 
+        list_id = str(raw.get("list_id") or "").strip()
+
         return cls(
             accounts=tuple(accounts),
             search_queries=tuple(search_queries),
             promote_keywords=promote_keywords,
             warnings=tuple(warnings),
+            list_id=list_id,
         )
 
 
@@ -211,8 +215,9 @@ class FallbackXRunner:
     ) -> None:
         self.primary = primary or TwikitAccountRunner()
         self.backup = backup or TwscrapeRunner()
-        self.search_runner = search_runner or self.backup
+        self.search_runner = search_runner or self.primary
         self._primary_disabled = False
+        self._search_disabled = False
 
     def user_by_login(self, handle: str) -> dict[str, object]:
         if self._primary_disabled:
@@ -237,7 +242,24 @@ class FallbackXRunner:
             return self.backup.user_tweets(user_id, limit)
 
     def search(self, query: str, limit: int) -> list[dict[str, object]]:
-        return self.search_runner.search(query, limit)
+        if self._search_disabled:
+            return self.backup.search(query, limit)
+        try:
+            return self.search_runner.search(query, limit)
+        except Exception as exc:
+            if _is_rate_limit_error(exc):
+                raise
+            if self.search_runner is self.backup:
+                raise
+            logger.warning(
+                "Disabling Twikit search primary for this run; using twscrape search backup: %s",
+                _error_log_summary(exc),
+            )
+            self._search_disabled = True
+            return self.backup.search(query, limit)
+
+    def list_tweets(self, list_id: str, limit: int) -> list[dict[str, object]]:
+        return self.primary.list_tweets(list_id, limit)
 
     def _disable_primary(self, exc: Exception) -> None:
         self._primary_disabled = True
@@ -281,8 +303,31 @@ class TwikitAccountRunner:
 
         return self._run_with_client(fetch)
 
+    def list_tweets(self, list_id: str, limit: int) -> list[dict[str, object]]:
+        async def fetch(client: object) -> list[dict[str, object]]:
+            get_list_tweets = getattr(client, "get_list_tweets")
+            collected: list[dict[str, object]] = []
+            result = await get_list_tweets(list_id, count=min(limit, 100))
+            while result:
+                for tweet in result:
+                    collected.append(_twikit_tweet_to_dict(tweet))
+                    if len(collected) >= limit:
+                        return collected
+                next_page = getattr(result, "next", None)
+                if not callable(next_page):
+                    break
+                result = await next_page()
+            return collected
+
+        return self._run_with_client(fetch)
+
     def search(self, query: str, limit: int) -> list[dict[str, object]]:
-        raise RuntimeError("Twikit account runner does not serve configured X search queries")
+        async def fetch(client: object) -> list[dict[str, object]]:
+            search_tweet = getattr(client, "search_tweet")
+            tweets = await search_tweet(query, "Latest", count=limit)
+            return [_twikit_tweet_to_dict(tweet) for tweet in list(tweets)[:limit]]
+
+        return self._run_with_client(fetch)
 
     def _default_client_factory(self) -> object:
         repo = str(self.repo_path)
@@ -379,7 +424,188 @@ class XWatchlistCollector:
 
         return tuple(selected)
 
-    def collect_accounts(self, max_accounts: int = 12, posts_per_account: int = 5) -> dict:
+    def collect_accounts(
+        self, max_accounts: int = 12, posts_per_account: int = 5, topup_max_accounts: int = 12
+    ) -> dict:
+        if self.config.list_id and hasattr(self.runner, "list_tweets"):
+            try:
+                return self._collect_accounts_via_list(
+                    max_accounts=max_accounts,
+                    posts_per_account=posts_per_account,
+                    topup_max_accounts=topup_max_accounts,
+                )
+            except Exception as exc:
+                if _is_rate_limit_error(exc):
+                    return {
+                        "source": "x_watchlist",
+                        "source_status": "error",
+                        "accounts_checked": len(self._selected_accounts(max_accounts)),
+                        "posts": [],
+                        "errors": [{"handle": "list", "message": str(exc)}],
+                        "config_warnings": list(self.config.warnings),
+                        "lane_mode": "list",
+                    }
+                logger.warning(
+                    "X list lane failed, falling back to per-account: %s",
+                    _error_log_summary(exc),
+                )
+        return self._collect_accounts_per_account(
+            max_accounts=max_accounts, posts_per_account=posts_per_account
+        )
+
+    def _collect_accounts_via_list(
+        self, *, max_accounts: int, posts_per_account: int, topup_max_accounts: int = 12
+    ) -> dict:
+        selected = self._selected_accounts(max_accounts)
+        if not selected:
+            return {
+                "source": "x_watchlist",
+                "source_status": "ok",
+                "accounts_checked": 0,
+                "posts": [],
+                "errors": [],
+                "config_warnings": list(self.config.warnings),
+                "lane_mode": "list",
+            }
+        index = {account.handle.lower(): account for account in selected}
+        fetch_limit = max(posts_per_account * max(1, len(index)), 100)
+        tweets = self.runner.list_tweets(self.config.list_id, fetch_limit)
+
+        posts: list[dict] = []
+        errors: list[dict] = []
+        seen_ids: set[str] = set()
+        per_author: dict[str, int] = {}
+        for tweet in tweets:
+            author = str(tweet.get("author_screen_name") or "").lower()
+            account = index.get(author)
+            if account is None:
+                continue
+            tweet_id = str(tweet.get("id") or tweet.get("id_str") or "")
+            if tweet_id and tweet_id in seen_ids:
+                continue
+            if tweet_id:
+                seen_ids.add(tweet_id)
+            if per_author.get(author, 0) >= posts_per_account:
+                continue
+            per_author[author] = per_author.get(author, 0) + 1
+            posts.append(self._normalize_post(account, tweet))
+
+        if topup_max_accounts > 0:
+            self._topup_missing_accounts(
+                index=index,
+                posts=posts,
+                errors=errors,
+                seen_ids=seen_ids,
+                per_author=per_author,
+                posts_per_account=posts_per_account,
+                topup_max_accounts=topup_max_accounts,
+            )
+
+        posts.sort(
+            key=lambda post: (
+                int(post.get("signal_score", 0)),
+                int(post.get("engagement", 0)),
+            ),
+            reverse=True,
+        )
+
+        if posts and errors:
+            source_status = "degraded"
+        elif posts:
+            source_status = "ok"
+        else:
+            errors.append(
+                {
+                    "handle": "*",
+                    "message": (
+                        f"List {self.config.list_id} returned 0 posts from configured "
+                        "members; X session likely dead or expired - check session health."
+                    ),
+                }
+            )
+            source_status = "degraded"
+
+        return {
+            "source": "x_watchlist",
+            "source_status": source_status,
+            "accounts_checked": len(selected),
+            "posts": posts,
+            "errors": errors,
+            "config_warnings": list(self.config.warnings),
+            "lane_mode": "list",
+        }
+
+    def _topup_missing_accounts(
+        self,
+        *,
+        index: dict[str, XAccount],
+        posts: list[dict],
+        errors: list[dict],
+        seen_ids: set[str],
+        per_author: dict[str, int],
+        posts_per_account: int,
+        topup_max_accounts: int,
+    ) -> None:
+        """Fill selected accounts that got zero posts from the List window.
+
+        Bounded per-account fetch (priority-ranked, capped at topup_max_accounts,
+        stops on the first rate-limit) so the followed-account lane represents
+        every selected member, not just the high-frequency floods. Timeline-family
+        calls only (user_by_login / user_tweets) -> tolerated by the noop txn-id.
+        """
+        missing = [
+            account
+            for handle_lc, account in index.items()
+            if per_author.get(handle_lc, 0) == 0
+        ]
+        missing.sort(key=lambda account: (-_priority_rank(account), account.handle))
+        deferred = missing[topup_max_accounts:]
+
+        for account in missing[:topup_max_accounts]:
+            handle_lc = account.handle.lower()
+            try:
+                user_id = account.user_id or str(
+                    self.runner.user_by_login(account.handle).get("id_str") or ""
+                )
+                if not user_id:
+                    errors.append(
+                        {"handle": account.handle, "message": "Could not resolve user id for top-up"}
+                    )
+                    continue
+                for tweet in self.runner.user_tweets(user_id, posts_per_account)[:posts_per_account]:
+                    if per_author.get(handle_lc, 0) >= posts_per_account:
+                        break
+                    tweet_id = str(tweet.get("id") or tweet.get("id_str") or "")
+                    if tweet_id and tweet_id in seen_ids:
+                        continue
+                    if tweet_id:
+                        seen_ids.add(tweet_id)
+                    per_author[handle_lc] = per_author.get(handle_lc, 0) + 1
+                    posts.append(self._normalize_post(account, tweet))
+            except Exception as exc:
+                if _is_rate_limit_error(exc):
+                    errors.append(
+                        {
+                            "handle": account.handle,
+                            "message": f"top-up stopped at rate limit: {_error_log_summary(exc)}",
+                        }
+                    )
+                    break
+                errors.append({"handle": account.handle, "message": _error_log_summary(exc)})
+
+        if deferred:
+            handles = ", ".join("@" + account.handle for account in deferred)
+            errors.append(
+                {
+                    "handle": "*",
+                    "message": (
+                        f"top-up budget {topup_max_accounts} reached; {len(deferred)} selected "
+                        f"accounts not checked: {handles}"
+                    ),
+                }
+            )
+
+    def _collect_accounts_per_account(self, max_accounts: int = 12, posts_per_account: int = 5) -> dict:
         posts: list[dict] = []
         errors: list[dict] = []
 
@@ -652,12 +878,15 @@ def _twikit_tweet_to_dict(tweet: object) -> dict[str, object]:
     tweet_id = str(getattr(tweet, "id", "") or "")
     user = getattr(tweet, "user", None)
     screen_name = str(getattr(user, "screen_name", "") or "")
+    author_id = str(getattr(user, "id", "") or "")
     text = str(getattr(tweet, "full_text", "") or getattr(tweet, "text", "") or "")
     date = _twikit_tweet_date(tweet)
     return {
         "id": tweet_id,
         "id_str": tweet_id,
         "rawContent": text,
+        "author_screen_name": screen_name,
+        "author_id": author_id,
         "url": f"https://x.com/{screen_name}/status/{tweet_id}" if screen_name and tweet_id else "",
         "date": date,
         "likeCount": _int_attr(tweet, "favorite_count"),

@@ -31,7 +31,9 @@ class _FakeNewsLayerCollector:
         self.account_call: dict[str, int] | None = None
         self.search_call: dict[str, int] | None = None
 
-    def collect_accounts(self, max_accounts: int, posts_per_account: int) -> dict[str, object]:
+    def collect_accounts(
+        self, max_accounts: int, posts_per_account: int, topup_max_accounts: int = 12
+    ) -> dict[str, object]:
         self.account_call = {
             "max_accounts": max_accounts,
             "posts_per_account": posts_per_account,
@@ -553,7 +555,9 @@ class _JuneTenthShapedCollector:
             promote_keywords=("CPO", "800V", "HBM"),
         )
 
-    def collect_accounts(self, max_accounts: int, posts_per_account: int) -> dict[str, object]:
+    def collect_accounts(
+        self, max_accounts: int, posts_per_account: int, topup_max_accounts: int = 12
+    ) -> dict[str, object]:
         return {
             "source_status": "ok",
             "accounts_checked": max_accounts,
@@ -826,7 +830,9 @@ class NewsStoryCardReportTest(unittest.TestCase):
 
 
 class _DeadXCollector(_FakeNewsLayerCollector):
-    def collect_accounts(self, max_accounts: int, posts_per_account: int) -> dict[str, object]:
+    def collect_accounts(
+        self, max_accounts: int, posts_per_account: int, topup_max_accounts: int = 12
+    ) -> dict[str, object]:
         return {"source_status": "error", "accounts_checked": max_accounts, "posts": [], "errors": [{"handle": "all", "message": "NoAccountError"}]}
 
     def collect_searches(self, max_queries: int, posts_per_query: int) -> dict[str, object]:
