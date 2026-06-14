@@ -70,6 +70,7 @@ def run_news_layer_review(
     news_collector: Callable[[], Mapping[str, object]] | None = None,
     tape_snapshot: Callable[[], Mapping[str, object]] | None = None,
     ai_infra: Callable[[], Mapping[str, object]] | None = None,
+    token_usage: Callable[[], Mapping[str, object]] | None = None,
     news_max_tickers: int = 12,
 ) -> dict[str, object]:
     now = generated_at or datetime.now(timezone.utc)
@@ -101,13 +102,14 @@ def run_news_layer_review(
     news_wire = _build_news_wire(news_collector, x_collector, news_max_tickers=news_max_tickers)
     market_tape = _build_market_tape(tape_snapshot, x_collector, now=now)
     ai_infra_update = _build_ai_infra(ai_infra, x_collector, now=now)
+    token_usage_update = _build_token_usage(token_usage, x_collector, now=now)
     watchlist_events = watchlist_notes.build_watchlist_event_insights(lookahead_days=180)
     executive_summary = _build_executive_summary(accounts, searches, news_wire, generated_at=now.isoformat())
     ranked_following = _ranked_post_briefs(_posts(accounts), limit=10, generated_at=now.isoformat())
     top_news_and_tickers = _top_news_and_tickers_payload(accounts, searches, news_wire, generated_at=now.isoformat())
 
     result: dict[str, object] = {
-        "schema_version": 2,
+        "schema_version": 3,
         "generated_at": now.isoformat(),
         "source_status": _combined_status(accounts, searches, news_wire),
         "session_guard": session_guard,
@@ -116,6 +118,7 @@ def run_news_layer_review(
         "news_wire": news_wire,
         "market_tape": market_tape,
         "ai_infra_update": ai_infra_update,
+        "token_usage_update": token_usage_update,
         "bernstein_monitor": bernstein_monitor,
         "vol_structure_monitor": vol_structure,
         "gamma_exposure_monitor": gamma_exposure,
@@ -150,6 +153,7 @@ def format_news_layer_report(result: Mapping[str, object]) -> str:
     lines.extend(_vol_structure_lines(_mapping(result.get("vol_structure_monitor"))))
     lines.extend(_gamma_exposure_lines(_mapping(result.get("gamma_exposure_monitor"))))
     lines.extend(_ai_infra_lines(_mapping(result.get("ai_infra_update"))))
+    lines.extend(_token_usage_lines(_mapping(result.get("token_usage_update"))))
     lines.extend(_executive_summary_lines(summary))
     lines.extend(_topic_lines(summary.get("top_topics")))
     lines.extend(_bernstein_lines(bernstein))
@@ -187,6 +191,7 @@ def _write_artifacts(
         "news_wire": result.get("news_wire"),
         "market_tape": result.get("market_tape"),
         "ai_infra_update": result.get("ai_infra_update"),
+        "token_usage_update": result.get("token_usage_update"),
         "session_guard": result.get("session_guard"),
         "executive_summary": result.get("executive_summary"),
         "ranked_twitter_following": result.get("ranked_twitter_following"),
@@ -378,6 +383,27 @@ def _build_ai_infra(
         return _ai_infra_with_staleness(dict(build_ai_infra_update()), now=now)
     except Exception as exc:
         return _lane_error_payload("ai_infra", f"ai infra update failed: {exc}")
+
+
+def _build_token_usage(
+    token_usage: Callable[[], Mapping[str, object]] | None,
+    x_collector: NewsLayerCollectorProtocol | None,
+    *,
+    now: datetime,
+) -> dict[str, object]:
+    if token_usage is not None:
+        try:
+            return _ai_infra_with_staleness(dict(token_usage()), now=now)
+        except Exception as exc:
+            return _lane_error_payload("token_usage", f"injected token usage source failed: {exc}")
+    if x_collector is not None:
+        return {"source_status": "skipped_injected_collector", "items": [], "errors": [], "report_timestamp_utc": None}
+    try:
+        from backend.services.token_usage_update import build_token_usage_update
+
+        return _ai_infra_with_staleness(dict(build_token_usage_update()), now=now)
+    except Exception as exc:
+        return _lane_error_payload("token_usage", f"token usage update failed: {exc}")
 
 
 def _ai_infra_with_staleness(payload: dict[str, object], *, now: datetime) -> dict[str, object]:
@@ -696,6 +722,60 @@ def _ai_infra_lines(payload: Mapping[str, object]) -> list[str]:
     for error in _errors(payload):
         lines.append(f"- AI infra error: {error}")
     return lines
+
+
+def _token_usage_lines(payload: Mapping[str, object]) -> list[str]:
+    staleness = _mapping(payload.get("staleness"))
+    title = "## AI Token Usage (OpenRouter model share)"
+    if staleness.get("stale"):
+        age = staleness.get("age_hours")
+        age_text = f"{age}h" if age is not None else "age unknown"
+        title = f"## AI Token Usage (OpenRouter model share) - STALE ({age_text}) - run /ai-infra-update first"
+    lines = [
+        "",
+        title,
+        f"- Status: {payload.get('source_status', 'unknown')}; report {payload.get('report_timestamp_utc') or 'n/a'}",
+    ]
+    items = payload.get("items")
+    rows = [item for item in items if isinstance(item, Mapping)] if isinstance(items, list) else []
+    if rows:
+        widths = (18, 9, 7, 8, 8)
+
+        def _row(cells: list[str]) -> str:
+            padded = [
+                str(cell).ljust(width) if idx == 0 else str(cell).rjust(width)
+                for idx, (cell, width) in enumerate(zip(cells, widths, strict=False))
+            ]
+            return "| " + " | ".join(padded) + " |"
+
+        sep = "+" + "+".join("-" * (width + 2) for width in widths) + "+"
+        lines.append(sep)
+        lines.append(_row(["Family", "Tokens(T)", "Share%", "4W%", "12W%"]))
+        lines.append(sep)
+        for item in rows:
+            meta = _mapping(item.get("metadata"))
+            lines.append(
+                _row(
+                    [
+                        str(meta.get("family") or "")[:18],
+                        _fmt_num(meta.get("tokens_trillions")),
+                        _fmt_num(meta.get("share_pct")),
+                        _fmt_pct(meta.get("token_change_4w_pct")),
+                        _fmt_pct(meta.get("token_change_12w_pct")),
+                    ]
+                )
+            )
+        lines.append(sep)
+    for error in _errors(payload):
+        lines.append(f"- Token usage error: {error}")
+    return lines
+
+
+def _fmt_num(value: object) -> str:
+    try:
+        return f"{float(value):.2f}"  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return "n/a"
 
 
 def _vol_structure_lines(monitor: Mapping[str, object]) -> list[str]:
