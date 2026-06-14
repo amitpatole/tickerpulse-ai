@@ -923,7 +923,8 @@ class MorningDigestLanesTest(unittest.TestCase):
         self.assertEqual(result["market_tape"]["source_status"], "skipped_injected_collector")
         self.assertEqual(result["ai_infra_update"]["source_status"], "skipped_injected_collector")
         self.assertEqual(result["token_usage_update"]["source_status"], "skipped_injected_collector")
-        self.assertEqual(summary["schema_version"], 3)
+        self.assertEqual(result["breadth_monitor"]["status"], "skipped_injected_collector")
+        self.assertEqual(summary["schema_version"], 4)
 
     def test_news_post_fuses_into_story_and_sections_print(self):
         result, summary = self._run(

@@ -35,6 +35,7 @@ from backend.services.news_story_cards import (
     what_happened_for_post,
 )
 from backend.services.gamma_exposure_monitor import build_gamma_exposure_monitor
+from backend.services.breadth_monitor import build_breadth_monitor
 from backend.services.vol_structure_monitor import build_vol_structure_monitor
 from backend.services.x_session_guard import ensure_x_session
 from backend.services.x_watchlist import XWatchlistCollector, XWatchlistConfig
@@ -71,6 +72,7 @@ def run_news_layer_review(
     tape_snapshot: Callable[[], Mapping[str, object]] | None = None,
     ai_infra: Callable[[], Mapping[str, object]] | None = None,
     token_usage: Callable[[], Mapping[str, object]] | None = None,
+    breadth_monitor: Callable[[], Mapping[str, object]] | None = None,
     news_max_tickers: int = 12,
 ) -> dict[str, object]:
     now = generated_at or datetime.now(timezone.utc)
@@ -103,13 +105,14 @@ def run_news_layer_review(
     market_tape = _build_market_tape(tape_snapshot, x_collector, now=now)
     ai_infra_update = _build_ai_infra(ai_infra, x_collector, now=now)
     token_usage_update = _build_token_usage(token_usage, x_collector, now=now)
+    breadth = _build_breadth(breadth_monitor, x_collector)
     watchlist_events = watchlist_notes.build_watchlist_event_insights(lookahead_days=180)
     executive_summary = _build_executive_summary(accounts, searches, news_wire, generated_at=now.isoformat())
     ranked_following = _ranked_post_briefs(_posts(accounts), limit=10, generated_at=now.isoformat())
     top_news_and_tickers = _top_news_and_tickers_payload(accounts, searches, news_wire, generated_at=now.isoformat())
 
     result: dict[str, object] = {
-        "schema_version": 3,
+        "schema_version": 4,
         "generated_at": now.isoformat(),
         "source_status": _combined_status(accounts, searches, news_wire),
         "session_guard": session_guard,
@@ -122,6 +125,7 @@ def run_news_layer_review(
         "bernstein_monitor": bernstein_monitor,
         "vol_structure_monitor": vol_structure,
         "gamma_exposure_monitor": gamma_exposure,
+        "breadth_monitor": breadth,
         "watchlist_events": watchlist_events,
         "executive_summary": executive_summary,
         "ranked_twitter_following": ranked_following,
@@ -152,6 +156,7 @@ def format_news_layer_report(result: Mapping[str, object]) -> str:
     lines.extend(_top_news_and_ticker_lines(accounts, searches, generated_at=generated_at))
     lines.extend(_vol_structure_lines(_mapping(result.get("vol_structure_monitor"))))
     lines.extend(_gamma_exposure_lines(_mapping(result.get("gamma_exposure_monitor"))))
+    lines.extend(_breadth_lines(_mapping(result.get("breadth_monitor"))))
     lines.extend(_ai_infra_lines(_mapping(result.get("ai_infra_update"))))
     lines.extend(_token_usage_lines(_mapping(result.get("token_usage_update"))))
     lines.extend(_executive_summary_lines(summary))
@@ -199,6 +204,7 @@ def _write_artifacts(
         "bernstein_monitor": result.get("bernstein_monitor"),
         "vol_structure_monitor": result.get("vol_structure_monitor"),
         "gamma_exposure_monitor": result.get("gamma_exposure_monitor"),
+        "breadth_monitor": result.get("breadth_monitor"),
         "watchlist_events": result.get("watchlist_events"),
     }
     summary_path.write_text(json.dumps(summary_payload, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -283,6 +289,28 @@ def _vol_structure_error(message: str, *, now: datetime) -> dict[str, object]:
         "headline": "Leverage monitor failed - check connectivity, do not assume calm.",
         "errors": [message],
     }
+
+
+def _build_breadth(
+    breadth_monitor: Callable[[], Mapping[str, object]] | None,
+    x_collector: NewsLayerCollectorProtocol | None,
+) -> dict[str, object]:
+    if breadth_monitor is not None:
+        try:
+            return dict(breadth_monitor())
+        except Exception as exc:  # monitor failure must not kill the news run
+            return {"status": "error", "signals": [], "errors": [f"injected breadth monitor failed: {exc}"]}
+    if x_collector is not None:
+        return {
+            "status": "skipped_injected_collector",
+            "signals": [],
+            "index_phase": "unknown",
+            "breadth_phase": "unknown",
+        }
+    try:
+        return build_breadth_monitor()
+    except Exception as exc:  # monitor failure must not kill the news run
+        return {"status": "error", "signals": [], "errors": [f"breadth monitor failed: {exc}"]}
 
 
 def _build_gamma_exposure(
@@ -820,6 +848,26 @@ def _vol_structure_lines(monitor: Mapping[str, object]) -> list[str]:
     if isinstance(signals, list) and not signals and status == "ok":
         lines.append("- No critical leverage/correlation signals today.")
 
+    for error in _strings(monitor.get("errors")):
+        lines.append(f"- Monitor error: {error}")
+    return lines
+
+
+def _breadth_lines(monitor: Mapping[str, object]) -> list[str]:
+    lines = ["", "## Breadth Divergence Monitor"]
+    status = str(monitor.get("status") or "not run")
+    index_phase = str(monitor.get("index_phase") or "unknown")
+    breadth_phase = str(monitor.get("breadth_phase") or "unknown")
+    lines.append(
+        f"- Status: {status}; index {index_phase}; breadth {breadth_phase} "
+        f"(RSP/SPY equal-weight vs cap-weight)"
+    )
+    signals = monitor.get("signals")
+    for signal in signals if isinstance(signals, list) else []:
+        if isinstance(signal, Mapping):
+            lines.append(f"- Signal [{signal.get('level')}] {signal.get('key')}: {signal.get('message')}")
+    if isinstance(signals, list) and not signals and status == "ok":
+        lines.append("- No breadth divergence: index trend and breadth agree.")
     for error in _strings(monitor.get("errors")):
         lines.append(f"- Monitor error: {error}")
     return lines
