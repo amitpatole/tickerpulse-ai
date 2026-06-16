@@ -147,6 +147,83 @@ items:
         self.assertEqual([row["ticker"] for row in rows], ["HYPE32196-USD", "RBRK"])
         self.assertTrue(all(row["active"] == 1 for row in rows))
 
+    def test_load_dashboard_watchlist_excludes_news_false_by_default(self) -> None:
+        from backend.services.dashboard_watchlist import load_dashboard_watchlist
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "dashboard_watchlist.yaml"
+            path.write_text(
+                """
+updated_at: "2026-06-15"
+items:
+  - ticker: NVDA
+    name: NVIDIA Corporation
+    market: US
+    bucket: core_ai
+  - ticker: UCTT
+    name: Ultra Clean Holdings Inc.
+    market: US
+    bucket: semicap
+    news: false
+  - ticker: WMT
+    name: Walmart Inc.
+    market: US
+""",
+                encoding="utf-8",
+            )
+            default_items = load_dashboard_watchlist(path)
+            all_items = load_dashboard_watchlist(path, include_all=True)
+
+        # Default view drops chart-only (news: false) names so the /news universe
+        # stays lean; the escape hatch returns the full master list.
+        self.assertEqual([item["ticker"] for item in default_items], ["NVDA", "WMT"])
+        self.assertEqual(
+            [item["ticker"] for item in all_items], ["NVDA", "UCTT", "WMT"]
+        )
+
+    def test_sync_to_db_skips_news_false_items(self) -> None:
+        from backend.core.stock_manager import init_stocks_table
+        from backend.services.dashboard_watchlist import sync_dashboard_watchlist_to_db
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            config_path = root / "dashboard_watchlist.yaml"
+            config_path.write_text(
+                """
+updated_at: "2026-06-15"
+items:
+  - ticker: NVDA
+    name: NVIDIA Corporation
+    market: US
+    bucket: core_ai
+  - ticker: UCTT
+    name: Ultra Clean Holdings Inc.
+    market: US
+    bucket: semicap
+    news: false
+""",
+                encoding="utf-8",
+            )
+            db_path = str(root / "stocks.db")
+
+            with patch("backend.config.Config.DB_PATH", db_path):
+                init_stocks_table()
+                summary = sync_dashboard_watchlist_to_db(config_path)
+                conn = sqlite3.connect(db_path)
+                conn.row_factory = sqlite3.Row
+                rows = conn.execute(
+                    "SELECT ticker, active FROM stocks WHERE ticker IN (?, ?)",
+                    ("NVDA", "UCTT"),
+                ).fetchall()
+                conn.close()
+
+        # The sync upserts only the news-tracked name; the chart-only (news: false)
+        # name is never seeded into the /news DB.
+        self.assertEqual(summary["upserted"], 1)
+        seeded = {row["ticker"]: row["active"] for row in rows}
+        self.assertEqual(seeded.get("NVDA"), 1)
+        self.assertNotIn("UCTT", seeded)
+
 
 if __name__ == "__main__":
     unittest.main()

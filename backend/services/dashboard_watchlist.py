@@ -22,12 +22,20 @@ def default_watchlist_path() -> Path:
     return Path(Config.BASE_DIR) / "config" / "dashboard_watchlist.yaml"
 
 
-def load_dashboard_watchlist(path: Path | None = None) -> list[dict[str, object]]:
+def load_dashboard_watchlist(
+    path: Path | None = None, *, include_all: bool = False
+) -> list[dict[str, object]]:
+    """Load watchlist items. By default drops chart-only names (``news: false``)
+    so every /news consumer (DB seed, news-wire tickers, known cashtags) stays
+    lean; pass ``include_all=True`` for the full master list."""
     raw = _load_raw(path or default_watchlist_path())
     items = raw.get("items")
     if not isinstance(items, list):
         return []
-    return [item for item in items if isinstance(item, dict)]
+    result = [item for item in items if isinstance(item, dict)]
+    if not include_all:
+        result = [item for item in result if item.get("news") is not False]
+    return result
 
 
 def upsert_dashboard_watchlist_item(
