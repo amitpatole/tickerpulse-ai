@@ -185,6 +185,102 @@ class NewsLayerReviewTest(unittest.TestCase):
         self.assertEqual(summary["vol_structure_monitor"]["overall_level"], "alert")
         self.assertEqual(result["vol_structure_monitor"]["status"], "ok")
 
+    def test_news_layer_report_includes_vol_regime_window_lines(self) -> None:
+        from backend.services.news_layer_review import run_news_layer_review
+
+        collector = _FakeNewsLayerCollector()
+        fake_monitor = {
+            "status": "ok",
+            "generated_at": "2026-06-24T00:00:00+00:00",
+            "indices": {
+                "COR1M": {
+                    "close": 11.9,
+                    "close_date": "2026-06-23",
+                    "change_1d": 3.82,
+                    "pctile_1y": 41.7,
+                    "pctile_full": 5.6,
+                    "pctile_2023": 26.1,
+                    "median_1y": 12.71,
+                    "median_2023": 15.53,
+                    "full_start": "2006-01-03",
+                    "full_max": 96.59,
+                    "full_max_date": "2020-03-18",
+                    "live": None,
+                    "live_time": "",
+                },
+                "VIXEQ": {
+                    "close": 46.38,
+                    "close_date": "2026-06-23",
+                    "change_1d": -0.51,
+                    "pctile_1y": 98.4,
+                    "pctile_full": 97.1,
+                    "pctile_2023": 97.8,
+                    "median_1y": 39.31,
+                    "median_2023": 34.75,
+                    "full_start": "2014-06-19",
+                    "full_max": 96.12,
+                    "full_max_date": "2020-03-18",
+                    "live": None,
+                    "live_time": "",
+                },
+                "VIX": {"close": 19.49, "close_date": "2026-06-23", "change_1d": 2.21,
+                        "pctile_1y": 77.4, "pctile_full": 60.2, "full_start": "1990-01-02",
+                        "live": None, "live_time": ""},
+            },
+            "derived": {
+                "vixeq_vix_spread": 26.89,
+                "vixeq_vix_ratio": 2.38,
+                "ratio_pctile_1y": 90.0,
+                "cor1m_change_1d_pts": 3.82,
+                "cor1m_change_1d_pct": 47.3,
+                "cor1m_change_5d_pts": 3.84,
+                "regime_state": {
+                    "label": "macro/beta",
+                    "detail": "correlation snap overriding low absolute COR1M",
+                },
+                "regime_drift": {
+                    "COR1M": {
+                        "drift_pts": -2.81,
+                        "drift_pct": -18.1,
+                        "direction": "down",
+                        "signal": "mild",
+                    },
+                    "VIXEQ": {
+                        "drift_pts": 4.57,
+                        "drift_pct": 13.2,
+                        "direction": "up",
+                        "signal": "strong",
+                    },
+                },
+            },
+            "signals": [],
+            "overall_level": "normal",
+            "headline": "NORMAL: COR1M 11.9; VIXEQ 46.38; VIX 19.49 - no critical signals",
+            "interpretation": [],
+            "thresholds": {},
+            "errors": [],
+        }
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result = run_news_layer_review(
+                x_collector=collector,
+                output_dir=Path(tmpdir),
+                vol_monitor=lambda: fake_monitor,
+            )
+            report = Path(result["paths"]["report_markdown"]).read_text(encoding="utf-8")
+
+        self.assertIn("Style dial: macro/beta", report)
+        self.assertIn("Status: ok; level: normal; run 2026-06-24", report)
+        self.assertIn("252-session pctile 41.7", report)
+        self.assertIn("VIX 19.49", report)
+        self.assertIn("full since 1990-01-02", report)
+        self.assertIn("COR1M regime windows: 2023 pctile 26.1", report)
+        self.assertIn("252-session median 12.71 vs 2023 median 15.53", report)
+        self.assertIn("full max 96.59 on 2020-03-18 since 2006-01-03", report)
+        self.assertIn("VIXEQ baseline drift: +4.57 pts (+13.20%)", report)
+        self.assertNotIn("VIX regime windows", report)
+        self.assertNotIn("VIX drift:", report)
+
     def test_injected_collector_skips_vol_monitor_but_reports_it(self) -> None:
         from backend.services.news_layer_review import run_news_layer_review
 
@@ -276,6 +372,7 @@ class NewsLayerReviewTest(unittest.TestCase):
                 output_dir=Path(tmpdir),
                 posts_per_account=2,
                 posts_per_query=3,
+                generated_at=datetime(2026, 6, 10, 12, 0, tzinfo=timezone.utc),
             )
 
             report = Path(result["paths"]["report_markdown"]).read_text(encoding="utf-8")
@@ -309,6 +406,36 @@ class NewsLayerReviewTest(unittest.TestCase):
         self.assertRegex(report, r"What to do: .+ because .+")
         self.assertNotIn("exposed basket", report)
         self.assertIn("Top tickers: $NVDA", report)
+
+    def test_news_layer_report_suppresses_stale_ranked_sections(self) -> None:
+        from backend.services.news_layer_review import run_news_layer_review
+
+        collector = _FakeNewsLayerCollector()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result = run_news_layer_review(
+                x_collector=collector,
+                output_dir=Path(tmpdir),
+                posts_per_account=2,
+                posts_per_query=3,
+                generated_at=datetime(2026, 6, 24, 12, 0, tzinfo=timezone.utc),
+            )
+            report = Path(result["paths"]["report_markdown"]).read_text(encoding="utf-8")
+
+        ranked_section = report[
+            report.index("## Ranked Twitter Following"):report.index("## Top News And Tickers")
+        ]
+        news_section = report[
+            report.index("## Top News And Tickers"):report.index("## Leverage & Correlation Monitor")
+        ]
+        raw_section = report[report.index("## Fast X Tape"):report.index("## Source Health")]
+
+        self.assertIn("- No followed-account posts collected.", ranked_section)
+        self.assertIn("- Top tickers: none detected in collected posts.", news_section)
+        self.assertIn("- Top news: no search/news posts collected.", news_section)
+        self.assertNotIn("Old high scoring macro", ranked_section)
+        self.assertNotIn("Public summary says Bernstein", news_section)
+        self.assertIn("Old high scoring macro", raw_section)
 
     def test_news_layer_review_includes_top_level_watchlist_events(self) -> None:
         from backend.services.news_layer_review import run_news_layer_review

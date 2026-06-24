@@ -6,15 +6,16 @@ stacked under a calm index surface:
 - ``VIXEQ``: cap-weighted implied volatility of S&P 500 constituents. A high
   VIXEQ premium over VIX means single-stock options are being bid aggressively
   versus the index (concentrated single-name speculation).
-- ``COR1M``: 1-month implied correlation. Index variance is roughly average
-  single-stock variance times correlation, so a COR1M floor means everyone is
-  leveraged into independent single-stock bets while the index is artificially
-  flat. A crash is the moment correlation snaps back toward 1.
+- ``COR1M``: 1-month implied correlation. Schematically, index variance is
+  single-stock variance plus weighted pairwise correlation, so a COR1M floor
+  means investors are being rewarded for independent single-stock bets while
+  the index surface stays calm. A shock can force correlations sharply higher.
 - ``VIX``: index-level implied volatility, used for the spread/ratio context.
 """
 
 from __future__ import annotations
 
+import statistics
 from collections.abc import Callable, Mapping, Sequence
 from datetime import datetime, timezone
 
@@ -25,6 +26,11 @@ CBOE_HISTORY_URL = "https://cdn.cboe.com/api/global/delayed_quotes/charts/histor
 
 _SYMBOLS = {"COR1M": "_COR1M", "VIXEQ": "_VIXEQ", "VIX": "_VIX"}
 _TRADING_DAYS_1Y = 252
+_REGIME_ANCHOR_DATE = "2023-01-01"
+_REGIME_INDEXES = ("COR1M", "VIXEQ")
+_DRIFT_MIN_POINTS = 2.0
+_DRIFT_MIN_PCT = 10.0
+_DRIFT_STRONG_MIN_PCT = 20.0
 
 THRESHOLDS: dict[str, float] = {
     "cor1m_alert_low": 10.0,
@@ -138,9 +144,12 @@ def _index_summary(
         "change_1d": round(latest - values[-2], 2) if len(values) >= 2 else None,
         "pctile_1y": _percentile(values[-_TRADING_DAYS_1Y:], latest),
         "pctile_full": _percentile(values, latest),
+        "full_start": closes[0][0],
         "live": None,
         "live_time": "",
     }
+    if name in _REGIME_INDEXES:
+        summary.update(_regime_window_summary(closes, latest))
     try:
         quote = fetch("quote", symbol)
     except Exception:  # quote is enrichment; close data already reported
@@ -154,6 +163,43 @@ def _index_summary(
     return summary
 
 
+def _regime_window_summary(
+    closes: Sequence[tuple[str, float]],
+    latest: float,
+) -> dict[str, object]:
+    values = [value for _date, value in closes]
+    trailing = values[-_TRADING_DAYS_1Y:]
+    anchor_values = [value for date, value in closes if date >= _REGIME_ANCHOR_DATE]
+    full_max_date, full_max = max(closes, key=lambda item: item[1])
+    summary: dict[str, object] = {
+        "full_start": closes[0][0],
+        "full_max": round(full_max, 2),
+        "full_max_date": full_max_date,
+        "full_mean": _rounded_mean(values),
+        "full_median": _rounded_median(values),
+        "mean_1y": _rounded_mean(trailing),
+        "median_1y": _rounded_median(trailing),
+        "regime_anchor_date": _REGIME_ANCHOR_DATE,
+    }
+    if anchor_values:
+        summary.update(
+            {
+                "pctile_2023": _percentile(anchor_values, latest),
+                "mean_2023": _rounded_mean(anchor_values),
+                "median_2023": _rounded_median(anchor_values),
+            }
+        )
+    return summary
+
+
+def _rounded_mean(values: Sequence[float]) -> float:
+    return round(statistics.mean(values), 2)
+
+
+def _rounded_median(values: Sequence[float]) -> float:
+    return round(statistics.median(values), 2)
+
+
 def _derived_metrics(series: Mapping[str, list[tuple[str, float]]]) -> dict[str, object]:
     derived: dict[str, object] = {
         "vixeq_vix_spread": None,
@@ -162,6 +208,8 @@ def _derived_metrics(series: Mapping[str, list[tuple[str, float]]]) -> dict[str,
         "cor1m_change_1d_pts": None,
         "cor1m_change_1d_pct": None,
         "cor1m_change_5d_pts": None,
+        "regime_drift": {},
+        "regime_state": {},
     }
     cor = series.get("COR1M")
     if cor and len(cor) >= 2:
@@ -181,6 +229,8 @@ def _derived_metrics(series: Mapping[str, list[tuple[str, float]]]) -> dict[str,
         vix = series.get("VIX")
         if vixeq and vix:
             derived["vixeq_vix_spread"] = round(vixeq[-1][1] - vix[-1][1], 2)
+    derived["regime_drift"] = _regime_drift(series)
+    derived["regime_state"] = _regime_state(series, derived)
     return derived
 
 
@@ -192,6 +242,131 @@ def _ratio_series(
         return []
     vix_by_date = {date: value for date, value in vix if value > 0}
     return [value / vix_by_date[date] for date, value in vixeq if date in vix_by_date]
+
+
+def _regime_drift(series: Mapping[str, list[tuple[str, float]]]) -> dict[str, dict[str, object]]:
+    drift: dict[str, dict[str, object]] = {}
+    for name in _REGIME_INDEXES:
+        closes = series.get(name)
+        if not closes:
+            continue
+        item = _regime_drift_item(name, closes)
+        if item:
+            drift[name] = item
+    return drift
+
+
+def _regime_drift_item(
+    name: str,
+    closes: Sequence[tuple[str, float]],
+) -> dict[str, object]:
+    values = [value for _date, value in closes]
+    trailing = values[-_TRADING_DAYS_1Y:]
+    anchor_values = [value for date, value in closes if date >= _REGIME_ANCHOR_DATE]
+    if not trailing or not anchor_values:
+        return {}
+    median_1y = statistics.median(trailing)
+    median_anchor = statistics.median(anchor_values)
+    drift_pts = median_1y - median_anchor
+    drift_pct = (drift_pts / median_anchor * 100.0) if median_anchor else 0.0
+    anchor_iqr = _iqr(anchor_values)
+    direction = _direction(drift_pts)
+    signal = _drift_signal(drift_pts, drift_pct, anchor_iqr)
+    return {
+        "anchor_date": _REGIME_ANCHOR_DATE,
+        "median_1y": round(median_1y, 2),
+        "median_2023": round(median_anchor, 2),
+        "drift_pts": round(drift_pts, 2),
+        "drift_pct": round(drift_pct, 1),
+        "anchor_iqr": round(anchor_iqr, 2),
+        "direction": direction,
+        "signal": signal,
+        "label": _drift_label(name, direction, signal),
+    }
+
+
+def _iqr(values: Sequence[float]) -> float:
+    return _quantile(values, 0.75) - _quantile(values, 0.25)
+
+
+def _quantile(values: Sequence[float], percentile: float) -> float:
+    ordered = sorted(values)
+    if not ordered:
+        return 0.0
+    position = (len(ordered) - 1) * percentile
+    lower = int(position)
+    upper = min(lower + 1, len(ordered) - 1)
+    weight = position - lower
+    return ordered[lower] * (1.0 - weight) + ordered[upper] * weight
+
+
+def _direction(value: float) -> str:
+    if value > 0:
+        return "up"
+    if value < 0:
+        return "down"
+    return "flat"
+
+
+def _drift_signal(drift_pts: float, drift_pct: float, anchor_iqr: float) -> str:
+    if abs(drift_pts) < _DRIFT_MIN_POINTS or abs(drift_pct) < _DRIFT_MIN_PCT:
+        return "flat"
+    if anchor_iqr > 0 and abs(drift_pts) >= anchor_iqr * 0.5:
+        return "strong"
+    if abs(drift_pct) >= _DRIFT_STRONG_MIN_PCT:
+        return "strong"
+    return "mild"
+
+
+def _drift_label(name: str, direction: str, signal: str) -> str:
+    if signal == "flat" or direction == "flat":
+        return "baseline stable"
+    if name == "COR1M" and direction == "up":
+        return "correlation baseline rising; dispersion regime weakening"
+    if name == "COR1M":
+        return "correlation baseline lower; dispersion crowding baseline deeper"
+    if direction == "up":
+        return "single-stock vol baseline rising"
+    return "single-stock vol baseline falling; froth easing"
+
+
+def _regime_state(
+    series: Mapping[str, list[tuple[str, float]]],
+    derived: Mapping[str, object],
+) -> dict[str, object]:
+    cor = series.get("COR1M")
+    if not cor:
+        return {}
+    latest = cor[-1][1]
+    change_1d = derived.get("cor1m_change_1d_pts")
+    change_pct = derived.get("cor1m_change_1d_pct")
+    change_5d = derived.get("cor1m_change_5d_pts")
+    if _cor1m_snap_active(change_1d, change_pct, change_5d):
+        return {
+            "label": "macro/beta",
+            "detail": "correlation snap overriding low absolute COR1M; selection benefit is being compressed",
+        }
+    if latest <= THRESHOLDS["cor1m_watch_low"]:
+        return {
+            "label": "selection/alpha",
+            "detail": "low implied correlation is selection-friendly, but it is not proof of stock-picking alpha",
+        }
+    if latest >= 30.0:
+        return {"label": "macro/beta", "detail": "high implied correlation points to macro-beta dominance"}
+    return {"label": "rotating", "detail": "COR1M is between selection-friendly and macro-beta regimes"}
+
+
+def _cor1m_snap_active(change_pts: object, change_pct: object, change_5d: object) -> bool:
+    snap_1d = (
+        isinstance(change_pts, (int, float))
+        and change_pts > 0
+        and (
+            change_pts >= THRESHOLDS["cor1m_snap_1d_pts"]
+            or (isinstance(change_pct, (int, float)) and change_pct >= THRESHOLDS["cor1m_snap_1d_pct"])
+        )
+    )
+    snap_5d = isinstance(change_5d, (int, float)) and change_5d >= THRESHOLDS["cor1m_snap_5d_pts"]
+    return snap_1d or snap_5d
 
 
 def _classify(
@@ -216,7 +391,7 @@ def _cor1m_signals(
     pctile_1y = _percentile(values[-_TRADING_DAYS_1Y:], latest)
     pctile_full = _percentile(values, latest)
 
-    pctile_text = f"pctile {pctile_1y:.0f} 1y / {pctile_full:.0f} full"
+    pctile_text = f"pctile {pctile_1y:.0f} 252 sessions / {pctile_full:.0f} full"
     if latest <= THRESHOLDS["cor1m_alert_low"] or pctile_full <= THRESHOLDS["cor1m_full_pctile_alert"]:
         signals.append(
             {
@@ -225,7 +400,8 @@ def _cor1m_signals(
                 "detail": (
                     f"COR1M {latest:.2f} at/near historic floor ({pctile_text}): "
                     "implied correlation crushed - leverage stacked on independent single-stock bets, "
-                    "index artificially flat. Crash fuel is loaded; any shock can snap correlation to 1."
+                    "index artificially flat. Crash fuel is loaded; any shock can force correlations "
+                    "sharply higher."
                 ),
             }
         )
@@ -260,7 +436,7 @@ def _cor1m_signals(
                 "level": "alert",
                 "detail": (
                     f"COR1M +{float(change_pts):.2f} pts (+{float(change_pct or 0):.0f}%) in 1d to {latest:.2f}: "
-                    "correlation snapping back toward 1 - stocks falling together, leveraged longs forced "
+                    "correlation snapping higher - stocks falling together, leveraged longs forced "
                     "to de-gross simultaneously. This is the deleveraging itself, not a warning of it."
                 ),
             }
@@ -298,7 +474,8 @@ def _froth_signals(
                     "name": "single_stock_froth",
                     "level": level,
                     "detail": (
-                        f"VIXEQ/VIX ratio {float(ratio):.2f} ({float(ratio_pctile or 0):.0f}th pctile 1y): "
+                        f"VIXEQ/VIX ratio {float(ratio):.2f} "
+                        f"({float(ratio_pctile or 0):.0f}th pctile 252 sessions): "
                         "single-stock options bid far above index - concentrated single-name "
                         "speculation/leverage is extreme."
                     ),
@@ -363,6 +540,7 @@ def _interpretation(signals: Sequence[Mapping[str, str]]) -> list[str]:
 
 
 def _percentile(window: Sequence[float], value: float) -> float:
+    """inclusive empirical CDF percentile: percent of window values <= value."""
     if not window:
         return 0.0
     rank = sum(1 for item in window if item <= value)

@@ -20,6 +20,23 @@ def _history(closes: list[float], end: datetime) -> list[dict[str, str]]:
     return rows
 
 
+def _dated_history(start: datetime, closes: list[float]) -> list[dict[str, str]]:
+    rows = []
+    for index, close in enumerate(closes):
+        day = start + timedelta(days=index)
+        rows.append(
+            {
+                "date": day.strftime("%Y-%m-%d"),
+                "open": f"{close:.6f}",
+                "high": f"{close:.6f}",
+                "low": f"{close:.6f}",
+                "close": f"{close:.6f}",
+                "volume": "0.0",
+            }
+        )
+    return rows
+
+
 def _flat(value: float, count: int) -> list[float]:
     return [value] * count
 
@@ -167,6 +184,75 @@ class VolStructureMonitorTest(unittest.TestCase):
         vixeq = monitor["indices"]["VIXEQ"]
         self.assertEqual(vixeq["pctile_1y"], 100.0)
         self.assertLess(vixeq["pctile_full"], 60.0)
+
+    def test_regime_window_stats_are_additive_for_cor1m_and_vixeq(self) -> None:
+        from backend.services.vol_structure_monitor import build_vol_structure_monitor
+
+        start = datetime(2022, 12, 2, tzinfo=timezone.utc)
+        cor_values = [*_flat(40.0, 30), *_flat(25.0, 150), *_flat(10.0, 150)]
+        vixeq_values = [*_flat(20.0, 30), *_flat(30.0, 150), *_flat(40.0, 150)]
+        histories = {
+            "_COR1M": _dated_history(start, cor_values),
+            "_VIXEQ": _dated_history(start, vixeq_values),
+            "_VIX": _dated_history(start, _flat(18.0, 330)),
+        }
+
+        monitor = build_vol_structure_monitor(fetch=_fake_fetch(histories), now=_END)
+
+        cor = monitor["indices"]["COR1M"]
+        self.assertEqual(cor["full_start"], "2022-12-02")
+        self.assertEqual(cor["full_max"], 40.0)
+        self.assertEqual(cor["full_max_date"], "2022-12-02")
+        self.assertEqual(cor["pctile_2023"], 50.0)
+        self.assertEqual(cor["median_2023"], 17.5)
+        self.assertEqual(cor["median_1y"], 10.0)
+        self.assertEqual(cor["mean_2023"], 17.5)
+
+        vixeq = monitor["indices"]["VIXEQ"]
+        self.assertEqual(vixeq["full_max"], 40.0)
+        self.assertEqual(vixeq["full_max_date"], "2023-05-31")
+        self.assertEqual(vixeq["pctile_2023"], 100.0)
+        self.assertEqual(vixeq["median_2023"], 35.0)
+        self.assertEqual(vixeq["median_1y"], 40.0)
+
+        drift = monitor["derived"]["regime_drift"]
+        self.assertEqual(drift["COR1M"]["drift_pts"], -7.5)
+        self.assertEqual(drift["COR1M"]["direction"], "down")
+        self.assertEqual(drift["COR1M"]["signal"], "strong")
+        self.assertEqual(drift["VIXEQ"]["drift_pts"], 5.0)
+        self.assertEqual(drift["VIXEQ"]["direction"], "up")
+        self.assertEqual(drift["VIXEQ"]["signal"], "strong")
+
+        self.assertEqual(monitor["indices"]["VIX"]["full_start"], "2022-12-02")
+        self.assertNotIn("pctile_2023", monitor["indices"]["VIX"])
+
+    def test_drift_signal_uses_percent_override_for_strong_baseline_shift(self) -> None:
+        from backend.services.vol_structure_monitor import _drift_signal
+
+        self.assertEqual(_drift_signal(3.0, 21.0, 100.0), "strong")
+        self.assertEqual(_drift_signal(3.0, 11.0, 100.0), "mild")
+        self.assertEqual(_drift_signal(1.9, 25.0, 100.0), "flat")
+
+    def test_percentile_is_documented_as_inclusive_empirical_cdf(self) -> None:
+        from backend.services.vol_structure_monitor import _percentile
+
+        self.assertEqual(_percentile([1.0, 1.0, 2.0, 3.0], 1.0), 50.0)
+        self.assertIn("inclusive empirical CDF", _percentile.__doc__ or "")
+
+    def test_cor1m_snap_overrides_low_level_in_style_state(self) -> None:
+        from backend.services.vol_structure_monitor import build_vol_structure_monitor
+
+        histories = {
+            "_COR1M": _history([*_flat(20.0, 296), 8.0, 8.1, 8.0, 8.0, 8.08, 11.9], _END),
+            "_VIXEQ": _history(_flat(35.0, 302), _END),
+            "_VIX": _history(_flat(18.0, 302), _END),
+        }
+
+        monitor = build_vol_structure_monitor(fetch=_fake_fetch(histories), now=_END)
+
+        state = monitor["derived"]["regime_state"]
+        self.assertEqual(state["label"], "macro/beta")
+        self.assertIn("correlation snap", state["detail"])
 
 
 if __name__ == "__main__":

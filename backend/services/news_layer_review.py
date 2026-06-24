@@ -550,8 +550,22 @@ def _ranked_post_briefs(
     limit: int,
     generated_at: str = "",
 ) -> list[dict[str, object]]:
-    ranked = _rank_posts(fresh_posts(posts, generated_at=generated_at), generated_at=generated_at)
+    ranked = _rank_posts(
+        _fresh_posts_no_fallback(posts, generated_at=generated_at),
+        generated_at=generated_at,
+    )
     return [_post_brief(post) for post in ranked[:limit]]
+
+
+def _fresh_posts_no_fallback(
+    posts: Sequence[Mapping[str, object]],
+    *,
+    generated_at: str,
+) -> list[Mapping[str, object]]:
+    reference = parse_datetime(generated_at)
+    if reference is None:
+        return list(posts)
+    return [post for post in posts if freshness_bucket(post, reference) >= 2]
 
 
 def _top_news_and_tickers_payload(
@@ -564,7 +578,10 @@ def _top_news_and_tickers_payload(
     account_posts = _posts(accounts)
     search_posts = _posts(searches)
     news_posts = _posts(news_wire or {})
-    ticker_posts = fresh_posts([*account_posts, *search_posts, *news_posts], generated_at=generated_at)
+    ticker_posts = _fresh_posts_no_fallback(
+        [*account_posts, *search_posts, *news_posts],
+        generated_at=generated_at,
+    )
     return {
         "top_news": _ranked_post_briefs([*search_posts, *news_posts], limit=5, generated_at=generated_at),
         "top_tickers": _top_tickers(ticker_posts, limit=10),
@@ -806,11 +823,21 @@ def _fmt_num(value: object) -> str:
         return "n/a"
 
 
+def _fmt_signed_num(value: object) -> str:
+    try:
+        return f"{float(value):+.2f}"  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return "n/a"
+
+
 def _vol_structure_lines(monitor: Mapping[str, object]) -> list[str]:
     lines = ["", "## Leverage & Correlation Monitor"]
     status = str(monitor.get("status") or "not run")
     overall = str(monitor.get("overall_level") or "unknown")
-    lines.append(f"- Status: {status}; level: {overall}")
+    generated_at = str(monitor.get("generated_at") or "")
+    run_date = generated_at[:10] if len(generated_at) >= 10 else ""
+    run_text = f"; run {run_date}" if run_date else ""
+    lines.append(f"- Status: {status}; level: {overall}{run_text}")
     headline = str(monitor.get("headline") or "")
     if headline:
         lines.append(f"- {headline}")
@@ -826,20 +853,29 @@ def _vol_structure_lines(monitor: Mapping[str, object]) -> list[str]:
             continue
         live = info.get("live")
         live_text = f", live {live}" if live is not None else ""
+        full_start = info.get("full_start")
+        full_start_text = f"; full since {full_start}" if full_start else ""
         lines.append(
             f"- {name} {info.get('close')} ({descriptor}; close {info.get('close_date')}"
-            f"{live_text}; 1d {info.get('change_1d')}; 1y pctile {info.get('pctile_1y')}; "
-            f"full pctile {info.get('pctile_full')})"
+            f"{live_text}; 1d {info.get('change_1d')}; 252-session pctile {info.get('pctile_1y')}; "
+            f"full pctile {info.get('pctile_full')}{full_start_text})"
         )
+        lines.extend(_vol_regime_window_lines(name, info))
 
     derived = _mapping(monitor.get("derived"))
+    state = _mapping(derived.get("regime_state"))
+    if state.get("label"):
+        detail = str(state.get("detail") or "")
+        detail_text = f" - {detail}" if detail else ""
+        lines.append(f"- Style dial: {state.get('label')}{detail_text}")
     if derived.get("vixeq_vix_ratio") is not None:
         lines.append(
             f"- VIXEQ-VIX spread {derived.get('vixeq_vix_spread')}; ratio "
-            f"{derived.get('vixeq_vix_ratio')} (1y pctile {derived.get('ratio_pctile_1y')}); "
+            f"{derived.get('vixeq_vix_ratio')} (252-session pctile {derived.get('ratio_pctile_1y')}); "
             f"COR1M 1d {derived.get('cor1m_change_1d_pts')} pts / "
             f"{derived.get('cor1m_change_1d_pct')}%, 5d {derived.get('cor1m_change_5d_pts')} pts"
         )
+    lines.extend(_vol_regime_drift_lines(_mapping(derived.get("regime_drift"))))
 
     signals = monitor.get("signals")
     for signal in signals if isinstance(signals, list) else []:
@@ -850,6 +886,32 @@ def _vol_structure_lines(monitor: Mapping[str, object]) -> list[str]:
 
     for error in _strings(monitor.get("errors")):
         lines.append(f"- Monitor error: {error}")
+    return lines
+
+
+def _vol_regime_window_lines(name: str, info: Mapping[str, object]) -> list[str]:
+    if info.get("pctile_2023") is None:
+        return []
+    return [
+        f"- {name} regime windows: 2023 pctile {info.get('pctile_2023')}; "
+        f"252-session median {info.get('median_1y')} vs 2023 median {info.get('median_2023')}; "
+        f"full max {info.get('full_max')} on {info.get('full_max_date')} since {info.get('full_start')}"
+    ]
+
+
+def _vol_regime_drift_lines(drift: Mapping[str, object]) -> list[str]:
+    lines: list[str] = []
+    for name in ("COR1M", "VIXEQ"):
+        item = _mapping(drift.get(name))
+        if not item:
+            continue
+        label = str(item.get("label") or "").strip()
+        label_text = f"; {label}" if label else ""
+        lines.append(
+            f"- {name} baseline drift: {_fmt_signed_num(item.get('drift_pts'))} pts "
+            f"({_fmt_pct(item.get('drift_pct'))}) vs 2023 median; "
+            f"{item.get('signal')} {item.get('direction')}{label_text}"
+        )
     return lines
 
 
@@ -952,7 +1014,7 @@ def _ranked_twitter_following_lines(
     *,
     generated_at: str,
 ) -> list[str]:
-    account_posts = fresh_posts(_posts(accounts), generated_at=generated_at)
+    account_posts = _fresh_posts_no_fallback(_posts(accounts), generated_at=generated_at)
     posts = _rank_posts(account_posts, generated_at=generated_at)
     lines = ["", "## Ranked Twitter Following"]
     if not posts:
@@ -983,8 +1045,11 @@ def _top_news_and_ticker_lines(
     generated_at: str,
 ) -> list[str]:
     account_posts = _posts(accounts)
-    search_posts = _rank_posts(_posts(searches), generated_at=generated_at)
-    ticker_posts = fresh_posts([*account_posts, *search_posts], generated_at=generated_at)
+    search_posts = _rank_posts(
+        _fresh_posts_no_fallback(_posts(searches), generated_at=generated_at),
+        generated_at=generated_at,
+    )
+    ticker_posts = _fresh_posts_no_fallback([*account_posts, *search_posts], generated_at=generated_at)
     top_tickers = _top_tickers(ticker_posts, limit=10)
     lines = ["", "## Top News And Tickers"]
     if top_tickers:
