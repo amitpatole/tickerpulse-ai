@@ -1,3 +1,29 @@
+## 2026-06-16 - twscrape v0.19.0 default X scraper
+
+Task: make `twscrape` v0.19.0 the default Twitter/X scraper for `/news`.
+
+Observed state before change:
+- `/news --posts-per-account 1 --posts-per-query 1 --news-max-tickers 3` wrote `D:\Crypto Data\Analysis\20260616 - TickerPulse news layer daily`.
+- Followed-account lane worked via Twikit List mode: raw JSON `accounts.source_status=ok`, `accounts.posts=25`, `source_backend=twikit_account`.
+- X search lane was degraded: raw JSON `searches.source_status=degraded`, `searches.posts=0`.
+- Direct Twikit search returned `twikit.errors.NotFound: status: 404`.
+- Local `twscrape` search exited 0 with `XClIdGen creation attempt ... Failed to parse scripts`, making zero-result fallback look like a successful empty search.
+- Upstream `twscrape` v0.19.0 was tested with `uvx --from git+https://github.com/vladkens/twscrape@v0.19.0 twscrape --db C:\Repos\twscrape\accounts.db search "AI lang:en" --limit=3` and returned live JSON rows.
+
+Implementation intent:
+- Fast-forward `C:\Repos\twscrape` to `v0.19.0` and sync deps.
+- Change `backend.services.x_watchlist.FallbackXRunner` defaults so `TwscrapeRunner` is the primary/default X runner and `TwikitAccountRunner` is the backup.
+- Add `TwscrapeRunner.list_tweets()` normalization so the private List lane can run through `twscrape list_timeline`.
+- Preserve Twikit fallback for account/List/search failures.
+
+Verification evidence:
+- TDD red: `venv\Scripts\python.exe -m pytest tests\test_x_watchlist_twikit_fallback.py tests\test_x_watchlist_list_lane.py -q` failed on the expected old-default assertion and missing `TwscrapeRunner.list_tweets`.
+- Focused green: same command passed with `29 passed`.
+- Broader news/X green: `venv\Scripts\python.exe -m pytest tests\test_news_layer_review.py tests\test_news_layer_topup_cap.py tests\test_x_watchlist_twikit_fallback.py tests\test_x_watchlist_list_lane.py -q` passed with `53 passed`.
+- Runtime probe: `FallbackXRunner()` printed `TwscrapeRunner TwikitAccountRunner TwscrapeRunner`; bounded collector returned `accounts ok 3 ['twscrape'] list []` and `searches ok 1 ['twscrape'] []`.
+- Bounded `/news`: `news --posts-per-account 1 --posts-per-query 1 --news-max-tickers 3` completed with Source Health `X accounts: ok; checked 25`, `X searches: ok; checked 8`, and report saved to `D:\Crypto Data\Analysis\20260616 - TickerPulse news layer daily\daily_news_layer_report.md`.
+- Raw artifact check: `tickerpulse_news_layer_raw.json` had account status `ok`, 25 posts, backend `twscrape`; search status `ok`, 8 posts, backend `twscrape`.
+
 ## 2026-06-04 - DeepSeek/OpenAI-Compatible Provider Setup
 
 Task: Add support for a DeepSeek/OpenAI-compatible AI provider so TickerPulse can use a non-built-in model API for monitoring agents.
@@ -1602,3 +1628,371 @@ Scope: touched only gamma_exposure_monitor.py, news_layer_review.py
 (_gamma_exposure_lines render), the two gamma test files, news SKILL.md, .ai
 notes. No VPS/Telegram/intraday-watcher code (deferred). Other dirty files on
 main belong to parallel work, untouched.
+
+## 2026-06-13 - X List top-up coverage + sync_x_list write guard
+
+Task: per plan docs/superpowers/plans/2026-06-13-x-list-topup-coverage.md, guarantee
+every selected X List member with recent posts is represented in /news despite the
+frequency-weighted List timeline, plus harden the bootstrap script.
+
+Why (live evidence): probes showed the List lane works but a deep 676-tweet pull mapped
+to only 35/46 members; 3 loud accounts = 58% of the pull, burying 11 high-value desks.
+Search lane is separately dead (twikit x-client-transaction-id JS-wall -> "Couldn't get
+KEY_BYTE indices"); not fixable cheaply, out of scope here. Decided: keep twikit List for
+accounts (free, own account), add a bounded per-account top-up; do NOT adopt Xpoz/browser
+bootstrap.
+
+Decisions:
+- Top-up targets only ZERO-representation selected accounts (matches the "absent" complaint;
+  bounded). Priority-ranked, capped at topup_max_accounts (default 12), stops + records on the
+  first 429. Timeline-only calls (user_by_login/user_tweets) tolerate the noop txn-id; the
+  original self-DOS was an *unbounded* 46-account sweep, this is hard-bounded.
+- Prefer XAccount.user_id when present to avoid a user_by_login resolve call.
+- Status refinement: list path now returns "degraded" when posts exist alongside errors (so a
+  top-up 429 surfaces, not silently "ok"). In-scope: top-up is what introduces those errors.
+
+Codex adversarial review (round 1, needs-attention, 3 highs) - addressed before re-review:
+- F1 (List drops configured accounts) = the top-up itself.
+- F2 (List path ignored max_accounts contract): real, and the top-up amplified it (it iterates
+  the index). Fixed: index built from self._selected_accounts(max_accounts); fetch_limit and
+  accounts_checked based on the selected set; error-branch accounts_checked too. /news passes
+  max_accounts=len(all) so unaffected; market_sweep (x_max_accounts=12) is corrected. Regression
+  test test_list_path_respects_max_accounts_selection added.
+- F3 (sync_x_list could write to the wrong X account): _resolve_target requires explicit
+  --username/TWIKIT_X_USERNAME; prints target + mode; writes (create_list/add_list_member) gated
+  behind --yes, dry-run otherwise. Guard tests mock _build_client (justified: the alternative is
+  live writes in a unit test).
+
+Evidence:
+- RED->GREEN both suites. test_x_watchlist_list_lane.py ListTopupTest 9 passed; new
+  test_sync_x_list_guard.py 6 passed. Fixed a test-isolation env leak (tearDown pops
+  TWIKIT_X_USERNAME). Full suite: 189 passed, 0 failed (pre-existing utcnow warning only).
+- LIVE smoke (%TEMP%\smoke_list_topup.py, real List 2065703090779492503, default cap 12):
+  distinct handles 25 -> 37 (+12: IanCutress, TrendForce, dnystedt, realDonaldTrump, FundaAI,
+  FredaDuan, ServeTheHome, ShanghaoJin, JonahLupton, jukan05, labubu_trader, aleabitoreddit),
+  146 posts, 0 errors, no dup ids, status=ok, accounts_checked=46. Remaining ~9 absent are
+  budget-deferred (cap 12) / no recent posts; raise topup_max_accounts to widen.
+
+Deviations: F2 is slightly beyond the literal "cover all 46" ask but is coupled to the change
+(top-up iterates the index) and was a Codex [high]; included as required cleanup. Throwaway
+probes/smoke live in %TEMP%, not committed. Commit/branch decision still deferred to user
+(x_watchlist.py carries the other agent's uncommitted Twikit work).
+
+## 2026-06-13 - AI token-usage lane in /news AI-infra section
+
+Task: AI-infra digest section should also show an AI token-usage table from the user's OpenRouter
+model-usage dashboard. Scope (user): render in this digest + wire into the pipeline.
+
+Source decision: `update-status.json` (AI infrastructure dashboard) maps token_usage_source ->
+"D:\Crypto Data\Analysis\20260603 - OpenRouter model usage trend" (updates in place; "Generated:
+2026-06-13"). Parse `model_family_trend_summary_completed_weeks.csv` (header: key,label,
+latestCompletedWeek,latestTokens,latestTokensT,latestSharePct,change4wPct,change12wPct,
+shareChange4wPct,shareChange12wPct) rather than scraping summary.md - stable CSV schema, robust.
+Reuse-first: mirrors ai_infra_update.build_ai_infra_update (GPU rental report parser) exactly.
+
+Design: new build_token_usage_update returns the same payload shape as build_ai_infra_update
+(source_status/report_dir/report_path/report_timestamp_utc/summary/items/errors), so the existing
+_ai_infra_with_staleness wrapper and lane plumbing are reused unchanged. items sorted by abs 4W
+token-volume change. New sibling lane token_usage_update (not folded into ai_infra_update) to keep
+per-source status/staleness honest; both render under the AI Infra heading.
+
+Schema: bumped summary.json schema_version 2 -> 3 (new lane = honest structural signal).
+schema_version consumers were only news_layer_review.py (write), one test assert, and the SKILL -
+all updated in this change. SKILL.md edited at the canonical .agents path (the .claude\skills copy
+is a junction).
+
+Evidence: TDD. test_token_usage_update.py (parse+sort, degraded-on-missing) RED->GREEN.
+test_news_layer_review schema assert 2->3 + token_usage skipped-injected assert. Full suite
+194 passed, 0 failed. Live render verified against the real dashboard (DeepSeek 6.75T / +125.77%
+4W on top; Claude/Gemini/ChatGPT follow; status ok, not stale). Tests inject collectors so the
+token lane returns skipped_injected_collector and never reads D: in CI.
+
+Deviations: none beyond the schema bump (surfaced and approved-by-scope). Uncommitted; isolated
+from x_watchlist.py so no bundling concern. Commit/review pending user.
+
+## 2026-06-14 - AI capex-slowdown scissor: BBG leading-fields pull template
+
+Task: light, reuse-first early-warning monitor for AI-capex slowdown (origin: Chamath frontier-lab valuation-reset thesis). Free-data spine + BBG fills gaps with LEADING fields only.
+
+Design (user-locked): 3-tier — A trigger (token growth + GPU $/hr [both already in ai-infra-update stack] + CRWV credit), B de-noise (semicap book-to-bill, TSM/SK/MU, lab secondary marks), C confirm (consensus capex/guidance — EXCLUDED, too late). Verdict 0-1/2/3 RED = clear/arm/warning. Source priority: BBG-primary for gap fields via pull-loop; free TRACE/FRED/EDGAR/yfinance = auto fallback.
+
+This step: generated `D:\Crypto Data\Analysis\20260614 - AI capex slowdown scissor\ai_capex_scissor_bbg_template.xlsx` via `build_bbg_scissor_template.py` (run `uv run --with openpyxl` from this repo for env). bbg-formula rules applied: BDP guard `=IF(OR($B#="",C$2=""),"",BDP(...))`, blank-guarded uncertain mnemonics for one FLDS pass, no Excel Tables, fullCalcOnLoad. Verified 40 formula cells, 0 stored-as-text.
+
+FLDS-pending (orange): book-to-bill (522 HK), DRSK 1y default prob (CRWV), CRWV bond ticker (CRWV Corp <GO>) + OAS/YAS, confirm LF98OAS Index. Manual (no clean BDP): #4 lab marks (private-co/news/HDS), HBM ASP (BI <GO>).
+
+Side-find: twscrape dead (X JS signing change "Failed to parse scripts"); twikit works after injecting deps filetype + Js2Py-3.13. Same break will hit /news searches.
+
+BUGFIX (same day): v1 BDP guard hardcoded `C$2` for the mnemonic, but stacked tables put mnemonics in row 4 (equities) / row 15 (credit) — row 2 was blank, so guard short-circuited to "" and nothing pulled. Fixed `bdp()` to take the table's mnemonic row; shipped `ai_capex_scissor_bbg_template_v2.xlsx`. FLDS cells moved: book-to-bill F4, default-prob G4, bond OAS E15, YAS F15, CRWV bond ticker B18. v1 discarded.
+
+Next slice (not done): free-spine #6 credit light (CRWV px [yfinance] + CRWV OAS [TRACE] + HY OAS [FRED]) test-first, then scissor_state.json + dashboard tab.
+
+CLOSE-OUT (2026-06-14): DESCOPED — no build. User confirmed token+GPU (existing ai-infra-update stack) is sufficient; credit/supply tracks are lower-alpha confirmation, not worth a maintained pipeline. Deleted all 3 artifacts + the dir `D:\Crypto Data\Analysis\20260614 - AI capex slowdown scissor\`. Operating rule: PRIMARY = token 3-Fam verdict + GPU $/hr (live); ESCALATE only when BOTH amber → manual glance at CRWV on user's BBG monitor. Revisit/automate only if a financing-driven cut ever slips past token+GPU. No code shipped in tickerpulse-ai; this notes entry is the only residue.
+
+## 2026-06-24 - Vol-structure regime-aware windows
+
+Task: patch the reviewed /news leverage-correlation monitor issues before production rollout.
+Scope is additive only for `backend/services/vol_structure_monitor.py` and the markdown renderer in
+`backend/services/news_layer_review.py`; preserve schema_version 4 and existing keys.
+
+Pre-mortem risks before implementation:
+- String-key contract risk: monitor payload is a dict consumed by report/digest code. New fields must be
+  optional and rendered via `.get()`/mapping helpers; no existing key rename or schema bump.
+- Window semantics risk: 252 trading sessions and 2023-anchor windows answer different questions. Payload
+  should carry anchor/start/full-tail metadata so report text does not treat "full" as equal history depth.
+- Drift wording risk: `median(t12m) - median(2023+)` is a baseline detector, not proof of today's direction.
+  Style/state lines must let a 1d COR1M snap override low-level "crowding deepening" language.
+- Threshold risk: raw median differences can over-label noise. Emit points, percent, and anchor IQR so the
+  flag is bounded by both absolute and relative movement.
+
+TDD evidence:
+- RED: targeted run failed on missing `full_start`/`regime_state`/report lines before production edits.
+- RED: stale ranked-section regression failed because the Top News renderer still displayed a stale 2026-06-09
+  search hit in a 2026-06-24 report.
+- GREEN: `venv\Scripts\python.exe -m pytest tests\test_vol_structure_monitor.py tests\test_news_layer_review.py -q`
+  -> 35 passed.
+- RED (round 2): targeted run failed on missing `full_max_date`, missing VIX full-history label,
+  missing percent-based strong drift override, and undocumented `_percentile` inclusivity.
+- GREEN (round 2): `venv\Scripts\python.exe -m pytest tests\test_vol_structure_monitor.py tests\test_news_layer_review.py -q`
+  -> 37 passed.
+- RED/GREEN (round 2 close-vs-run wording): report test failed until the leverage monitor status line
+  rendered monitor `generated_at` as a separate `run YYYY-MM-DD` date alongside per-index close dates.
+
+Implementation decisions:
+- Added regime-window fields only for COR1M/VIXEQ (`pctile_2023`, 1y/2023/full stats, `full_start`,
+  `full_max`) so VIX remains on the original 1y/full percentile contract.
+- Round 2 added `full_max_date` to COR1M/VIXEQ tail metadata and `full_start` to all index summaries.
+  VIX still has no `pctile_2023` or baseline-drift payload; the VIX `full_start` exists only so the
+  report can label the unequal history depth.
+- Report wording now says `252-session` for the former 1y window and includes monitor run date separately
+  from each index close date. The drift report line is labeled `baseline drift` to keep the median baseline
+  statistic distinct from the live COR1M snap delta.
+- Added derived `regime_drift` with points, percent, anchor IQR, direction, and mild/strong/flat signal.
+  COR1M 2026-06-23 live smoke: drift -2.81 pts / -18.1%, signal mild. VIXEQ: +4.57 pts / +13.2%,
+  signal strong.
+- Round 2 strong drift rule now matches the accepted spec: first require both absolute and percent
+  thresholds (`>=2 pts` and `>=10%`), then classify strong when either `>=0.5 * anchor_iqr` or
+  `>=20%`.
+- Added derived `regime_state`; COR1M snap overrides low absolute COR1M and reports `macro/beta` so the
+  report does not describe a +47% one-day snap as crowding deepening.
+- Removed stale fallback only from ranked/report sections through `_fresh_posts_no_fallback`; raw tape
+  still displays collected stale posts for source-health/debug visibility.
+- Updated `C:\Users\MingC\.agents\skills\news\SKILL.md` so the external digest instructions use the
+  schematic correlation wording, inclusive empirical-CDF convention, 252-trading-session wording, full
+  history start dates, tail max dates, and baseline-drift-vs-snap distinction.
+
+Verification:
+- `venv\Scripts\python.exe -m py_compile backend\services\vol_structure_monitor.py backend\services\news_layer_review.py`
+  -> pass.
+- Round 2: `venv\Scripts\python.exe -m py_compile backend\services\vol_structure_monitor.py backend\services\news_layer_review.py`
+  -> pass.
+- Round 2: `venv\Scripts\python.exe -m pytest tests\test_vol_structure_monitor.py tests\test_news_layer_review.py -q`
+  -> 37 passed.
+- Round 2: `venv\Scripts\python.exe -m pytest -q --ignore=tests\test_sync_x_list_guard.py` -> 207 passed, 1
+  pre-existing deprecation warning.
+- Round 2 unfiltered `venv\Scripts\python.exe -m pytest -q` remains blocked by unrelated dirty sync-list work:
+  212 passed, 1 failed. Failure:
+  `tests/test_sync_x_list_guard.py::SyncXListGuardTest::test_dry_run_without_yes_does_not_build_client`
+  fails because `backend/scripts/sync_x_list.py` awaits a MagicMock `http.aclose`.
+- Live CBOE smoke: status ok; COR1M/VIXEQ additive fields populated; VIX additive regime fields absent
+  as intended; latest historical close date was 2026-06-23.
+
+Mutation-testing evidence:
+- Mutating `_DRIFT_MIN_PCT` from 10.0 to 100.0 was killed by
+  `test_regime_window_stats_are_additive_for_cor1m_and_vixeq` (`flat` vs expected `strong`).
+- Round 2: mutating `_DRIFT_STRONG_MIN_PCT` from 20.0 to 200.0 was killed by
+  `test_drift_signal_uses_percent_override_for_strong_baseline_shift` (`mild` vs expected `strong`).
+- Mutating `_fresh_posts_no_fallback` from freshness bucket `>= 2` to `>= 1` was killed by
+  `test_news_layer_report_suppresses_stale_ranked_sections`.
+
+## 2026-06-24 - COR1M/VIXEQ Regime Window Scope Cleanup
+
+Task: fix scope creep from commit 43f24eb so only COR1M/VIXEQ regime-window upgrades remain.
+
+Initial decisions:
+- Use TDD regression tests before production edits: VIX must stay on the old payload/report surface, and non-monitor ranked/news freshness behavior must keep the prior fallback semantics.
+- Leave unrelated dirty working-tree changes alone, especially X-list reconciliation files.
+- Keep the requested COR1M/VIXEQ fields: 2023-anchor window, trailing 252-session medians, full-history tail max/date, regime drift, and style dial.
+
+Implementation:
+- Restored `news_layer_review.py` ranked/news paths to `fresh_posts(...)` fallback behavior and removed `_fresh_posts_no_fallback`.
+- Removed the VIX `full_start` payload leak by keeping full-history tail metadata inside `_regime_window_summary`, which is only called for COR1M/VIXEQ.
+- Updated `/news` rendering so `full since ...`, regime window lines, baseline drift, and style dial are driven by COR1M/VIXEQ regime fields only; VIX keeps the old close/1y/full percentile line.
+- Reverted incidental COR1M/VIXEQ signal wording churn and the added leverage-monitor run date.
+
+TDD evidence:
+- RED: `python -m pytest tests/test_vol_structure_monitor.py tests/test_news_layer_review.py -q` failed on VIX `full_start`, VIX `full since 1990-01-02`, stale-fallback removal, run-date churn, and changed existing signal text.
+- GREEN: `python -m pytest tests/test_vol_structure_monitor.py tests/test_news_layer_review.py -q` -> 36 passed.
+
+Verification:
+- `python -m py_compile backend/services/vol_structure_monitor.py backend/services/news_layer_review.py` -> pass.
+- `git diff --check -- backend/services/vol_structure_monitor.py backend/services/news_layer_review.py tests/test_vol_structure_monitor.py tests/test_news_layer_review.py` -> pass.
+- `python -m pytest -q --ignore=tests/test_sync_x_list_guard.py --ignore=tests/test_daily_idea_sweep.py` -> 198 passed, 1 pre-existing deprecation warning.
+- Broader run with only `test_sync_x_list_guard.py` ignored was blocked by missing local dependency `apscheduler` in `tests/test_daily_idea_sweep.py`, unrelated to these files.
+
+Mutation-testing reporting:
+- Blocked by mutation-testing preflight: production files in scope have uncommitted changes from this fix, so the skill's clean-working-tree requirement would require stashing/committing first. No deliberate mutation was left in the tree.
+
+## 2026-06-14 - X Watchlist Evidence Re-grade And Narrow (46 -> 25)
+
+Task: narrow `config/x_watchlists.yaml` to a top-10 evidence-graded insight tier per Ming's request.
+
+Method: scraped current samples of 18 research contenders via `TwikitAccountRunner` (twscrape still dead — "Failed to parse scripts", same break noted above; twikit account-timeline path works under noop client-transaction). Graded with two fork subagents on original-insight / semi-edge / uniqueness / stack-fit.
+
+Decisions:
+- New `top10_insight` tier (priority highest) = Ming's reading set: jukan05, aleabitoreddit, zephyr_z9, JonahLupton, TheValueist, lithos_graphein, ShanghaoJin, SemiAnalysis_, CKCapitalxx, qinbafrank. Added `regrade_2026_06_14` scores; preserved prior reliability_score/basis where present.
+- New `utility` tier: realDonaldTrump (policy shock), DeItaone (single retained headline feed), TrendForce (demoted from research to raw-data).
+- New `b_tier_pending_grade` tier: labubu_trader, FundaAI, FredaDuan, ServeTheHome, IanCutress, KairosPraxis — NOT graded in this pass (not in the 18-contender scrape); kept per Ming, grade before promote/cut.
+- New `korea_semi` tier: added blazingbees (Katoo) — free-feed catalyst surfacing; EDGE=PARTIAL (info/framework, not copyable alpha). Paid sub NOT recommended (education, not signals).
+- CUT 22: 10 unproven discovery (whole `discovery_seed_network` group), 6 thin/redundant research (dylan522p=SemiAnalysis founder, PhotonCap, BenBajarin, teortaxesTex, tig88411109, dnystedt), 5 redundant headline relays (zerohedge, FirstSquawk, financialjuice, KobeissiLetter, Sino_Market), citrini (free X feed = memes; alpha paywalled — recommended subscribe to Citrini Research substack ~$799/yr separately, +100% Citrindex; rival I/O Fund $749 may fit his execution-paralysis better).
+- Updated `alert_policy` group references to the new tier names.
+- Bumped `version: 2`, added `revised_at`.
+
+Verification: `yaml.safe_load` parsed clean; 5 groups / 25 unique accounts (top10=10 exact, utility=3, b_tier=6, crypto=5, korea_semi=1); all 22 cuts absent; blazingbees present. Protected keys unchanged: `list_id` 2065703090779492503, all 8 `search_queries` names, 7 `collection_defaults` keys.
+
+PENDING (not done): `backend.scripts.sync_x_list` NOT run — the synced X List (list_id) still mirrors the old 46 until synced (modifies Ming's actual X List; left for his go-ahead). Repo working tree dirty (config only); not committed. Durable rationale in memory `reference_x_followlist_top5_regrade`.
+
+ADVERSARIAL REVIEW (2026-06-14, `/codex:adversarial-review`, 4 rounds, converged — all fixed): F1 top10 used a dead `regrade_2026_06_14` field the loader ignored (6/10 loaded reliability 0; ranking sorts on it) → now `reliability_score` carries the grade. F2 stale CRDO-seed test asserted cut handles → rewritten as `test_x_watchlist_config_includes_top10_insight_reliability_scores` (asserts top10 grades load + cut handles absent). F3 `sync_x_list.py` was add-only (reused list_id never removed the 22 cuts; stale high-volume members ate the List timeline window) → added pure `reconcile_members()` + reconciliation (add missing + remove cut), `get_list_members` pagination, dry-run preview. F4 transient screen-name lookup failure could classify a configured keeper as stale and DELETE it → `_resolve_configured_ids` prefers stored `user_id`, and `reconcile_list` refuses ALL removals if any configured account is unresolved. F5 remove failures still exited 0 → `reconcile_ok` gate + post-write re-fetch verify (`verify_stale`) → nonzero on any failure. F6 unresolved account with no stale members still exited 0 (silent incomplete sync) → `reconcile_ok` now also fails on `unresolved`. Tests: new `tests/test_sync_x_list.py` (6: pure set-diff + fake-client keeper-safety/fail-nonzero/unresolved-missing) + rewritten watchlist config test; 20 pass, compile clean. Loop stopped at round 4 (severity decreasing = diminishing returns; original narrowing goal done at R1). Working tree (unstaged, not committed): config/x_watchlists.yaml, backend/scripts/sync_x_list.py, tests/test_sync_x_list.py, tests/test_monitoring_hardening.py.
+## 2026-06-25 - MSTR NAV Discount Monitor In /news
+
+Task: wire the MSTR common-equity NAV discount monitor into the standalone
+`/news` daily report so Ming sees the discount every day.
+
+Initial decisions:
+- Follow the existing `/news` lane pattern: guarded builder, top-level result
+  key, summary JSON key, Markdown section, and Source Health line.
+- Use common-equity NAV as the actionable signal:
+  BTC holdings marked to live BTC price + USD reserve - debt - preferred
+  notional. Gross BTC discount stays secondary to avoid false cheap signals.
+- Bump the news-layer schema because adding a daily lane changes the summary
+  JSON contract.
+- Leave unrelated dirty worktree changes alone.
+
+Pre-mortem:
+- Wrote `.ai/pre-mortem-20260625-mstr-nav-news.md`.
+- Main risks identified: lane surface drift, Strategy API failure killing
+  `/news`, and false signals from using gross BTC discount instead of
+  common-equity NAV.
+
+Implementation:
+- Added `backend/services/mstr_nav_monitor.py` with Strategy API fetch,
+  API-shape normalization, common NAV calculation, and signal classification.
+- Wired `mstr_nav_monitor` into `run_news_layer_review()` as an injectable,
+  guarded lane.
+- Added the lane to raw JSON, summary JSON, Markdown immediately after Market
+  Tape, and Source Health.
+- Bumped `/news` summary schema from 4 to 5 and updated
+  `C:\Users\MingC\.agents\skills\news\SKILL.md`.
+
+TDD evidence:
+- RED:
+  `venv\Scripts\python.exe -m pytest tests\test_mstr_nav_monitor.py tests\test_news_layer_review.py::NewsLayerReviewTest::test_news_layer_review_includes_mstr_nav_discount_monitor -q`
+  failed with missing `backend.services.mstr_nav_monitor` and unexpected
+  `mstr_nav_monitor` parameter.
+- GREEN:
+  same command passed with 3 tests.
+
+Verification:
+- `venv\Scripts\python.exe -m pytest tests\test_news_layer_review.py tests\test_mstr_nav_monitor.py -q`
+  -> 28 passed.
+- `venv\Scripts\python.exe -m py_compile backend\services\mstr_nav_monitor.py backend\services\news_layer_review.py backend\scripts\run_news_layer_review.py`
+  -> pass.
+- `git diff --check -- backend\services\mstr_nav_monitor.py backend\services\news_layer_review.py tests\test_mstr_nav_monitor.py tests\test_news_layer_review.py`
+  -> pass, with only line-ending warnings for existing files.
+- Bounded smoke:
+  `news --posts-per-account 1 --posts-per-query 1 --news-max-tickers 3`
+  completed and wrote
+  `D:\Crypto Data\Analysis\20260626 - TickerPulse news layer daily\daily_news_layer_report.md`.
+  The report included `## MSTR NAV Discount Monitor`, signal
+  `NO_DISCOUNT_PREMIUM`, common discount `-1.94%`, and Source Health
+  `MSTR NAV: ok; signal NO_DISCOUNT_PREMIUM`.
+
+Mutation-testing reporting:
+- Blocked by mutation-testing preflight: `backend/services/mstr_nav_monitor.py`
+  is a new uncommitted production file, and the mutation workflow requires a
+  clean baseline before deliberate mutation/revert cycles. No deliberate
+  mutation was applied.
+
+## 2026-06-28 - Dashboard watchlist taxonomy cleanup for Kova / TradingView
+
+- Task: review and tighten `config/dashboard_watchlist.yaml` categories for trading use,
+  then sync Kova bucket CSVs and TradingView import artifacts.
+- Scope guard: many unrelated `/news` files are already dirty in this worktree. Keep edits
+  focused to the dashboard watchlist master and do not revert or normalize unrelated changes.
+- Required taxonomy changes from Ming: remove MRNA peers and passive as standalone buckets;
+  make memory explicitly include MU, DRAM/SK Hynix/Kioxia exposure, and EWY; add CAD FX
+  pairs and key commodities as their own categories; remove useless names and keep key
+  trading instruments.
+- Master-list edits: bumped `updated_at` to `2026-06-28`; Memory now contains `MU`,
+  `DRAM`, `EWY`, `000660.KS`, `005930.KS`, `SNDK`, and `285A.T`; `ALAB` and `MRVL`
+  moved from Memory to Core-Infra; `SOUN` moved from Core-Infra to Core-AI; `ANET`,
+  `COHR`, and `RKLB` gained chart buckets; private IPO placeholders remain news-only.
+- Passive dissolved: `VICR` and `BELFB` moved to Core-Power; `CRDO` and `GLW` moved to
+  Core-Infra; `VSH`, `KN`, and `CTS` were removed from charted buckets/list entries.
+- New trading categories: CAD FX contains `CAD=X`, `EURCAD=X`, `GBPCAD=X`, `AUDCAD=X`,
+  `NZDCAD=X`, `CADJPY=X`, `CADCHF=X`; Commodities contains `GC=F`, `SI=F`, `HG=F`,
+  `CL=F`, `BZ=F`, `NG=F`.
+- Downstream evidence lives in `C:\Repos\kova-screener`: bucket sync wrote 97 charted
+  names with no warnings; `passive`/MRNA traces are absent from the synced watchlists;
+  focused taxonomy/dashboard tests passed.
+- Follow-up request applied: restored IPO/private placeholders (`SPCX`, `CBRS`, `GENB`),
+  made `SPCX` primary `core_space` with `extra_buckets: [ipos]`, added `ASTS` to Space,
+  split Photonics/CPO (`LITE`, `SIVE.ST`, `AAOI`, `COHR`, `CRDO`, `GLW`) out of Core
+  Infra, split Core Other into `financials` (`JPM`, `C`) and `consumer` (`WMT`, `COST`,
+  `NKE`, `RDDT`, `AAL`), and narrowed CAD FX to `CAD=X`, `EURCAD=X`, `GBPCAD=X`.
+- Downstream regenerated import has 14 importable sections / 94 importable symbols;
+  private IPO placeholders are excluded from TradingView import because they have no safe
+  public TradingView symbol.
+- Follow-up Core-AI split: Core AI is now decomposed into `mag7`, `neo_cloud`,
+  `semis_major`, and `software`. `NVDA` is primary `semis_major` with
+  `extra_buckets: [mag7]`; MAG7 contains `NVDA`, `AAPL`, `GOOGL`, `MSFT`, `AMZN`,
+  `META`, `TSLA`; Neo Cloud contains public/chartable names `ORCL`, `NBIS`, `CRWV`,
+  `IREN`, `APLD`, `CORZ`, `CIFR`, `WULF`; Software contains `PLTR`, `CRWD`, `CRM`,
+  `NOW`, `SOUN`; Major Semis contains `NVDA`, `AVGO`, `ALAB`, `MRVL`, `AMD`, `TSM`,
+  `INTC`, `QCOM`, `TXN`, `ADI`, `ARM`. `core_ai` intentionally has no remaining names.
+- Downstream regenerated TradingView import now has 18 sections / 104 symbol lines;
+  `NVDA` appears in both MAG7 and Major Semis by design.
+
+## 2026-06-29 - Dirty Tree Patch Pass
+
+Task: patch the two P1 cleanup blockers from the `/news` dirty-tree review without
+executing the full branch cleanup plan.
+
+Scope:
+- `backend/scripts/sync_x_list.py`
+- `tests/test_sync_x_list_guard.py`
+- `backend/services/mstr_nav_monitor.py`
+- `tests/test_mstr_nav_monitor.py`
+- `tests/test_news_layer_review.py`
+
+Decisions:
+- Keep create-list dry-run as a no-network path: `sync_x_list --username MingFan0`
+  now returns before `_build_client()`. Existing-list dry-run still builds a client
+  because it must read current list members to preview add/remove diffs; writes remain
+  gated by `--yes`.
+- Harden `_aclose()` to tolerate sync or mocked close methods while preserving real
+  async client close behavior.
+- Keep the existing `_lane_error_payload()` message contract for MSTR failures, including
+  the lane prefix (`mstr_nav:`), and assert it in the failure-path coverage.
+- Replace the damaged MSTR numeric parser cleanup line with ASCII-only normalization for
+  USD/US prefixes, `$`, `%`, commas, and parentheses.
+
+TDD evidence:
+- RED: `venv\Scripts\python.exe -m pytest tests\test_sync_x_list_guard.py::SyncXListGuardTest::test_dry_run_without_yes_does_not_build_client -q`
+  failed because create-list dry-run constructed the patched client and tried to await a
+  MagicMock close.
+- GREEN: `venv\Scripts\python.exe -m pytest tests\test_sync_x_list_guard.py tests\test_sync_x_list.py -q`
+  passed with 13 tests.
+- RED: `venv\Scripts\python.exe -m pytest tests\test_mstr_nav_monitor.py::MstrNavMonitorTest::test_parse_number_accepts_usd_percent_and_parentheses -q`
+  failed on `ValueError: could not convert string to float: 'USD1234.50'`.
+
+Verification evidence:
+- Focused green:
+  `venv\Scripts\python.exe -m pytest tests\test_sync_x_list_guard.py tests\test_sync_x_list.py tests\test_mstr_nav_monitor.py tests\test_news_layer_review.py::NewsLayerReviewTest::test_news_layer_review_includes_mstr_nav_discount_monitor tests\test_news_layer_review.py::NewsLayerReviewTest::test_news_layer_review_keeps_running_when_mstr_nav_monitor_fails -q`
+  -> 18 passed.
+- Compile green:
+  `venv\Scripts\python.exe -m py_compile backend\scripts\sync_x_list.py backend\services\mstr_nav_monitor.py backend\services\news_layer_review.py`
+  -> pass.
+- Scoped diff check green for patched files and notes.
+- Full suite green:
+  `venv\Scripts\python.exe -m pytest -q` -> 218 passed, 1 pre-existing
+  `datetime.utcnow()` deprecation warning in `backend/api/agents.py`.

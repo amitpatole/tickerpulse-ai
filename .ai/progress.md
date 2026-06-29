@@ -76,3 +76,98 @@ Baseline: 130 passed (pytest 9.0.3 freshly installed into venv, Ming-approved de
   code commit already had spec + quality review).
 
 - 2026-06-13 - Gamma monitor QQQ + freshness gate (VPS deferred to 6/14). Added QQQ to default underlyings; freshness gate from last_trade_time (live/prior_close/stale/unknown via zoneinfo America/New_York, tzdata 2026.2) -> payload freshness + per-underlying as_of/age_minutes; stale degrades status, prior_close flagged ([PRIOR CLOSE]/WARNING in headline+report). TDD: 9 RED -> 17/17 gamma module tests, 142/142 full suite. Live (Sat, market shut): status ok / prior_close, SPX 7431 vs flip 7402 (+0.39% proximity watch), SMH 622 vs 650.64 (-4.4% alert), QQQ 723.25 vs 723.30 (on-flip alert). SKILL.md + implementation-notes updated. My files: backend/services/gamma_exposure_monitor.py, backend/services/news_layer_review.py, tests/test_gamma_exposure_monitor.py, tests/test_news_layer_review.py (untracked on main alongside other in-flight work).
+
+## 2026-06-13 X-scrape fix: List account lane + Twikit search (TDD, on feat/news-morning-digest worktree)
+
+Decision (Ming): account lane -> X Lists only; search lane -> Twikit search_tweet. Built on
+the other agent's uncommitted Twikit authenticated-runner work in x_watchlist.py (not reverted).
+- RED: tests/test_x_watchlist_list_lane.py 7 failed (list_id kwarg unknown; search->backup).
+- GREEN: x_watchlist.py changes - XWatchlistConfig.list_id + load() parse; TwikitAccountRunner
+  .list_tweets (paginated get_list_tweets) + .search (search_tweet, replaced NotImplemented);
+  _twikit_tweet_to_dict author_screen_name/author_id; FallbackXRunner search->primary w/
+  twscrape fallback + .list_tweets; collector list path (author->account map, drop non-members,
+  dedupe, per-author cap) with per-account fallback on non-429 list failure.
+- Updated test_x_watchlist_twikit_fallback.py: search now routes to twikit primary (intended
+  behavior change) + added search-fallback-to-twscrape test.
+- Tests: list-lane+fallback 17 passed; full suite 174 passed, 0 regressions.
+- New backend/scripts/sync_x_list.py (bootstrap: resolve handles, create private list, add
+  members, print list_id). NOT yet run (mutates Ming's X account - awaiting go).
+- PENDING: live list creation + list_id into config + live smoke + full /news. Commit/branch
+  strategy deferred (x_watchlist.py carries other-agent uncommitted Twikit work).
+
+## 2026-06-13 - X List top-up coverage (plan 2026-06-13-x-list-topup-coverage.md)
+- Diagnosed search-lane death (twikit txn-id JS-wall, KEY_BYTE) via 4 live probes; List lane
+  itself works. Followed-account coverage was frequency-skewed: deep 676-pull = 35/46 members,
+  11 high-value desks (IanCutress/TrendForce/dnystedt/realDonaldTrump...) buried.
+- Plan written + Codex adversarial review (needs-attention, 3 highs). Findings addressed:
+  (1) coverage = the top-up itself; (2) List path ignored max_accounts -> now indexes
+  _selected_accounts(max_accounts), accounts_checked=len(selected); (3) sync_x_list could write
+  to wrong account -> requires explicit --username/TWIKIT_X_USERNAME + --yes, dry-runs otherwise.
+- TDD: x_watchlist top-up (9 tests incl. max_accounts regression) RED->GREEN; sync_x_list guard
+  (6 tests, justified mock of _build_client) RED->GREEN. Fixed a test-isolation env leak in the
+  guard tests (tearDown now pops TWIKIT_X_USERNAME).
+- Full suite: 189 passed, 0 failed (pre-existing utcnow warning only).
+- LIVE smoke (real List, default cap 12): distinct handles 25 -> 37 (+12), 146 posts, 0 errors,
+  no dup ids, status=ok. Bounded by topup_max_accounts; raise it to cover the remaining ~9.
+- Uncommitted. Commit/branch still deferred (same shared-x_watchlist.py concern); re-review next.
+- Codex round 2 (needs-attention, 2 highs) patched TDD: F4 budget-deferred accounts were silently
+  dropped while status="ok" -> now recorded as a single "*" error ("budget N reached; K not
+  checked: @...") so status flips to degraded; F5 max_accounts=0 still hit live list_tweets ->
+  short-circuit returns ok/empty before any fetch (matches per-account zero-account contract).
+  +2 tests (11 ListTopupTest). Full suite 191 passed. NOTE: with default cap 12 and ~21 missing,
+  /news account lane will now report "degraded" + deferred note every run until the call-site
+  topup_max_accounts is raised (~24 covers all 46) - that's an intended honesty change, user's knob.
+- Codex round 3 (needs-attention, 2 highs): F7 PATCHED TDD - /news call site now passes
+  topup_max_accounts=len(config.accounts) so production lane covers all selected (no deferral);
+  required updating NewsLayerCollectorProtocol.collect_accounts + 3 test fakes (fake-vs-real
+  drift) + new tests/test_news_layer_topup_cap.py spy test. Full suite 192 passed.
+- F6 ESCALATED not patched: List lane not pinned to owning account. accounts.db has 1 active
+  account (@Mingfan0 = list owner) so wrong-account read is LATENT today. Two sub-parts need a
+  user call: (i) pin account - interim set TWIKIT_X_USERNAME=MingFan0 (0 code), durable add
+  list_owner to config; (ii) Codex flags the list-fail -> 46-acct per-account sweep as self-DOS,
+  but that fallback is the intended behavior encoded in test_list_failure_falls_back_to_per_account
+  - flipping it to fail-closed is a design change, deferred to user. Loop at round 3; stopping
+  auto-patch/review per loop-budget rule.
+- DECISIONS (user): F6 = interim env pin (set TWIKIT_X_USERNAME=MingFan0 at User scope; DONE) +
+  defer durable list_owner/fail-closed to a separate task. Commit = full file now.
+- COMMITTED 15983b0 on feat/news-morning-digest (10 files, +1303): bundles the other agent's
+  inseparable Twikit work + my top-up/guard/coverage + plan + tests. .ai/* left unstaged. NOT
+  pushed. 192 tests green.
+- DEFERRED TASK (durable F6): add list_owner to config + pin runner to it + fail-closed when the
+  List lane fails with list_id set (instead of the 46-acct per-account sweep; will flip
+  test_list_failure_falls_back_to_per_account). Needs its own plan.
+
+## 2026-06-13 - AI token-usage lane (OpenRouter) added to /news AI-infra section
+- User: AI-infra section should also carry a token-usage table, sourced from the OpenRouter
+  model-usage dashboard (same pattern as ai_infra_update). Scope: this digest + wire into pipeline.
+- Source confirmed via update-status.json token_usage_source -> "D:\Crypto Data\Analysis\20260603 -
+  OpenRouter model usage trend"; parse model_family_trend_summary_completed_weeks.csv (stable
+  header schema). Mirrors ai_infra_update (GPU report) exactly - adapt not invent.
+- NEW backend/services/token_usage_update.py: build_token_usage_update -> items {family, tokens_T,
+  share%, 4W%, 12W%, share pp}, sorted by abs 4W change; degraded if CSV missing; timestamp from
+  summary.md "Generated:". TDD: test_token_usage_update.py (2 tests) RED->GREEN.
+- news_layer_review: added token_usage lane (mirror _build_ai_infra + reused _ai_infra_with_staleness),
+  _token_usage_lines boxed table rendered in AI Infra area, token_usage_update in summary.json,
+  schema_version 2 -> 3. Bumped test assert + added skipped-injected assert.
+- SKILL.md (.agents canonical, junction): schema_version 3, section 4 documents both GPU + token tables.
+- Full suite 194 passed, 0 failed. Live render verified (DeepSeek 6.75T/+125.77% 4W top, status ok).
+- Uncommitted (isolated from x_watchlist.py - no bundling); commit/review pending user.
+
+## 2026-06-14 - Committed token-usage lane + added breadth-divergence monitor (Opus session)
+- Per user: committed the pending token-usage lane FIRST (isolated, no bundling) before adding
+  breadth. COMMIT f1b7e91 on feat/news-morning-digest (token_usage_update.py + test +
+  news_layer_review wiring + test, 4 files +292). Verified diff was token-usage-only and 25 tests
+  green before committing. .ai/* left unstaged.
+- NEW breadth-divergence monitor (user wanted /news to catch a breadth turn). Self-contained
+  backend/services/breadth_monitor.py: index trend (^GSPC EMA50/200 + 200-EMA slope) + RSP/SPY
+  equal-weight-vs-cap-weight breadth (broad/narrowing/mixed). Fires breadth_divergence ALERT when
+  index confirmed_up AND breadth narrowing (2021/2007 mega-cap-led top setup). Reuses the METHOD
+  from kova-screener regime.py, NOT a cross-repo import. yfinance source, fails soft (never blocks).
+- Wired into news_layer_review as breadth_monitor lane: import, run param, _build_breadth,
+  result+summary entry, _breadth_lines render (Section 5), schema_version 3->4. TDD:
+  test_breadth_monitor.py (4 tests RED->GREEN). Updated test_news_layer_review schema 3->4 +
+  breadth skip assert. COMMIT f1c177a (4 files +241). Full suite 198 passed, 0 failed.
+- SKILL.md (.agents canonical, home dir - NOT this repo): schema 3->4 + Section 5 documents breadth.
+- Live verified both render paths: today index confirmed_up + breadth broad -> quiet one-liner;
+  synthetic narrowing -> full breadth_divergence alert prints. Combined alert unit-tested, not
+  live-exercised (market broad now). Breadth MONITORED only, not gating sizing.
