@@ -381,52 +381,128 @@ def get_cost_summary():
     """Get cost summary for agent runs (AI API usage).
 
     Query Parameters:
+        days (int, optional): Number of trailing days to include.
         period (str, optional): Aggregation period -- 'daily', 'weekly', or 'monthly'.
             Defaults to 'daily'.
 
     Returns:
         JSON object with cost breakdown by period and agent, plus totals.
     """
-    period = request.args.get('period', 'daily')
-    valid_periods = ['daily', 'weekly', 'monthly']
+    period_arg = request.args.get('period')
+    days_arg = request.args.get('days')
+    valid_periods = {'daily': 1, 'weekly': 7, 'monthly': 30}
 
-    if period not in valid_periods:
-        return jsonify({
-            'error': f'Invalid period: {period}. Must be one of: {", ".join(valid_periods)}'
-        }), 400
+    if days_arg is not None:
+        try:
+            period_days = max(1, min(int(days_arg), 365))
+        except ValueError:
+            return jsonify({'error': f'Invalid days: {days_arg}. Must be an integer.'}), 400
+        period = 'custom'
+    else:
+        period = period_arg or 'daily'
+        if period not in valid_periods:
+            return jsonify({
+                'error': f'Invalid period: {period}. Must be one of: {", ".join(valid_periods)}'
+            }), 400
+        period_days = valid_periods[period]
 
-    # Determine date range based on period
     now = datetime.utcnow()
-    if period == 'daily':
-        range_start = (now - timedelta(days=1)).isoformat() + 'Z'
+    range_start_dt = now - timedelta(days=period_days)
+    range_start = range_start_dt.isoformat() + 'Z'
+    range_end = now.isoformat() + 'Z'
+    if period_days == 1:
         range_label = 'Last 24 hours'
-    elif period == 'weekly':
-        range_start = (now - timedelta(weeks=1)).isoformat() + 'Z'
-        range_label = 'Last 7 days'
-    else:  # monthly
-        range_start = (now - timedelta(days=30)).isoformat() + 'Z'
-        range_label = 'Last 30 days'
+    else:
+        range_label = f'Last {period_days} days'
 
-    # Stub: return zero costs -- no runs have occurred yet
+    range_start_sql = range_start_dt.strftime('%Y-%m-%d %H:%M:%S')
+
+    by_agent = {}
+    daily_costs = []
+    try:
+        conn = sqlite3.connect(Config.DB_PATH)
+        conn.row_factory = sqlite3.Row
+
+        total_row = conn.execute("""
+            SELECT
+                COUNT(*) AS total_runs,
+                COALESCE(SUM(tokens_input), 0) AS total_tokens_input,
+                COALESCE(SUM(tokens_output), 0) AS total_tokens_output,
+                COALESCE(SUM(estimated_cost), 0.0) AS total_cost_usd
+            FROM agent_runs
+            WHERE datetime(COALESCE(created_at, started_at)) >= datetime(?)
+        """, (range_start_sql,)).fetchone()
+
+        agent_rows = conn.execute("""
+            SELECT
+                agent_name,
+                COUNT(*) AS runs,
+                COALESCE(SUM(tokens_input + tokens_output), 0) AS tokens_used,
+                COALESCE(SUM(estimated_cost), 0.0) AS cost_usd
+            FROM agent_runs
+            WHERE datetime(COALESCE(created_at, started_at)) >= datetime(?)
+            GROUP BY agent_name
+            ORDER BY cost_usd DESC, runs DESC, agent_name ASC
+        """, (range_start_sql,)).fetchall()
+
+        daily_rows = conn.execute("""
+            SELECT
+                DATE(COALESCE(created_at, started_at)) AS date,
+                COUNT(*) AS runs,
+                COALESCE(SUM(estimated_cost), 0.0) AS cost
+            FROM agent_runs
+            WHERE datetime(COALESCE(created_at, started_at)) >= datetime(?)
+            GROUP BY DATE(COALESCE(created_at, started_at))
+            ORDER BY date DESC
+        """, (range_start_sql,)).fetchall()
+        conn.close()
+    except Exception as e:
+        logger.error(f"Failed to query cost summary: {e}")
+        total_row = {
+            'total_runs': 0,
+            'total_tokens_input': 0,
+            'total_tokens_output': 0,
+            'total_cost_usd': 0.0,
+        }
+        agent_rows = []
+        daily_rows = []
+
+    display_names = {agent['name']: agent['display_name'] for agent in _STUB_AGENTS}
+    for row in agent_rows:
+        agent_name = row['agent_name']
+        by_agent[agent_name] = {
+            'display_name': display_names.get(agent_name, agent_name.replace('_', ' ').title()),
+            'runs': row['runs'],
+            'cost_usd': round(row['cost_usd'], 6),
+            'tokens_used': row['tokens_used'],
+        }
+
+    for row in daily_rows:
+        daily_costs.append({
+            'date': row['date'],
+            'runs': row['runs'],
+            'cost': round(row['cost'], 6),
+        })
+
+    total_tokens_input = total_row['total_tokens_input'] or 0
+    total_tokens_output = total_row['total_tokens_output'] or 0
+    total_cost_usd = round(total_row['total_cost_usd'] or 0.0, 6)
+
     return jsonify({
         'period': period,
+        'period_days': period_days,
         'range_label': range_label,
         'range_start': range_start,
-        'range_end': now.isoformat() + 'Z',
-        'total_cost_usd': 0.0,
-        'total_runs': 0,
-        'total_tokens': 0,
-        'by_agent': {
-            agent['name']: {
-                'display_name': agent['display_name'],
-                'runs': 0,
-                'cost_usd': 0.0,
-                'tokens_used': 0
-            }
-            for agent in _STUB_AGENTS
-        },
+        'range_end': range_end,
+        'total_cost': total_cost_usd,
+        'total_cost_usd': total_cost_usd,
+        'total_runs': total_row['total_runs'] or 0,
+        'total_tokens': total_tokens_input + total_tokens_output,
+        'total_tokens_input': total_tokens_input,
+        'total_tokens_output': total_tokens_output,
+        'by_agent': by_agent,
         'by_provider': {},
-        'message': 'Cost tracking will populate once agent runs begin'
+        'daily_costs': daily_costs,
     })
 
 

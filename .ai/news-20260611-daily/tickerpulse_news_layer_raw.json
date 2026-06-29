@@ -1,0 +1,561 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-06-11T04:33:05.244046+00:00",
+  "source_status": "error",
+  "accounts": {
+    "source": "x_watchlist",
+    "source_status": "error",
+    "accounts_checked": 46,
+    "posts": [],
+    "errors": [
+      {
+        "handle": "mindmoon_108",
+        "message": "Could not resolve user id"
+      },
+      {
+        "handle": "himself65",
+        "message": "Could not resolve user id"
+      },
+      {
+        "handle": "RYANHINGSHING",
+        "message": "Could not resolve user id"
+      },
+      {
+        "handle": "realDonaldTrump",
+        "message": "Could not resolve user id"
+      },
+      {
+        "handle": "zephyr_z9",
+        "message": "Could not resolve user id"
+      },
+      {
+        "handle": "ShanghaoJin",
+        "message": "Could not resolve user id"
+      },
+      {
+        "handle": "jukan05",
+        "message": "Could not resolve user id"
+      },
+      {
+        "handle": "zerohedge",
+        "message": "Could not resolve user id"
+      },
+      {
+        "handle": "tig88411109",
+        "message": "Could not resolve user id"
+      },
+      {
+        "handle": "FundaAI",
+        "message": "Could not resolve user id"
+      },
+      {
+        "handle": "FredaDuan",
+        "message": "Could not resolve user id"
+      },
+      {
+        "handle": "dnystedt",
+        "message": "Could not resolve user id"
+      },
+      {
+        "handle": "TrendForce",
+        "message": "Could not resolve user id"
+      },
+      {
+        "handle": "SemiAnalysis_",
+        "message": "Could not resolve user id"
+      },
+      {
+        "handle": "dylan522p",
+        "message": "Could not resolve user id"
+      },
+      {
+        "handle": "teortaxesTex",
+        "message": "Could not resolve user id"
+      },
+      {
+        "handle": "qinbafrank",
+        "message": "Could not resolve user id"
+      },
+      {
+        "handle": "lithos_graphein",
+        "message": "Could not resolve user id"
+      },
+      {
+        "handle": "ServeTheHome",
+        "message": "Could not resolve user id"
+      },
+      {
+        "handle": "IanCutress",
+        "message": "Could not resolve user id"
+      },
+      {
+        "handle": "KairosPraxis",
+        "message": "Could not resolve user id"
+      },
+      {
+        "handle": "KobeissiLetter",
+        "message": "Could not resolve user id"
+      },
+      {
+        "handle": "DeItaone",
+        "message": "Could not resolve user id"
+      },
+      {
+        "handle": "FirstSquawk",
+        "message": "Could not resolve user id"
+      },
+      {
+        "handle": "financialjuice",
+        "message": "Could not resolve user id"
+      },
+      {
+        "handle": "Sino_Market",
+        "message": "Could not resolve user id"
+      },
+      {
+        "handle": "WuBlockchain",
+        "message": "Could not resolve user id"
+      },
+      {
+        "handle": "tier10k",
+        "message": "Could not resolve user id"
+      },
+      {
+        "handle": "lookonchain",
+        "message": "Could not resolve user id"
+      },
+      {
+        "handle": "EricBalchunas",
+        "message": "Could not resolve user id"
+      },
+      {
+        "handle": "JSeyff",
+        "message": "Could not resolve user id"
+      },
+      {
+        "handle": "knockouttrader",
+        "message": "Could not resolve user id"
+      },
+      {
+        "handle": "wallstengine",
+        "message": "Could not resolve user id"
+      },
+      {
+        "handle": "nrehiew_",
+        "message": "Could not resolve user id"
+      },
+      {
+        "handle": "chetaslua",
+        "message": "Could not resolve user id"
+      },
+      {
+        "handle": "firstadopter",
+        "message": "Could not resolve user id"
+      }
+    ],
+    "config_warnings": []
+  },
+  "searches": {
+    "source": "x_search",
+    "source_status": "ok",
+    "queries_checked": 8,
+    "posts": [],
+    "errors": []
+  },
+  "bernstein_monitor": {
+    "public_echo_posts": 0,
+    "top_public_echoes": [],
+    "suppressed_from_lead": 0,
+    "source_quality_policy": "Primary Bernstein reports require entitled access outside the default news scrape; public summaries and X echoes are alert sources only."
+  },
+  "watchlist_events": [
+    {
+      "source": "watchlist_event",
+      "score": 65,
+      "title": "CBRS: Cerebras IPO price watch and staged lock-up unlocks (2026-08-19)",
+      "url": "https://www.sec.gov/Archives/edgar/data/2021728/000162828026035214/cerebras-424b4.htm",
+      "metadata": {
+        "ticker": "CBRS",
+        "event_date": "2026-08-19",
+        "days_until_event": 69,
+        "note": "User-supplied setup: watch Cerebras if price dips below $200, then especially if it tests the $185 IPO price. Current research source is the final 424B4 prospectus dated May 13, 2026, which confirms a staged lock-up schedule rather than a single August cliff. Revalidate current quote, borrow/options, earnings timing, and actual Form 144/insider flow before making any trading decision.",
+        "process": [
+          "Price trigger 1: below $200, start full research refresh; do not buy only because the round-number level breaks.",
+          "Price trigger 2: near or below the $185 IPO price, look for capitulation, stabilization, and whether selling is event-driven or thesis-driven.",
+          "Buying rule: watch every tranche separately; a potential buy requires the unlock to fail to create a new low or to reclaim the broken level after the supply event.",
+          "If CBRS sells off before a tranche, wait 5-10 sessions after the unlock for no lower low, fading sell volume, or a reclaim of $185/$200 before considering a starter.",
+          "If CBRS holds up or rallies into a tranche, assume supply risk is not fully priced and avoid buying ahead of the event.",
+          "Lock-up: first fixed-date tranche is 2026-08-19 at 6:00 a.m. ET, up to about 14.6M shares.",
+          "Additional fixed tranches: 2026-09-02 and 2026-09-16 at about 14.6M shares each; 2026-09-30, 2026-10-14, and 2026-10-28 at about 19.4M shares each.",
+          "Earnings-triggered tranches: Q1 2026 earnings + second trading day released up to about 27.7M shares if the second-trading-day trigger was met, or about 30.2M if not; Q2 2026 earnings + second trading day releases about 36.4M shares.",
+          "Final remaining lock-up: earlier of Q3 2026 earnings + second trading day or 180 days after the May 13, 2026 prospectus date, which is 2026-11-09."
+        ],
+        "avoid": [
+          "Treating August 19 as the final lock-up expiration.",
+          "Buying only because price is below $200 or below the $185 IPO price.",
+          "Ignoring Q2/Q3 earnings timing, Rule 144 limits, Form 144/insider filings, or underwriter lock-up release waivers."
+        ],
+        "sources": [
+          "https://www.sec.gov/Archives/edgar/data/2021728/000162828026035214/cerebras-424b4.htm",
+          "https://www.cerebras.ai/press-release/cerebras-systems-announces-pricing-of-initial-public-offering",
+          "https://stockanalysis.com/stocks/cbrs/"
+        ]
+      }
+    },
+    {
+      "source": "watchlist_event",
+      "score": 65,
+      "title": "CBRS: Cerebras fixed lock-up tranche no-new-low check (2026-09-02)",
+      "url": "https://www.sec.gov/Archives/edgar/data/2021728/000162828026035214/cerebras-424b4.htm",
+      "metadata": {
+        "ticker": "CBRS",
+        "event_date": "2026-09-02",
+        "days_until_event": 83,
+        "note": "Follow-up CBRS lock-up tranche. Treat the date as a supply absorption test, not as an automatic buy date.",
+        "process": [
+          "Check whether the post-unlock low stays above the pre-unlock selloff low.",
+          "Potential buy signal only if the unlock fails to create a new low, sell volume fades, or price reclaims $185/$200.",
+          "If price keeps making lower lows 5-10 sessions after the unlock, no bottom yet."
+        ],
+        "avoid": [
+          "Buying just because the tranche date arrived.",
+          "Waiting blindly for the November 9 backstop if earlier tranches already show supply absorption."
+        ],
+        "sources": [
+          "https://www.sec.gov/Archives/edgar/data/2021728/000162828026035214/cerebras-424b4.htm"
+        ]
+      }
+    },
+    {
+      "source": "watchlist_event",
+      "score": 65,
+      "title": "CBRS: Cerebras fixed lock-up tranche no-new-low check (2026-09-16)",
+      "url": "https://www.sec.gov/Archives/edgar/data/2021728/000162828026035214/cerebras-424b4.htm",
+      "metadata": {
+        "ticker": "CBRS",
+        "event_date": "2026-09-16",
+        "days_until_event": 97,
+        "note": "Follow-up CBRS lock-up tranche. Treat the date as a supply absorption test, not as an automatic buy date.",
+        "process": [
+          "Check whether the post-unlock low stays above the pre-unlock selloff low.",
+          "Potential buy signal only if the unlock fails to create a new low, sell volume fades, or price reclaims $185/$200.",
+          "If price keeps making lower lows 5-10 sessions after the unlock, no bottom yet."
+        ],
+        "avoid": [
+          "Buying just because the tranche date arrived.",
+          "Waiting blindly for the November 9 backstop if earlier tranches already show supply absorption."
+        ],
+        "sources": [
+          "https://www.sec.gov/Archives/edgar/data/2021728/000162828026035214/cerebras-424b4.htm"
+        ]
+      }
+    },
+    {
+      "source": "watchlist_event",
+      "score": 65,
+      "title": "CBRS: Cerebras larger lock-up tranche no-new-low check (2026-09-30)",
+      "url": "https://www.sec.gov/Archives/edgar/data/2021728/000162828026035214/cerebras-424b4.htm",
+      "metadata": {
+        "ticker": "CBRS",
+        "event_date": "2026-09-30",
+        "days_until_event": 111,
+        "note": "Follow-up CBRS lock-up tranche. Treat the date as a supply absorption test, not as an automatic buy date.",
+        "process": [
+          "Check whether the post-unlock low stays above the pre-unlock selloff low.",
+          "Potential buy signal only if the unlock fails to create a new low, sell volume fades, or price reclaims $185/$200.",
+          "If price keeps making lower lows 5-10 sessions after the unlock, no bottom yet."
+        ],
+        "avoid": [
+          "Buying just because the tranche date arrived.",
+          "Waiting blindly for the November 9 backstop if earlier tranches already show supply absorption."
+        ],
+        "sources": [
+          "https://www.sec.gov/Archives/edgar/data/2021728/000162828026035214/cerebras-424b4.htm"
+        ]
+      }
+    },
+    {
+      "source": "watchlist_event",
+      "score": 65,
+      "title": "CBRS: Cerebras larger lock-up tranche no-new-low check (2026-10-14)",
+      "url": "https://www.sec.gov/Archives/edgar/data/2021728/000162828026035214/cerebras-424b4.htm",
+      "metadata": {
+        "ticker": "CBRS",
+        "event_date": "2026-10-14",
+        "days_until_event": 125,
+        "note": "Follow-up CBRS lock-up tranche. Treat the date as a supply absorption test, not as an automatic buy date.",
+        "process": [
+          "Check whether the post-unlock low stays above the pre-unlock selloff low.",
+          "Potential buy signal only if the unlock fails to create a new low, sell volume fades, or price reclaims $185/$200.",
+          "If price keeps making lower lows 5-10 sessions after the unlock, no bottom yet."
+        ],
+        "avoid": [
+          "Buying just because the tranche date arrived.",
+          "Waiting blindly for the November 9 backstop if earlier tranches already show supply absorption."
+        ],
+        "sources": [
+          "https://www.sec.gov/Archives/edgar/data/2021728/000162828026035214/cerebras-424b4.htm"
+        ]
+      }
+    },
+    {
+      "source": "watchlist_event",
+      "score": 65,
+      "title": "CBRS: Cerebras larger lock-up tranche no-new-low check (2026-10-28)",
+      "url": "https://www.sec.gov/Archives/edgar/data/2021728/000162828026035214/cerebras-424b4.htm",
+      "metadata": {
+        "ticker": "CBRS",
+        "event_date": "2026-10-28",
+        "days_until_event": 139,
+        "note": "Follow-up CBRS lock-up tranche. Treat the date as a supply absorption test, not as an automatic buy date.",
+        "process": [
+          "Check whether the post-unlock low stays above the pre-unlock selloff low.",
+          "Potential buy signal only if the unlock fails to create a new low, sell volume fades, or price reclaims $185/$200.",
+          "If price keeps making lower lows 5-10 sessions after the unlock, no bottom yet."
+        ],
+        "avoid": [
+          "Buying just because the tranche date arrived.",
+          "Waiting blindly for the November 9 backstop if earlier tranches already show supply absorption."
+        ],
+        "sources": [
+          "https://www.sec.gov/Archives/edgar/data/2021728/000162828026035214/cerebras-424b4.htm"
+        ]
+      }
+    },
+    {
+      "source": "watchlist_event",
+      "score": 65,
+      "title": "CBRS: Cerebras final lock-up backstop and absorption check (2026-11-09)",
+      "url": "https://www.sec.gov/Archives/edgar/data/2021728/000162828026035214/cerebras-424b4.htm",
+      "metadata": {
+        "ticker": "CBRS",
+        "event_date": "2026-11-09",
+        "days_until_event": 151,
+        "note": "Final CBRS lock-up backstop based on 180 days after the May 13, 2026 prospectus date, unless the Q3 2026 earnings-triggered release occurs earlier.",
+        "process": [
+          "Do not wait blindly for this date if Aug/Sep/Oct tranches already show a failed breakdown and reclaim.",
+          "If price is still making lower lows 5-10 sessions after November 9, no bottom yet.",
+          "Potential buy signal is supply absorption: failed new low, fading sell volume, and reclaim of $185/$200."
+        ],
+        "avoid": [
+          "Treating November 9 as an automatic all-clear.",
+          "Ignoring earlier tranche behavior."
+        ],
+        "sources": [
+          "https://www.sec.gov/Archives/edgar/data/2021728/000162828026035214/cerebras-424b4.htm"
+        ]
+      }
+    },
+    {
+      "source": "watchlist_event",
+      "score": 70,
+      "title": "AAOI: CPO/SIC pullback basket strategy (2026-06-09)",
+      "url": "https://www.nvidia.com/en-us/networking/products/silicon-photonics/",
+      "metadata": {
+        "ticker": "AAOI",
+        "event_date": "2026-06-09",
+        "days_until_event": -2,
+        "note": "User strategy 1: buy CPO and SiC names on major pullbacks. Core tickers are AAOI, LITE, SIVE.ST, and WOLF. AAOI/LITE/SIVE.ST are treated as the CPO/optical-interconnect basket; WOLF is tracked separately as a SiC turnaround/high-beta special situation.",
+        "process": [
+          "Entry rule: do not buy the first red candle blindly; wait for a washout that stops making new lows, reclaims the prior breakdown level, or forms a higher low.",
+          "Starter size: 0.25%-0.5% per name or basket starter after the failed-breakdown signal; max basket size should be earned by evidence.",
+          "Core CPO names: AAOI, LITE, SIVE.ST; monitor adjacent optics/interconnect names COHR, CRDO, CIEN, MRVL, and AVGO for confirmation.",
+          "WOLF rule: keep smaller and separate from CPO; it is SiC/turnaround balance-sheet risk, not the same trade as optical interconnect.",
+          "Avoid adding if the group keeps making lower lows after earnings, if AI-infra tape weakens, or if the move is pure short squeeze with no fresh demand evidence."
+        ],
+        "avoid": [
+          "Treating CPO and WOLF as the same risk bucket.",
+          "Averaging down before a failed breakdown, reclaim, or higher-low signal.",
+          "Letting a watchlist idea become a full-size position without written exit and capital source."
+        ],
+        "sources": [
+          "https://www.nvidia.com/en-us/networking/products/silicon-photonics/",
+          "https://investors.ao-inc.com/news-releases/news-release-details/aoi-showcases-25dbm-ultra-high-power-elsfp-foundation-next-gen",
+          "https://www.lumentum.com/en/products/data-center"
+        ]
+      }
+    },
+    {
+      "source": "watchlist_event",
+      "score": 65,
+      "title": "SIVE.ST: Sivers CPO pullback earnings checkpoint (2026-08-06)",
+      "url": "D:\\Crypto Data\\Analysis\\20260607 - Bloomberg financial analysis cache template\\bloomberg_financial_analysis_cache_template_values_20260607_200005.xlsx",
+      "metadata": {
+        "ticker": "SIVE.ST",
+        "event_date": "2026-08-06",
+        "days_until_event": 56,
+        "note": "Bloomberg-cache expected report date candidate; verify against company IR near the event.",
+        "process": [
+          "Check whether price held/reclaimed the pullback level into earnings.",
+          "Do not add before earnings if position is already full or if price is still making lower lows.",
+          "After earnings, buy only if guidance/order commentary supports the CPO thesis and price absorbs the event."
+        ],
+        "avoid": [
+          "Buying only because the stock is below its recent high."
+        ],
+        "sources": [
+          "D:\\Crypto Data\\Analysis\\20260607 - Bloomberg financial analysis cache template\\bloomberg_financial_analysis_cache_template_values_20260607_200005.xlsx"
+        ]
+      }
+    },
+    {
+      "source": "watchlist_event",
+      "score": 65,
+      "title": "AAOI: Applied Optoelectronics CPO pullback earnings checkpoint (2026-08-07)",
+      "url": "D:\\Crypto Data\\Analysis\\20260607 - Bloomberg financial analysis cache template\\bloomberg_financial_analysis_cache_template_values_20260607_200005.xlsx",
+      "metadata": {
+        "ticker": "AAOI",
+        "event_date": "2026-08-07",
+        "days_until_event": 57,
+        "note": "Bloomberg-cache expected report date candidate; verify against company IR near the event.",
+        "process": [
+          "Check customer/design-win commentary, AI data-center demand, and margin quality.",
+          "Potential add only after failed breakdown, reclaim, or earnings gap that holds for several sessions.",
+          "If earnings cause new lows that persist 5-10 sessions, no bottom yet."
+        ],
+        "avoid": [
+          "Chasing a rebound before the post-earnings low is defined."
+        ],
+        "sources": [
+          "D:\\Crypto Data\\Analysis\\20260607 - Bloomberg financial analysis cache template\\bloomberg_financial_analysis_cache_template_values_20260607_200005.xlsx"
+        ]
+      }
+    },
+    {
+      "source": "watchlist_event",
+      "score": 65,
+      "title": "LITE: Lumentum CPO pullback earnings checkpoint (2026-08-12)",
+      "url": "D:\\Crypto Data\\Analysis\\20260607 - Bloomberg financial analysis cache template\\bloomberg_financial_analysis_cache_template_values_20260607_200005.xlsx",
+      "metadata": {
+        "ticker": "LITE",
+        "event_date": "2026-08-12",
+        "days_until_event": 62,
+        "note": "Bloomberg-cache expected report date candidate; verify against company IR near the event.",
+        "process": [
+          "Check data-center optical demand, CPO/high-power laser commentary, and margin/guide quality.",
+          "Potential add only if earnings reaction holds above the event low or reclaims the failed-breakdown level.",
+          "If price keeps lower-lowing after earnings, wait."
+        ],
+        "avoid": [
+          "Treating valuation pullback alone as thesis confirmation."
+        ],
+        "sources": [
+          "D:\\Crypto Data\\Analysis\\20260607 - Bloomberg financial analysis cache template\\bloomberg_financial_analysis_cache_template_values_20260607_200005.xlsx"
+        ]
+      }
+    },
+    {
+      "source": "watchlist_event",
+      "score": 85,
+      "title": "SPACEX: SpaceX IPO opening and blowoff playbook (2026-06-12)",
+      "url": "https://www.sec.gov/Archives/edgar/data/1181412/000162828026040364/spaceexplorationtechnologib.htm",
+      "metadata": {
+        "ticker": "SPACEX",
+        "event_date": "2026-06-12",
+        "days_until_event": 1,
+        "note": "User strategy 2: play SpaceX IPO by participating in the low-float early move, selling into blowoff strength, then preparing a defined-risk bearish leg for lock-up supply and post-mania cooling. Current SEC source is the June 3, 2026 S-1/A, not a final 424B4.",
+        "process": [
+          "First-day long rule: if participating at the open, use tiny tracking size with a hard maximum price/slippage limit; avoid an unlimited market order into a thin opening auction.",
+          "Sell rule: scale out into vertical/blowoff strength, opening-range exhaustion, or failure back through VWAP; do not let an IPO flip become an accidental investment.",
+          "Bearish leg rule: do not short the first-day squeeze. Wait for failed high, opening-range breakdown, options liquidity/borrow confirmation, or lock-up/event supply.",
+          "Preferred bearish instrument after liquidity exists: defined-risk puts or put spreads. Outright short only if borrow is available, costs are acceptable, and stop/recall risk is explicit.",
+          "RKLB proxy rule: use RKLB only if it is clearly trading as a SpaceX sympathy proxy; otherwise it is its own company risk."
+        ],
+        "avoid": [
+          "Unlimited market orders on the first print.",
+          "Naked shorting low-float IPO strength before the tape breaks.",
+          "Using leveraged ETFs as a substitute for a clean SpaceX view unless holdings/exposure match the trade."
+        ],
+        "sources": [
+          "https://www.sec.gov/Archives/edgar/data/1181412/000162828026040364/spaceexplorationtechnologib.htm"
+        ]
+      }
+    },
+    {
+      "source": "watchlist_event",
+      "score": 85,
+      "title": "SPACEX: SpaceX final prospectus and lock-up calendar rebuild (2026-06-12)",
+      "url": "https://www.sec.gov/Archives/edgar/data/1181412/000162828026040364/spaceexplorationtechnologib.htm",
+      "metadata": {
+        "ticker": "SPACEX",
+        "event_date": "2026-06-12",
+        "days_until_event": 1,
+        "note": "The June 3, 2026 S-1/A describes 180-day lock-up shares with timed automatic releases, plus a 366-day lock-up for Musk's shares. The actual calendar must be recalculated from the final prospectus date.",
+        "process": [
+          "After final 424B4 posts, calculate 70, 90, 105, 120, 135, 180, 280, 340, and 366 days after the final prospectus date.",
+          "Track Q2 2026 earnings release as the first major release trigger: up to 20% of 180-day lock-up shares, plus another 10% if closing price is at least 30% above IPO price for five of ten trading days.",
+          "Track Q3 2026 earnings release and the 180-day backstop as the main post-mania supply window.",
+          "If final prospectus date is 2026-06-12, provisional fixed dates are 2026-08-21, 2026-09-10, 2026-09-25, 2026-10-10, 2026-10-25, 2026-12-09, and 2027-06-13."
+        ],
+        "avoid": [
+          "Treating June 3 preliminary S-1/A dates as final lock-up dates.",
+          "Building the put/short leg without the final release calendar."
+        ],
+        "sources": [
+          "https://www.sec.gov/Archives/edgar/data/1181412/000162828026040364/spaceexplorationtechnologib.htm"
+        ]
+      }
+    },
+    {
+      "source": "watchlist_event",
+      "score": 85,
+      "title": "RKLB: Rocket Lab SpaceX proxy instrument check (2026-06-12)",
+      "url": "https://www.sec.gov/Archives/edgar/data/1181412/000162828026040364/spaceexplorationtechnologib.htm",
+      "metadata": {
+        "ticker": "RKLB",
+        "event_date": "2026-06-12",
+        "days_until_event": 1,
+        "note": "RKLB is a possible public-market proxy for SpaceX IPO risk, but it is not the same business or supply event. Instrument choice must be decided after seeing price action, borrow, and options liquidity.",
+        "process": [
+          "Compare RKLB reaction to SpaceX opening move and space-sector ETFs before using it as a proxy.",
+          "Preferred proxy instrument: RKLB put spread if options are liquid and IV is not prohibitive; outright short only with borrow/cost/stop checked.",
+          "Avoid leveraged ETFs unless the ETF holdings and liquidity map cleanly to the SpaceX sympathy trade."
+        ],
+        "avoid": [
+          "Shorting RKLB just because SpaceX is expensive.",
+          "Using RKLB proxy exposure if it is moving on Rocket Lab-specific news."
+        ],
+        "sources": [
+          "https://www.sec.gov/Archives/edgar/data/1181412/000162828026040364/spaceexplorationtechnologib.htm"
+        ]
+      }
+    },
+    {
+      "source": "watchlist_event",
+      "score": 65,
+      "title": "GENB: Generate Biomedicines IPO lock-up overhang (2026-08-26)",
+      "url": "https://www.marketbeat.com/stocks/NASDAQ/GENB/",
+      "metadata": {
+        "ticker": "GENB",
+        "event_date": "2026-08-26",
+        "days_until_event": 76,
+        "note": "User-supplied setup: GENB was below its $16 IPO price at about $12.90 when checked, with roughly $1.65B market cap. The key issue is potential supply: 103.1M restricted shares may become sellable after the August 2026 lock-up, versus 25M initially liquid IPO shares, plus 94.3M registration-rights shares. Revalidate current price, float, registration status, and lock-up timing before making any trading decision.",
+        "process": [
+          "Now to 2026-08-26: watchlist only; no meaningful size.",
+          "2026-08-26 to 2026-09-15: watch volume, block-sale/news flow, resale-registration panic, and whether price stops making new lows.",
+          "After the review window: consider only if the thesis still holds and there is a real catalyst or research reason."
+        ],
+        "avoid": [
+          "Buying only because NVIDIA disclosed a small position.",
+          "Buying only because the IPO price is above the current price."
+        ],
+        "sources": [
+          "https://www.marketbeat.com/stocks/NASDAQ/GENB/",
+          "https://www.sec.gov/Archives/edgar/data/2100782/000119312526210059/ck0002100782-20260331.htm"
+        ]
+      }
+    }
+  ],
+  "executive_summary": {
+    "bullets": [
+      "No fresh high-signal stories survived quality gating; review raw tape and source health below."
+    ],
+    "top_stories": [],
+    "top_topics": []
+  },
+  "ranked_twitter_following": [],
+  "top_news_and_tickers": {
+    "top_news": [],
+    "top_tickers": []
+  }
+}

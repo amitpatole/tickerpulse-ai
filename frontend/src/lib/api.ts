@@ -12,6 +12,7 @@ import type {
   NewsArticle,
   Alert,
   CostSummary,
+  AIInfraUpdate,
   AIProvider,
   HealthCheck,
   ResearchBrief,
@@ -152,6 +153,10 @@ export async function getAgentRuns(limit = 50): Promise<AgentRun[]> {
 
 export async function getCostSummary(days = 30): Promise<CostSummary> {
   return request<CostSummary>(`/api/agents/costs?days=${days}`);
+}
+
+export async function getAIInfraUpdate(): Promise<AIInfraUpdate> {
+  return request<AIInfraUpdate>('/api/ai-infra-update');
 }
 
 // ---- Scheduler ----

@@ -2,6 +2,7 @@
 
 import Header from '@/components/layout/Header';
 import KPICards from '@/components/dashboard/KPICards';
+import AIInfraPanel from '@/components/dashboard/AIInfraPanel';
 import StockGrid from '@/components/dashboard/StockGrid';
 import NewsFeed from '@/components/dashboard/NewsFeed';
 
@@ -13,6 +14,10 @@ export default function DashboardPage() {
       <div className="flex-1 p-6">
         {/* KPI Cards Row */}
         <KPICards />
+
+        <div className="mt-6">
+          <AIInfraPanel />
+        </div>
 
         {/* Main Content: Stock Grid + News Feed */}
         <div className="mt-6 grid grid-cols-1 gap-6 xl:grid-cols-3">

@@ -322,19 +322,13 @@ class InvestigatorAgent(BaseAgent):
     def _generate_ai_summary(self, ticker_reports: List[Dict[str, Any]],
                              anomalies: List[Dict[str, Any]]) -> tuple:
         """Generate AI summary. Returns (summary_text, tokens_in, tokens_out)."""
-        try:
-            from backend.config import Config
-            api_key = Config.ANTHROPIC_API_KEY
-        except ImportError:
-            api_key = ""
+        from backend.agents.ai_provider_resolver import resolve_agent_ai_provider
 
-        if not api_key:
+        resolved = resolve_agent_ai_provider(self.config)
+        if not resolved:
             return "", 0, 0
 
-        from backend.core.ai_providers import AIProviderFactory
-        provider = AIProviderFactory.create_provider("anthropic", api_key, self.config.model)
-        if not provider:
-            return "", 0, 0
+        provider, _model = resolved
 
         # Build compact context
         lines = []

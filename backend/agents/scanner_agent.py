@@ -62,10 +62,12 @@ class ScannerAgent(BaseAgent):
             tickers: list[str] -- override the list of tickers to scan
             period: str -- technical analysis period (default '3mo')
             top_n: int -- number of top results to return (default 10)
+            ai_summary: bool -- whether to call the configured AI provider (default True)
         """
         inputs = inputs or {}
         period = inputs.get("period", "3mo")
         top_n = inputs.get("top_n", 10)
+        ai_summary_enabled = inputs.get("ai_summary", True)
 
         # 1. Get list of tickers to scan
         tickers = inputs.get("tickers")
@@ -109,9 +111,12 @@ class ScannerAgent(BaseAgent):
         # 4. Use AI to summarize the scan (optional -- only if API key present)
         ai_summary = ""
         try:
-            ai_summary, tokens_in, tokens_out = self._generate_ai_summary(top_results, len(tickers))
-            total_tokens_in += tokens_in
-            total_tokens_out += tokens_out
+            if ai_summary_enabled:
+                ai_summary, tokens_in, tokens_out = self._generate_ai_summary(top_results, len(tickers))
+                total_tokens_in += tokens_in
+                total_tokens_out += tokens_out
+            else:
+                ai_summary = self._generate_fallback_summary(top_results, len(tickers))
         except Exception as e:
             logger.warning(f"Scanner AI summary failed (non-critical): {e}")
             ai_summary = self._generate_fallback_summary(top_results, len(tickers))
@@ -277,21 +282,15 @@ class ScannerAgent(BaseAgent):
         return max(0, min(100, score))
 
     def _generate_ai_summary(self, top_results: List[Dict], total_scanned: int) -> tuple:
-        """Generate an AI-powered summary using Anthropic's Haiku model.
+        """Generate an AI-powered summary using the configured AI provider.
         Returns (summary_text, tokens_in, tokens_out)."""
-        try:
-            from backend.config import Config
-            api_key = Config.ANTHROPIC_API_KEY
-        except ImportError:
-            api_key = ""
+        from backend.agents.ai_provider_resolver import resolve_agent_ai_provider
 
-        if not api_key:
+        resolved = resolve_agent_ai_provider(self.config)
+        if not resolved:
             return self._generate_fallback_summary(top_results, total_scanned), 0, 0
 
-        from backend.core.ai_providers import AIProviderFactory
-        provider = AIProviderFactory.create_provider("anthropic", api_key, self.config.model)
-        if not provider:
-            return self._generate_fallback_summary(top_results, total_scanned), 0, 0
+        provider, _model = resolved
 
         # Build prompt
         top_lines = []

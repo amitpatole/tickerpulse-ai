@@ -8,6 +8,8 @@ flask-apscheduler>=1.13.0
 
 # HTTP Requests
 requests>=2.31.0
+python-dotenv>=1.0.0
+PyYAML>=6.0.1
 
 # RSS Feed Parsing
 feedparser>=6.0.10
@@ -15,6 +17,12 @@ feedparser>=6.0.10
 # Web Scraping
 beautifulsoup4>=4.12.2
 lxml>=4.9.3
+httpx[socks]>=0.28.1
+filetype>=1.2.0
+pyotp>=2.9.0
+webvtt-py>=0.5.1
+m3u8>=6.0.0
+Js2Py-3.13>=0.74.1
 
 # Reddit API (optional - for authenticated social media monitoring)
 praw>=7.7.1

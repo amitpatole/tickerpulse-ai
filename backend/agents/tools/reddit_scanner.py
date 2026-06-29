@@ -157,15 +157,23 @@ class RedditScanner(_CrewAIBaseTool):
 
         all_posts: List[Dict[str, Any]] = []
         subreddit_counts: Dict[str, int] = {}
+        errors: List[Dict[str, Any]] = []
 
         for sub_name in subreddits:
             try:
-                posts = self._search_subreddit(session, sub_name, ticker, limit)
+                posts, error = self._search_subreddit(session, sub_name, ticker, limit)
                 subreddit_counts[sub_name] = len(posts)
                 all_posts.extend(posts)
+                if error:
+                    errors.append(error)
             except Exception as e:
                 logger.warning(f"Reddit scan failed for r/{sub_name} ({ticker}): {e}")
                 subreddit_counts[sub_name] = 0
+                errors.append({
+                    "subreddit": sub_name,
+                    "status_code": None,
+                    "message": str(e),
+                })
 
         # De-duplicate by post ID
         seen_ids = set()
@@ -200,11 +208,13 @@ class RedditScanner(_CrewAIBaseTool):
             "negative_count": negative_count,
             "neutral_count": neutral_count,
             "posts": unique_posts[:50],  # Cap at top 50 posts
-            "scanned_at": datetime.utcnow().isoformat(),
+            "source_status": "degraded" if errors else "ok",
+            "errors": errors,
+            "scanned_at": datetime.now(timezone.utc).isoformat(),
         })
 
     def _search_subreddit(self, session: requests.Session, subreddit: str,
-                          ticker: str, limit: int) -> List[Dict[str, Any]]:
+                          ticker: str, limit: int) -> tuple[List[Dict[str, Any]], Optional[Dict[str, Any]]]:
         """Search a single subreddit using the public .json endpoint."""
         _rate_limiter.wait_if_needed()
 
@@ -228,8 +238,13 @@ class RedditScanner(_CrewAIBaseTool):
             resp = session.get(url, params=params, timeout=15)
 
         if resp.status_code != 200:
-            logger.warning(f"Reddit returned {resp.status_code} for r/{subreddit}")
-            return []
+            message = f"Reddit returned {resp.status_code} for r/{subreddit}"
+            logger.warning(message)
+            return [], {
+                "subreddit": subreddit,
+                "status_code": resp.status_code,
+                "message": message,
+            }
 
         data = resp.json()
         children = data.get("data", {}).get("children", [])
@@ -286,4 +301,4 @@ class RedditScanner(_CrewAIBaseTool):
         # Small delay between subreddit requests
         time.sleep(1.2)
 
-        return posts
+        return posts, None

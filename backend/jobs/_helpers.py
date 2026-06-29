@@ -21,8 +21,8 @@ def _get_agent_registry():
     This avoids circular imports -- jobs are registered at module level but
     the agent registry may not yet be fully populated.
     """
-    from backend.agents.base import AgentRegistry
-    return AgentRegistry(db_path=Config.DB_PATH)
+    from backend.agents import create_default_agents
+    return create_default_agents(db_path=Config.DB_PATH)
 
 
 def _send_sse(event_type: str, data: dict) -> None:

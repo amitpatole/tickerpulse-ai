@@ -176,26 +176,19 @@ class ResearcherAgent(BaseAgent):
         context = self._build_context(ticker, data_bundle)
 
         # Try AI generation first
-        try:
-            from backend.config import Config
-            api_key = Config.ANTHROPIC_API_KEY
-        except ImportError:
-            api_key = ""
+        from backend.agents.ai_provider_resolver import resolve_agent_ai_provider
+        resolved = resolve_agent_ai_provider(self.config)
 
-        if api_key:
+        if resolved:
             try:
-                from backend.core.ai_providers import AIProviderFactory
-                provider = AIProviderFactory.create_provider(
-                    "anthropic", api_key, self.config.model
-                )
-                if provider:
-                    prompt = self._build_prompt(ticker, context)
-                    response = provider.generate_analysis(prompt, max_tokens=self.config.max_tokens)
+                provider, _model = resolved
+                prompt = self._build_prompt(ticker, context)
+                response = provider.generate_analysis(prompt, max_tokens=self.config.max_tokens)
 
-                    if response and not response.startswith("Error:"):
-                        tokens_in = len(prompt) // 4
-                        tokens_out = len(response) // 4
-                        return response, tokens_in, tokens_out
+                if response and not response.startswith("Error:"):
+                    tokens_in = len(prompt) // 4
+                    tokens_out = len(response) // 4
+                    return response, tokens_in, tokens_out
             except Exception as e:
                 logger.warning(f"Researcher: AI generation failed: {e}")
 

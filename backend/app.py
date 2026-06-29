@@ -203,6 +203,7 @@ def _register_blueprints(app: Flask) -> None:
         'backend.api.research':         'research_bp',
         'backend.api.chat':             'chat_bp',
         'backend.api.settings':         'settings_bp',
+        'backend.api.market_sweep':     'market_sweep_bp',
         'backend.api.scheduler_routes': 'scheduler_bp',
         'backend.api.downloads':        'bp',
     }
