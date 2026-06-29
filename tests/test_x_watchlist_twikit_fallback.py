@@ -119,6 +119,16 @@ class _TwscrapeRunner:
         ][:limit]
 
 
+class _RecordingTwscrapeCliRunner(TwscrapeRunner):
+    def __init__(self, rows: list[dict[str, object]]) -> None:
+        self.rows = rows
+        self.calls: list[list[str]] = []
+
+    def _run_json_lines(self, args: list[str]) -> list[dict[str, object]]:
+        self.calls.append(args)
+        return [dict(row) for row in self.rows]
+
+
 class _RateLimitedTwikitRunner(_WorkingTwikitRunner):
     def user_by_login(self, handle: str) -> dict[str, object]:
         self.calls.append(("user_by_login", handle))
@@ -212,12 +222,12 @@ class TwikitFallbackRunnerTest(unittest.TestCase):
         self.assertIsNotNone(runner_class, "TwikitAccountRunner must exist")
         return runner_class
 
-    def test_default_runner_uses_twikit_account_primary_and_twscrape_backup(self) -> None:
+    def test_default_runner_uses_twscrape_primary_and_twikit_account_backup(self) -> None:
         runner = FallbackXRunner()
         runner_class = self._twikit_account_runner_class()
 
-        self.assertIsInstance(runner.primary, runner_class)
-        self.assertIsInstance(runner.backup, TwscrapeRunner)
+        self.assertIsInstance(runner.primary, TwscrapeRunner)
+        self.assertIsInstance(runner.backup, runner_class)
         self.assertIs(runner.search_runner, runner.primary)
 
     def test_twikit_primary_handles_account_calls_without_twscrape(self) -> None:
@@ -273,6 +283,28 @@ class TwikitFallbackRunnerTest(unittest.TestCase):
 
         self.assertEqual(primary.calls, [("search", "AI")])
         self.assertEqual(backup.calls, [("search", "AI")])
+
+    def test_twscrape_runner_normalizes_list_timeline_authors(self) -> None:
+        runner = _RecordingTwscrapeCliRunner(
+            [
+                {
+                    "id": "tweet-1",
+                    "id_str": "tweet-1",
+                    "rawContent": "HBM supply update",
+                    "date": "2026-06-13T12:00:00+00:00",
+                    "url": "https://x.com/semisource/status/tweet-1",
+                    "user": {"username": "semisource", "id_str": "uid-1"},
+                },
+            ]
+        )
+
+        tweets = runner.list_tweets("L123", 1)
+
+        self.assertEqual(runner.calls, [["list_timeline", "L123", "--limit", "1"]])
+        self.assertEqual(tweets[0]["id_str"], "tweet-1")
+        self.assertEqual(tweets[0]["author_screen_name"], "semisource")
+        self.assertEqual(tweets[0]["author_id"], "uid-1")
+        self.assertEqual(tweets[0]["source_backend"], "twscrape")
 
     def test_collector_uses_shared_watchlist_with_twikit_primary_runner(self) -> None:
         config = XWatchlistConfig(

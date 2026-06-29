@@ -73,6 +73,7 @@ def run_news_layer_review(
     ai_infra: Callable[[], Mapping[str, object]] | None = None,
     token_usage: Callable[[], Mapping[str, object]] | None = None,
     breadth_monitor: Callable[[], Mapping[str, object]] | None = None,
+    mstr_nav_monitor: Callable[[], Mapping[str, object]] | None = None,
     news_max_tickers: int = 12,
 ) -> dict[str, object]:
     now = generated_at or datetime.now(timezone.utc)
@@ -103,6 +104,7 @@ def run_news_layer_review(
     gamma_exposure = _build_gamma_exposure(gamma_monitor, x_collector, now=now)
     news_wire = _build_news_wire(news_collector, x_collector, news_max_tickers=news_max_tickers)
     market_tape = _build_market_tape(tape_snapshot, x_collector, now=now)
+    mstr_nav = _build_mstr_nav(mstr_nav_monitor, x_collector, now=now)
     ai_infra_update = _build_ai_infra(ai_infra, x_collector, now=now)
     token_usage_update = _build_token_usage(token_usage, x_collector, now=now)
     breadth = _build_breadth(breadth_monitor, x_collector)
@@ -112,7 +114,7 @@ def run_news_layer_review(
     top_news_and_tickers = _top_news_and_tickers_payload(accounts, searches, news_wire, generated_at=now.isoformat())
 
     result: dict[str, object] = {
-        "schema_version": 4,
+        "schema_version": 5,
         "generated_at": now.isoformat(),
         "source_status": _combined_status(accounts, searches, news_wire),
         "session_guard": session_guard,
@@ -120,6 +122,7 @@ def run_news_layer_review(
         "searches": searches,
         "news_wire": news_wire,
         "market_tape": market_tape,
+        "mstr_nav_monitor": mstr_nav,
         "ai_infra_update": ai_infra_update,
         "token_usage_update": token_usage_update,
         "bernstein_monitor": bernstein_monitor,
@@ -152,6 +155,7 @@ def format_news_layer_report(result: Mapping[str, object]) -> str:
         f"Source status: {result.get('source_status', 'unknown')}",
     ]
     lines.extend(_market_tape_lines(_mapping(result.get("market_tape"))))
+    lines.extend(_mstr_nav_lines(_mapping(result.get("mstr_nav_monitor"))))
     lines.extend(_ranked_twitter_following_lines(accounts, generated_at=generated_at))
     lines.extend(_top_news_and_ticker_lines(accounts, searches, generated_at=generated_at))
     lines.extend(_vol_structure_lines(_mapping(result.get("vol_structure_monitor"))))
@@ -173,6 +177,7 @@ def format_news_layer_report(result: Mapping[str, object]) -> str:
             _mapping(result.get("session_guard")),
             news_wire=_mapping(result.get("news_wire")),
             market_tape=_mapping(result.get("market_tape")),
+            mstr_nav=_mapping(result.get("mstr_nav_monitor")),
             ai_infra=_mapping(result.get("ai_infra_update")),
         )
     )
@@ -195,6 +200,7 @@ def _write_artifacts(
         "schema_version": result.get("schema_version"),
         "news_wire": result.get("news_wire"),
         "market_tape": result.get("market_tape"),
+        "mstr_nav_monitor": result.get("mstr_nav_monitor"),
         "ai_infra_update": result.get("ai_infra_update"),
         "token_usage_update": result.get("token_usage_update"),
         "session_guard": result.get("session_guard"),
@@ -392,6 +398,32 @@ def _build_market_tape(
         return {"source_status": "error", "generated_at": now.isoformat(), "as_of": "", "rows": [], "errors": [{"source": "tape", "message": str(exc)}]}
 
 
+def _build_mstr_nav(
+    mstr_nav_monitor: Callable[[], Mapping[str, object]] | None,
+    x_collector: NewsLayerCollectorProtocol | None,
+    *,
+    now: datetime,
+) -> dict[str, object]:
+    if mstr_nav_monitor is not None:
+        try:
+            return dict(mstr_nav_monitor())
+        except Exception as exc:
+            return _lane_error_payload("mstr_nav", f"injected MSTR NAV monitor failed: {exc}")
+    if x_collector is not None:
+        return {
+            "source_status": "skipped_injected_collector",
+            "signal": "not_run",
+            "errors": [],
+            "generated_at": now.isoformat(),
+        }
+    try:
+        from backend.services.mstr_nav_monitor import build_mstr_nav_monitor
+
+        return dict(build_mstr_nav_monitor())
+    except Exception as exc:
+        return _lane_error_payload("mstr_nav", f"MSTR NAV monitor failed: {exc}")
+
+
 def _build_ai_infra(
     ai_infra: Callable[[], Mapping[str, object]] | None,
     x_collector: NewsLayerCollectorProtocol | None,
@@ -550,22 +582,8 @@ def _ranked_post_briefs(
     limit: int,
     generated_at: str = "",
 ) -> list[dict[str, object]]:
-    ranked = _rank_posts(
-        _fresh_posts_no_fallback(posts, generated_at=generated_at),
-        generated_at=generated_at,
-    )
+    ranked = _rank_posts(fresh_posts(posts, generated_at=generated_at), generated_at=generated_at)
     return [_post_brief(post) for post in ranked[:limit]]
-
-
-def _fresh_posts_no_fallback(
-    posts: Sequence[Mapping[str, object]],
-    *,
-    generated_at: str,
-) -> list[Mapping[str, object]]:
-    reference = parse_datetime(generated_at)
-    if reference is None:
-        return list(posts)
-    return [post for post in posts if freshness_bucket(post, reference) >= 2]
 
 
 def _top_news_and_tickers_payload(
@@ -578,10 +596,7 @@ def _top_news_and_tickers_payload(
     account_posts = _posts(accounts)
     search_posts = _posts(searches)
     news_posts = _posts(news_wire or {})
-    ticker_posts = _fresh_posts_no_fallback(
-        [*account_posts, *search_posts, *news_posts],
-        generated_at=generated_at,
-    )
+    ticker_posts = fresh_posts([*account_posts, *search_posts, *news_posts], generated_at=generated_at)
     return {
         "top_news": _ranked_post_briefs([*search_posts, *news_posts], limit=5, generated_at=generated_at),
         "top_tickers": _top_tickers(ticker_posts, limit=10),
@@ -731,6 +746,43 @@ def _market_tape_lines(tape: Mapping[str, object]) -> list[str]:
     return lines
 
 
+def _mstr_nav_lines(payload: Mapping[str, object]) -> list[str]:
+    lines = [
+        "",
+        "## MSTR NAV Discount Monitor",
+        f"- Status: {payload.get('source_status', 'unknown')}; signal {payload.get('signal', 'unknown')}",
+    ]
+    status = str(payload.get("source_status") or "unknown")
+    if status == "ok":
+        lines.append(
+            f"- BTC ${_fmt_whole(payload.get('btc_price'))}; holdings "
+            f"{_fmt_whole(payload.get('btc_holdings'))}; BTC NAV {_fmt_usd_b(payload.get('btc_nav_m'))}"
+        )
+        lines.append(
+            f"- Common NAV {_fmt_usd_b(payload.get('common_nav_m'))}; market cap "
+            f"{_fmt_usd_b(payload.get('market_cap_m'))}; Common discount "
+            f"{_fmt_pct(payload.get('common_discount_pct'))}; Gross BTC discount "
+            f"{_fmt_pct(payload.get('gross_btc_discount_pct'))}"
+        )
+        lines.append(
+            f"- Financing stack: USD reserve {_fmt_usd_b(payload.get('usd_reserve_m'))}; "
+            f"debt {_fmt_usd_b(payload.get('debt_m'))}; preferred notional "
+            f"{_fmt_usd_b(payload.get('pref_m'))}; common BTC breakeven "
+            f"${_fmt_whole(payload.get('common_breakeven_btc'))}"
+        )
+        stable = "yes" if payload.get("btc_stable") else "no"
+        lines.append(
+            f"- BTC stable gate: {stable}; discount must pair with BTC stabilization before action."
+        )
+        lines.append(
+            f"- Timestamps: MSTR {payload.get('mstr_timestamp_utc') or 'n/a'}; "
+            f"BTC {payload.get('btc_timestamp') or 'n/a'}"
+        )
+    for error in _errors(payload):
+        lines.append(f"- MSTR NAV error: {error}")
+    return lines
+
+
 def _ai_infra_lines(payload: Mapping[str, object]) -> list[str]:
     staleness = _mapping(payload.get("staleness"))
     title = "## AI Infra (GPU rental)"
@@ -823,6 +875,20 @@ def _fmt_num(value: object) -> str:
         return "n/a"
 
 
+def _fmt_whole(value: object) -> str:
+    try:
+        return f"{float(value):,.0f}"  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return "n/a"
+
+
+def _fmt_usd_b(value_m: object) -> str:
+    try:
+        return f"${float(value_m) / 1000.0:,.2f}B"  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return "n/a"
+
+
 def _fmt_signed_num(value: object) -> str:
     try:
         return f"{float(value):+.2f}"  # type: ignore[arg-type]
@@ -834,10 +900,7 @@ def _vol_structure_lines(monitor: Mapping[str, object]) -> list[str]:
     lines = ["", "## Leverage & Correlation Monitor"]
     status = str(monitor.get("status") or "not run")
     overall = str(monitor.get("overall_level") or "unknown")
-    generated_at = str(monitor.get("generated_at") or "")
-    run_date = generated_at[:10] if len(generated_at) >= 10 else ""
-    run_text = f"; run {run_date}" if run_date else ""
-    lines.append(f"- Status: {status}; level: {overall}{run_text}")
+    lines.append(f"- Status: {status}; level: {overall}")
     headline = str(monitor.get("headline") or "")
     if headline:
         lines.append(f"- {headline}")
@@ -853,7 +916,7 @@ def _vol_structure_lines(monitor: Mapping[str, object]) -> list[str]:
             continue
         live = info.get("live")
         live_text = f", live {live}" if live is not None else ""
-        full_start = info.get("full_start")
+        full_start = info.get("full_start") if info.get("pctile_2023") is not None else None
         full_start_text = f"; full since {full_start}" if full_start else ""
         lines.append(
             f"- {name} {info.get('close')} ({descriptor}; close {info.get('close_date')}"
@@ -1014,7 +1077,7 @@ def _ranked_twitter_following_lines(
     *,
     generated_at: str,
 ) -> list[str]:
-    account_posts = _fresh_posts_no_fallback(_posts(accounts), generated_at=generated_at)
+    account_posts = fresh_posts(_posts(accounts), generated_at=generated_at)
     posts = _rank_posts(account_posts, generated_at=generated_at)
     lines = ["", "## Ranked Twitter Following"]
     if not posts:
@@ -1045,11 +1108,8 @@ def _top_news_and_ticker_lines(
     generated_at: str,
 ) -> list[str]:
     account_posts = _posts(accounts)
-    search_posts = _rank_posts(
-        _fresh_posts_no_fallback(_posts(searches), generated_at=generated_at),
-        generated_at=generated_at,
-    )
-    ticker_posts = _fresh_posts_no_fallback([*account_posts, *search_posts], generated_at=generated_at)
+    search_posts = _rank_posts(_posts(searches), generated_at=generated_at)
+    ticker_posts = fresh_posts([*account_posts, *search_posts], generated_at=generated_at)
     top_tickers = _top_tickers(ticker_posts, limit=10)
     lines = ["", "## Top News And Tickers"]
     if top_tickers:
@@ -1107,12 +1167,14 @@ def _source_health_lines(
     *,
     news_wire: Mapping[str, object] | None = None,
     market_tape: Mapping[str, object] | None = None,
+    mstr_nav: Mapping[str, object] | None = None,
     ai_infra: Mapping[str, object] | None = None,
 ) -> list[str]:
     account_posts = _posts(accounts)
     search_posts = _posts(searches)
     news = news_wire or {}
     tape = market_tape or {}
+    mstr = mstr_nav or {}
     infra = ai_infra or {}
     guard = session_guard or {}
     guard_status = str(guard.get("status") or "not run")
@@ -1128,6 +1190,7 @@ def _source_health_lines(
         f"- X searches: {searches.get('source_status', 'unknown')}; checked {searches.get('queries_checked', 0)}",
         f"- News wire: {news.get('source_status', 'skipped')}; tickers {news.get('tickers_checked', 0)}, articles {news.get('articles_collected', 0)}",
         f"- Market tape: {tape.get('source_status', 'skipped')}; rows {len(tape_rows) if isinstance(tape_rows, list) else 0}",
+        f"- MSTR NAV: {mstr.get('source_status', 'skipped')}; signal {mstr.get('signal', 'n/a')}",
         f"- AI infra: {infra.get('source_status', 'skipped')}",
         f"- Posts reviewed: {len(account_posts)} followed-account posts, {len(search_posts)} search posts, {len(_posts(news))} wire articles.",
         guard_line,
@@ -1140,6 +1203,8 @@ def _source_health_lines(
         lines.append(f"- News wire error: {error}")
     for error in _errors(tape):
         lines.append(f"- Tape error: {error}")
+    for error in _errors(mstr):
+        lines.append(f"- MSTR NAV error: {error}")
     for error in _errors(infra):
         lines.append(f"- AI infra error: {error}")
     return lines

@@ -1,92 +1,149 @@
 # User-curated dashboard watchlist seed.
 # Load these into the stocks table for the active dashboard/sweep watchlist.
-updated_at: '2026-06-11'
+updated_at: '2026-06-28'
 items:
 - ticker: 9984.T
   name: SoftBank Group Corp
   market: Japan
   source_symbol: '9984'
-  bucket: core_ai
+  bucket: core_other
 - ticker: NVDA
   name: NVIDIA Corporation
   market: US
-  bucket: core_ai
+  bucket: semis_major
+  extra_buckets:
+  - mag7
 - ticker: AAPL
   name: Apple Inc.
   market: US
-  bucket: core_ai
+  bucket: mag7
 - ticker: GOOGL
   name: Alphabet Inc.
   market: US
-  bucket: core_ai
+  bucket: mag7
 - ticker: MSFT
   name: Microsoft Corporation
   market: US
-  bucket: core_ai
+  bucket: mag7
 - ticker: AMZN
   name: Amazon.com Inc.
   market: US
-  bucket: core_ai
+  bucket: mag7
 - ticker: AVGO
   name: Broadcom Inc.
   market: US
-  bucket: core_ai
+  bucket: semis_major
 - ticker: META
   name: Meta Platforms Inc.
   market: US
-  bucket: core_ai
+  bucket: mag7
 - ticker: TSLA
   name: Tesla Inc.
   market: US
-  bucket: core_ai
+  bucket: mag7
 - ticker: MU
   name: Micron Technology Inc.
   market: US
   bucket: memory
+- ticker: DRAM
+  name: Roundhill Memory ETF
+  market: US
+  bucket: memory
+  news: false
+- ticker: EWY
+  name: iShares MSCI South Korea ETF
+  market: US
+  bucket: memory
+  news: false
+- ticker: 000660.KS
+  name: SK hynix Inc.
+  market: South Korea
+  bucket: memory
+  news: false
+- ticker: 005930.KS
+  name: Samsung Electronics Co. Ltd.
+  market: South Korea
+  bucket: memory
+  news: false
+- ticker: SNDK
+  name: SanDisk Corporation
+  market: US
+  bucket: memory
+  news: false
+- ticker: ALAB
+  name: Astera Labs Inc.
+  market: US
+  bucket: semis_major
+  news: false
+- ticker: MRVL
+  name: Marvell Technology Inc.
+  market: US
+  bucket: semis_major
+  news: false
 - ticker: WMT
   name: Walmart Inc.
   market: US
-  bucket: core_other
+  bucket: consumer
 - ticker: AMD
   name: Advanced Micro Devices Inc.
   market: US
-  bucket: core_ai
+  bucket: semis_major
 - ticker: ORCL
   name: Oracle Corporation
   market: US
-  bucket: core_ai
+  bucket: neo_cloud
+- ticker: TSM
+  name: Taiwan Semiconductor Manufacturing Company Limited
+  market: US
+  bucket: semis_major
+  news: false
 - ticker: INTC
   name: Intel Corporation
   market: US
-  bucket: core_ai
+  bucket: semis_major
+- ticker: QCOM
+  name: QUALCOMM Incorporated
+  market: US
+  bucket: semis_major
+  news: false
+- ticker: TXN
+  name: Texas Instruments Incorporated
+  market: US
+  bucket: semis_major
+  news: false
+- ticker: ADI
+  name: Analog Devices Inc.
+  market: US
+  bucket: semis_major
+  news: false
 - ticker: COST
   name: Costco Wholesale Corporation
   market: US
-  bucket: core_other
+  bucket: consumer
 - ticker: ARM
   name: Arm Holdings plc
   market: US
-  bucket: core_ai
+  bucket: semis_major
 - ticker: NFLX
   name: Netflix Inc.
   market: US
-  bucket: core_ai
+  bucket: consumer
 - ticker: PLTR
   name: Palantir Technologies Inc.
   market: US
-  bucket: core_ai
+  bucket: software
 - ticker: CRWD
   name: CrowdStrike Holdings Inc.
   market: US
-  bucket: core_ai
+  bucket: software
 - ticker: CRM
   name: Salesforce Inc.
   market: US
-  bucket: core_ai
+  bucket: software
 - ticker: NOW
   name: ServiceNow Inc.
   market: US
-  bucket: core_ai
+  bucket: software
 - ticker: BE
   name: Bloom Energy Corporation
   market: US
@@ -98,24 +155,51 @@ items:
 - ticker: LITE
   name: Lumentum Holdings Inc.
   market: US
-  bucket: core_infra
+  bucket: photonics_cpo
 - ticker: NKE
   name: NIKE Inc.
   market: US
-  bucket: core_other
+  bucket: consumer
 - ticker: NBIS
   name: Nebius Group N.V.
   market: US
-  bucket: core_infra
+  bucket: neo_cloud
 - ticker: CRWV
   name: CoreWeave Inc.
   market: US
-  bucket: core_infra
+  bucket: neo_cloud
+- ticker: IREN
+  name: IREN Limited
+  market: US
+  bucket: neo_cloud
+  news: false
+- ticker: APLD
+  name: Applied Digital Corporation
+  market: US
+  bucket: neo_cloud
+  news: false
+- ticker: CORZ
+  name: Core Scientific Inc.
+  market: US
+  bucket: neo_cloud
+  news: false
+- ticker: CIFR
+  name: Cipher Mining Inc.
+  market: US
+  bucket: neo_cloud
+  news: false
+- ticker: WULF
+  name: TeraWulf Inc.
+  market: US
+  bucket: neo_cloud
+  news: false
 - ticker: SPCX
   name: SpaceX (Space Exploration Technologies Corp.)
   market: US
   source_symbol: SPACE X
-  bucket: ipos
+  bucket: core_space
+  extra_buckets:
+  - ipos
 - ticker: IBIT
   name: iShares Bitcoin Trust ETF
   market: US
@@ -135,16 +219,16 @@ items:
 - ticker: RDDT
   name: Reddit Inc.
   market: US
-  bucket: core_other
+  bucket: consumer
 - ticker: SOUN
   name: SoundHound AI Inc.
   market: US
-  bucket: core_infra
+  bucket: software
 - ticker: SIVE.ST
   name: Sivers Semiconductors AB
   market: Sweden
   source_symbol: SIVE
-  bucket: core_infra
+  bucket: photonics_cpo
 - ticker: CRCL
   name: Circle Internet Group Inc.
   market: US
@@ -152,7 +236,17 @@ items:
 - ticker: AAOI
   name: Applied Optoelectronics Inc.
   market: US
+  bucket: photonics_cpo
+- ticker: ANET
+  name: Arista Networks Inc.
+  market: US
   bucket: core_infra
+  news: false
+- ticker: COHR
+  name: Coherent Corp.
+  market: US
+  bucket: photonics_cpo
+  news: false
 - ticker: WOLF
   name: Wolfspeed Inc.
   market: US
@@ -161,6 +255,11 @@ items:
   name: Rocket Lab USA Inc.
   market: US
   bucket: core_space
+- ticker: ASTS
+  name: AST SpaceMobile Inc.
+  market: US
+  bucket: core_space
+  news: false
 - ticker: POWL
   name: Powell Industries Inc.
   market: US
@@ -182,17 +281,17 @@ items:
 - ticker: JPM
   name: JPMorgan Chase & Co.
   market: US
-  bucket: core_other
+  bucket: financials
 - ticker: C
   name: Citigroup Inc.
   market: US
   source_symbol: CITI
-  bucket: core_other
+  bucket: financials
 - ticker: AAL
   name: American Airlines Group Inc.
   market: US
   source_symbol: AMERICA AIRLINE
-  bucket: core_other
+  bucket: consumer
 - ticker: GENB
   name: Generate Biomedicines Inc.
   market: US
@@ -286,26 +385,62 @@ items:
   bucket: power800v
   news: false
 - ticker: VICR
-  bucket: passive
-  news: false
-- ticker: VSH
-  bucket: passive
+  bucket: core_power
   news: false
 - ticker: CRDO
-  bucket: passive
+  bucket: photonics_cpo
   news: false
 - ticker: GLW
-  bucket: passive
-  news: false
-- ticker: KN
-  bucket: passive
-  news: false
-- ticker: CTS
-  bucket: passive
+  bucket: photonics_cpo
   news: false
 - ticker: BELFB
-  bucket: passive
+  bucket: core_power
   news: false
 - ticker: 285A.T
   bucket: memory
+  news: false
+- ticker: CAD=X
+  name: USD/CAD
+  market: FX
+  bucket: fx_cad
+  news: false
+- ticker: EURCAD=X
+  name: EUR/CAD
+  market: FX
+  bucket: fx_cad
+  news: false
+- ticker: GBPCAD=X
+  name: GBP/CAD
+  market: FX
+  bucket: fx_cad
+  news: false
+- ticker: GC=F
+  name: Gold futures
+  market: Commodities
+  bucket: commodities
+  news: false
+- ticker: SI=F
+  name: Silver futures
+  market: Commodities
+  bucket: commodities
+  news: false
+- ticker: HG=F
+  name: Copper futures
+  market: Commodities
+  bucket: commodities
+  news: false
+- ticker: CL=F
+  name: WTI crude oil futures
+  market: Commodities
+  bucket: commodities
+  news: false
+- ticker: BZ=F
+  name: Brent crude oil futures
+  market: Commodities
+  bucket: commodities
+  news: false
+- ticker: NG=F
+  name: Natural gas futures
+  market: Commodities
+  bucket: commodities
   news: false

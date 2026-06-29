@@ -154,6 +154,9 @@ class TwscrapeRunnerProtocol(Protocol):
     def user_tweets(self, user_id: str, limit: int) -> list[dict[str, object]]:
         raise NotImplementedError
 
+    def list_tweets(self, list_id: str, limit: int) -> list[dict[str, object]]:
+        raise NotImplementedError
+
     def search(self, query: str, limit: int) -> list[dict[str, object]]:
         raise NotImplementedError
 
@@ -165,17 +168,21 @@ class TwscrapeRunner:
         self.repo_path = repo_path or Path(os.getenv("TWSCRAPE_REPO", r"C:\Repos\twscrape"))
         self.timeout_seconds = timeout_seconds
 
-    def user_by_login(self, handle: str) -> dict:
+    def user_by_login(self, handle: str) -> dict[str, object]:
         rows = self._run_json_lines(["user_by_login", handle])
         return rows[0] if rows else {}
 
-    def user_tweets(self, user_id: str, limit: int) -> list[dict]:
+    def user_tweets(self, user_id: str, limit: int) -> list[dict[str, object]]:
         return self._run_json_lines(["user_tweets", user_id, "--limit", str(limit)])[:limit]
+
+    def list_tweets(self, list_id: str, limit: int) -> list[dict[str, object]]:
+        rows = self._run_json_lines(["list_timeline", list_id, "--limit", str(limit)])[:limit]
+        return [_twscrape_tweet_to_dict(row) for row in rows]
 
     def search(self, query: str, limit: int) -> list[dict[str, object]]:
         return self._run_json_lines(["search", query, "--limit", str(limit)])[:limit]
 
-    def _run_json_lines(self, args: list[str]) -> list[dict]:
+    def _run_json_lines(self, args: list[str]) -> list[dict[str, object]]:
         env = dict(os.environ)
         env["PYTHONUTF8"] = "1"
         env["TWS_RAISE_WHEN_NO_ACCOUNT"] = "true"
@@ -195,7 +202,7 @@ class TwscrapeRunner:
             detail = (completed.stderr or completed.stdout or "").strip()
             raise RuntimeError(detail or f"twscrape exited {completed.returncode}")
 
-        rows: list[dict] = []
+        rows: list[dict[str, object]] = []
         for line in completed.stdout.splitlines():
             stripped = line.strip()
             if not stripped or not stripped.startswith("{"):
@@ -205,7 +212,7 @@ class TwscrapeRunner:
 
 
 class FallbackXRunner:
-    """Runner chain that uses Twikit for accounts and twscrape for backup/search."""
+    """Runner chain that uses twscrape by default with Twikit as authenticated backup."""
 
     def __init__(
         self,
@@ -213,8 +220,8 @@ class FallbackXRunner:
         backup: TwscrapeRunnerProtocol | None = None,
         search_runner: TwscrapeRunnerProtocol | None = None,
     ) -> None:
-        self.primary = primary or TwikitAccountRunner()
-        self.backup = backup or TwscrapeRunner()
+        self.primary = primary or TwscrapeRunner()
+        self.backup = backup or TwikitAccountRunner()
         self.search_runner = search_runner or self.primary
         self._primary_disabled = False
         self._search_disabled = False
@@ -252,18 +259,26 @@ class FallbackXRunner:
             if self.search_runner is self.backup:
                 raise
             logger.warning(
-                "Disabling Twikit search primary for this run; using twscrape search backup: %s",
+                "Disabling X search primary for this run; using authenticated backup: %s",
                 _error_log_summary(exc),
             )
             self._search_disabled = True
             return self.backup.search(query, limit)
 
     def list_tweets(self, list_id: str, limit: int) -> list[dict[str, object]]:
-        return self.primary.list_tweets(list_id, limit)
+        if self._primary_disabled:
+            return self.backup.list_tweets(list_id, limit)
+        try:
+            return self.primary.list_tweets(list_id, limit)
+        except Exception as exc:
+            if _is_rate_limit_error(exc):
+                raise
+            self._disable_primary(exc)
+            return self.backup.list_tweets(list_id, limit)
 
     def _disable_primary(self, exc: Exception) -> None:
         self._primary_disabled = True
-        logger.warning("Disabling Twikit primary for this run; using twscrape account backup: %s", _error_log_summary(exc))
+        logger.warning("Disabling X primary for this run; using authenticated backup: %s", _error_log_summary(exc))
 
 
 class TwikitAccountRunner:
@@ -860,6 +875,21 @@ def _parse_cookie_json(raw_cookies: str) -> dict[str, str]:
 
 def _normalize_x_username(username: str) -> str:
     return username.strip().lstrip("@").lower()
+
+
+def _twscrape_tweet_to_dict(tweet: dict[str, object]) -> dict[str, object]:
+    row = dict(tweet)
+    user = row.get("user")
+    username = ""
+    author_id = ""
+    if isinstance(user, dict):
+        username = str(user.get("username") or user.get("screen_name") or "")
+        author_id = str(user.get("id_str") or user.get("id") or "")
+
+    row["author_screen_name"] = str(row.get("author_screen_name") or username)
+    row["author_id"] = str(row.get("author_id") or author_id)
+    row["source_backend"] = str(row.get("source_backend") or "twscrape")
+    return row
 
 
 def _twikit_user_to_dict(user: object) -> dict[str, object]:

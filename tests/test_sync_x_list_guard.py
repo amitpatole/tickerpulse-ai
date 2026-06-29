@@ -48,6 +48,20 @@ class SyncXListGuardTest(unittest.TestCase):
         self.assertEqual(rc, 0)
         build.assert_not_called()
 
+    def test_existing_list_dry_run_builds_client_for_read_only_diff(self):
+        class _Result(list):
+            next = None
+
+        class _Client:
+            async def get_list_members(self, list_id, count=100):
+                return _Result()
+
+        with mock.patch.object(sync_x_list, "_build_client", return_value=_Client()) as build:
+            rc = sync_x_list.main(["--username", "MingFan0", "--list-id", "123"])
+
+        self.assertEqual(rc, 0)
+        build.assert_called_once()
+
     def test_yes_flag_proceeds_to_build_client(self):
         with mock.patch.object(
             sync_x_list, "_build_client", side_effect=RuntimeError("stop before network")

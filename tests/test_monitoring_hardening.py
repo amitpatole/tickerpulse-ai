@@ -417,32 +417,47 @@ def test_x_collector_warning_logs_summarize_traceback_errors() -> None:
     assert "Traceback line 1" in result["errors"][0]["message"]
 
 
-def test_x_watchlist_config_includes_crdo_top_source_reliability_seeds() -> None:
+def test_x_watchlist_config_includes_top10_insight_reliability_scores() -> None:
+    """2026-06-14 re-grade: top10_insight accounts must load with their evidence-grade
+    reliability_score (used by /news ranking), and the cut handles must be absent."""
     from backend.services.x_watchlist import XWatchlistConfig
 
     config = XWatchlistConfig.load(REPO_ROOT / "config" / "x_watchlists.yaml")
     accounts_by_handle = {account.handle: account for account in config.accounts}
     handles = [account.handle for account in config.accounts]
     expected_scores = {
-        "citrini": 9.0,
-        "TheValueist": 8.5,
-        "JonahLupton": 8.0,
-        "CKCapitalxx": 7.8,
-        "BenBajarin": 7.5,
-        "labubu_trader": 7.2,
-        "aleabitoreddit": 7.0,
-        "RichTerry123": 6.8,
-        "ParadisLabs": 6.7,
-        "PhotonCap": 6.5,
+        "jukan05": 9.5,
+        "aleabitoreddit": 9.0,
+        "zephyr_z9": 8.5,
+        "JonahLupton": 8.5,
+        "TheValueist": 8.0,
+        "lithos_graphein": 7.5,
+        "ShanghaoJin": 7.5,
+        "SemiAnalysis_": 7.5,
+        "CKCapitalxx": 7.5,
+        "qinbafrank": 7.0,
+    }
+    cut_handles = {
+        "citrini",
+        "BenBajarin",
+        "RichTerry123",
+        "ParadisLabs",
+        "PhotonCap",
+        "dylan522p",
+        "teortaxesTex",
+        "tig88411109",
+        "dnystedt",
+        "zerohedge",
     }
 
     assert len(handles) == len(set(handles))
     for handle, score in expected_scores.items():
-        assert handle in accounts_by_handle
+        assert handle in accounts_by_handle, handle
         account = accounts_by_handle[handle]
-        assert account.reliability_score == score
-        assert account.reliability_started_at == "2026-06-10"
-        assert "CRDO" in account.reliability_basis
+        assert account.reliability_score == score, (handle, account.reliability_score)
+        assert account.reliability_basis  # provenance must be populated
+    for handle in cut_handles:
+        assert handle not in accounts_by_handle, handle
 
 
 def test_x_collector_marks_all_searches_ok_but_zero_posts_degraded() -> None:

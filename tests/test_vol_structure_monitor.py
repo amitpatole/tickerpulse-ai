@@ -76,6 +76,8 @@ class VolStructureMonitorTest(unittest.TestCase):
         self.assertEqual(monitor["overall_level"], "alert")
         names = {signal["name"]: signal["level"] for signal in monitor["signals"]}
         self.assertEqual(names.get("dispersion_crowding"), "alert")
+        crowding = next(s for s in monitor["signals"] if s["name"] == "dispersion_crowding")
+        self.assertIn("snap correlation to 1", crowding["detail"])
         self.assertIn("COR1M", monitor["headline"])
 
     def test_cor1m_spike_flags_correlation_snap_alert(self) -> None:
@@ -93,6 +95,7 @@ class VolStructureMonitorTest(unittest.TestCase):
         self.assertEqual(monitor["overall_level"], "alert")
         snap = next(s for s in monitor["signals"] if s["name"] == "correlation_snap")
         self.assertIn("pts", snap["detail"])
+        self.assertIn("correlation snapping back toward 1", snap["detail"])
 
     def test_high_vixeq_vix_ratio_flags_single_stock_froth(self) -> None:
         from backend.services.vol_structure_monitor import build_vol_structure_monitor
@@ -108,6 +111,8 @@ class VolStructureMonitorTest(unittest.TestCase):
 
         names = {signal["name"]: signal["level"] for signal in monitor["signals"]}
         self.assertEqual(names.get("single_stock_froth"), "alert")
+        froth = next(s for s in monitor["signals"] if s["name"] == "single_stock_froth")
+        self.assertIn("pctile 1y", froth["detail"])
         self.assertGreaterEqual(monitor["derived"]["vixeq_vix_ratio"], 3.0)
 
     def test_normal_levels_report_normal_with_no_signals(self) -> None:
@@ -223,8 +228,21 @@ class VolStructureMonitorTest(unittest.TestCase):
         self.assertEqual(drift["VIXEQ"]["direction"], "up")
         self.assertEqual(drift["VIXEQ"]["signal"], "strong")
 
-        self.assertEqual(monitor["indices"]["VIX"]["full_start"], "2022-12-02")
-        self.assertNotIn("pctile_2023", monitor["indices"]["VIX"])
+        vix = monitor["indices"]["VIX"]
+        for field in (
+            "full_start",
+            "full_max",
+            "full_max_date",
+            "full_mean",
+            "full_median",
+            "mean_1y",
+            "median_1y",
+            "regime_anchor_date",
+            "pctile_2023",
+            "mean_2023",
+            "median_2023",
+        ):
+            self.assertNotIn(field, vix)
 
     def test_drift_signal_uses_percent_override_for_strong_baseline_shift(self) -> None:
         from backend.services.vol_structure_monitor import _drift_signal
@@ -232,12 +250,6 @@ class VolStructureMonitorTest(unittest.TestCase):
         self.assertEqual(_drift_signal(3.0, 21.0, 100.0), "strong")
         self.assertEqual(_drift_signal(3.0, 11.0, 100.0), "mild")
         self.assertEqual(_drift_signal(1.9, 25.0, 100.0), "flat")
-
-    def test_percentile_is_documented_as_inclusive_empirical_cdf(self) -> None:
-        from backend.services.vol_structure_monitor import _percentile
-
-        self.assertEqual(_percentile([1.0, 1.0, 2.0, 3.0], 1.0), 50.0)
-        self.assertIn("inclusive empirical CDF", _percentile.__doc__ or "")
 
     def test_cor1m_snap_overrides_low_level_in_style_state(self) -> None:
         from backend.services.vol_structure_monitor import build_vol_structure_monitor

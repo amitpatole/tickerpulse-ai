@@ -270,10 +270,11 @@ class NewsLayerReviewTest(unittest.TestCase):
             report = Path(result["paths"]["report_markdown"]).read_text(encoding="utf-8")
 
         self.assertIn("Style dial: macro/beta", report)
-        self.assertIn("Status: ok; level: normal; run 2026-06-24", report)
+        self.assertIn("Status: ok; level: normal", report)
+        self.assertNotIn("level: normal; run 2026-06-24", report)
         self.assertIn("252-session pctile 41.7", report)
         self.assertIn("VIX 19.49", report)
-        self.assertIn("full since 1990-01-02", report)
+        self.assertNotIn("full since 1990-01-02", report)
         self.assertIn("COR1M regime windows: 2023 pctile 26.1", report)
         self.assertIn("252-session median 12.71 vs 2023 median 15.53", report)
         self.assertIn("full max 96.59 on 2020-03-18 since 2006-01-03", report)
@@ -407,7 +408,7 @@ class NewsLayerReviewTest(unittest.TestCase):
         self.assertNotIn("exposed basket", report)
         self.assertIn("Top tickers: $NVDA", report)
 
-    def test_news_layer_report_suppresses_stale_ranked_sections(self) -> None:
+    def test_news_layer_report_uses_existing_stale_fallback_when_everything_is_stale(self) -> None:
         from backend.services.news_layer_review import run_news_layer_review
 
         collector = _FakeNewsLayerCollector()
@@ -430,11 +431,10 @@ class NewsLayerReviewTest(unittest.TestCase):
         ]
         raw_section = report[report.index("## Fast X Tape"):report.index("## Source Health")]
 
-        self.assertIn("- No followed-account posts collected.", ranked_section)
-        self.assertIn("- Top tickers: none detected in collected posts.", news_section)
-        self.assertIn("- Top news: no search/news posts collected.", news_section)
-        self.assertNotIn("Old high scoring macro", ranked_section)
-        self.assertNotIn("Public summary says Bernstein", news_section)
+        self.assertIn("Old high scoring macro", ranked_section)
+        self.assertIn("Public summary says Bernstein", news_section)
+        self.assertNotIn("- No followed-account posts collected.", ranked_section)
+        self.assertNotIn("- Top news: no search/news posts collected.", news_section)
         self.assertIn("Old high scoring macro", raw_section)
 
     def test_news_layer_review_includes_top_level_watchlist_events(self) -> None:
@@ -476,6 +476,78 @@ class NewsLayerReviewTest(unittest.TestCase):
         self.assertEqual(summary["watchlist_events"], [event])
         self.assertIn("Watchlist Catalyst Events", report)
         self.assertIn("CBRS: Cerebras lock-up no-new-low check", report)
+
+    def test_news_layer_review_includes_mstr_nav_discount_monitor(self) -> None:
+        from backend.services.news_layer_review import run_news_layer_review
+
+        collector = _FakeNewsLayerCollector()
+        mstr_nav = {
+            "source_status": "ok",
+            "signal": "NO_DISCOUNT_PREMIUM",
+            "btc_stable": False,
+            "btc_price": 59469,
+            "btc_1d_change_pct": -2.16,
+            "btc_holdings": 847363,
+            "btc_nav_m": 50392.0,
+            "usd_reserve_m": 1400.0,
+            "debt_m": 6754.0,
+            "pref_m": 15467.0,
+            "common_nav_m": 29571.0,
+            "market_cap_m": 30624.0,
+            "common_nav_per_basic_share": 82.41,
+            "common_discount_pct": -3.56,
+            "gross_btc_discount_pct": 39.23,
+            "common_breakeven_btc": 24572.01,
+            "mstr_timestamp_utc": "2026-06-25T20:00:00",
+            "btc_timestamp": "2026-06-25T21:10:00",
+            "errors": [],
+        }
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result = run_news_layer_review(
+                x_collector=collector,
+                output_dir=Path(tmpdir),
+                posts_per_account=1,
+                posts_per_query=1,
+                mstr_nav_monitor=lambda: mstr_nav,
+            )
+            raw = json.loads(Path(result["paths"]["raw_json"]).read_text(encoding="utf-8"))
+            summary = json.loads(Path(result["paths"]["summary_json"]).read_text(encoding="utf-8"))
+            report = Path(result["paths"]["report_markdown"]).read_text(encoding="utf-8")
+
+        self.assertEqual(result["schema_version"], 5)
+        self.assertEqual(result["mstr_nav_monitor"], mstr_nav)
+        self.assertEqual(raw["mstr_nav_monitor"], mstr_nav)
+        self.assertEqual(summary["mstr_nav_monitor"], mstr_nav)
+        self.assertIn("## MSTR NAV Discount Monitor", report)
+        self.assertIn("NO_DISCOUNT_PREMIUM", report)
+        self.assertIn("Common discount -3.56%", report)
+        self.assertIn("Gross BTC discount +39.23%", report)
+        self.assertIn("MSTR NAV: ok; signal NO_DISCOUNT_PREMIUM", report)
+
+    def test_news_layer_review_keeps_running_when_mstr_nav_monitor_fails(self) -> None:
+        from backend.services.news_layer_review import run_news_layer_review
+
+        collector = _FakeNewsLayerCollector()
+
+        def fail_mstr() -> dict[str, object]:
+            raise RuntimeError("strategy timeout")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result = run_news_layer_review(
+                x_collector=collector,
+                output_dir=Path(tmpdir),
+                posts_per_account=1,
+                posts_per_query=1,
+                mstr_nav_monitor=fail_mstr,
+            )
+            summary = json.loads(Path(result["paths"]["summary_json"]).read_text(encoding="utf-8"))
+            report = Path(result["paths"]["report_markdown"]).read_text(encoding="utf-8")
+
+        self.assertEqual(result["mstr_nav_monitor"]["source_status"], "error")
+        self.assertEqual(summary["mstr_nav_monitor"]["source_status"], "error")
+        self.assertIn("MSTR NAV error: mstr_nav: injected MSTR NAV monitor failed: strategy timeout", report)
+        self.assertIn("## Market Tape", report)
 
     def test_news_layer_cli_prints_markdown_report(self) -> None:
         import backend.scripts.run_news_layer_review as cli
@@ -1051,7 +1123,8 @@ class MorningDigestLanesTest(unittest.TestCase):
         self.assertEqual(result["ai_infra_update"]["source_status"], "skipped_injected_collector")
         self.assertEqual(result["token_usage_update"]["source_status"], "skipped_injected_collector")
         self.assertEqual(result["breadth_monitor"]["status"], "skipped_injected_collector")
-        self.assertEqual(summary["schema_version"], 4)
+        self.assertEqual(result["mstr_nav_monitor"]["source_status"], "skipped_injected_collector")
+        self.assertEqual(summary["schema_version"], 5)
 
     def test_news_post_fuses_into_story_and_sections_print(self):
         result, summary = self._run(

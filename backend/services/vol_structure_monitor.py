@@ -6,10 +6,10 @@ stacked under a calm index surface:
 - ``VIXEQ``: cap-weighted implied volatility of S&P 500 constituents. A high
   VIXEQ premium over VIX means single-stock options are being bid aggressively
   versus the index (concentrated single-name speculation).
-- ``COR1M``: 1-month implied correlation. Schematically, index variance is
-  single-stock variance plus weighted pairwise correlation, so a COR1M floor
-  means investors are being rewarded for independent single-stock bets while
-  the index surface stays calm. A shock can force correlations sharply higher.
+- ``COR1M``: 1-month implied correlation. Index variance is roughly average
+  single-stock variance times correlation, so a COR1M floor means everyone is
+  leveraged into independent single-stock bets while the index is artificially
+  flat. A crash is the moment correlation snaps back toward 1.
 - ``VIX``: index-level implied volatility, used for the spread/ratio context.
 """
 
@@ -144,7 +144,6 @@ def _index_summary(
         "change_1d": round(latest - values[-2], 2) if len(values) >= 2 else None,
         "pctile_1y": _percentile(values[-_TRADING_DAYS_1Y:], latest),
         "pctile_full": _percentile(values, latest),
-        "full_start": closes[0][0],
         "live": None,
         "live_time": "",
     }
@@ -391,7 +390,7 @@ def _cor1m_signals(
     pctile_1y = _percentile(values[-_TRADING_DAYS_1Y:], latest)
     pctile_full = _percentile(values, latest)
 
-    pctile_text = f"pctile {pctile_1y:.0f} 252 sessions / {pctile_full:.0f} full"
+    pctile_text = f"pctile {pctile_1y:.0f} 1y / {pctile_full:.0f} full"
     if latest <= THRESHOLDS["cor1m_alert_low"] or pctile_full <= THRESHOLDS["cor1m_full_pctile_alert"]:
         signals.append(
             {
@@ -400,8 +399,7 @@ def _cor1m_signals(
                 "detail": (
                     f"COR1M {latest:.2f} at/near historic floor ({pctile_text}): "
                     "implied correlation crushed - leverage stacked on independent single-stock bets, "
-                    "index artificially flat. Crash fuel is loaded; any shock can force correlations "
-                    "sharply higher."
+                    "index artificially flat. Crash fuel is loaded; any shock can snap correlation to 1."
                 ),
             }
         )
@@ -436,7 +434,7 @@ def _cor1m_signals(
                 "level": "alert",
                 "detail": (
                     f"COR1M +{float(change_pts):.2f} pts (+{float(change_pct or 0):.0f}%) in 1d to {latest:.2f}: "
-                    "correlation snapping higher - stocks falling together, leveraged longs forced "
+                    "correlation snapping back toward 1 - stocks falling together, leveraged longs forced "
                     "to de-gross simultaneously. This is the deleveraging itself, not a warning of it."
                 ),
             }
@@ -474,8 +472,7 @@ def _froth_signals(
                     "name": "single_stock_froth",
                     "level": level,
                     "detail": (
-                        f"VIXEQ/VIX ratio {float(ratio):.2f} "
-                        f"({float(ratio_pctile or 0):.0f}th pctile 252 sessions): "
+                        f"VIXEQ/VIX ratio {float(ratio):.2f} ({float(ratio_pctile or 0):.0f}th pctile 1y): "
                         "single-stock options bid far above index - concentrated single-name "
                         "speculation/leverage is extreme."
                     ),
@@ -540,7 +537,6 @@ def _interpretation(signals: Sequence[Mapping[str, str]]) -> list[str]:
 
 
 def _percentile(window: Sequence[float], value: float) -> float:
-    """inclusive empirical CDF percentile: percent of window values <= value."""
     if not window:
         return 0.0
     rank = sum(1 for item in window if item <= value)
