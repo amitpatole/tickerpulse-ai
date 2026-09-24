@@ -15,6 +15,32 @@ logger = logging.getLogger(__name__)
 chat_bp = Blueprint('chat', __name__, url_prefix='/api')
 
 
+def _get_chat_provider_config(thinking_level: str = 'balanced'):
+    """Return DB-backed provider config, falling back to .env-backed config."""
+    provider_config = get_active_ai_provider()
+    if provider_config:
+        return provider_config
+
+    try:
+        from backend.api.settings import _active_env_provider_name, _env_ai_provider
+        provider_name = _active_env_provider_name()
+        if provider_name:
+            provider_config = _env_ai_provider(provider_name)
+            if provider_config and provider_name == 'opencode':
+                from backend.config import Config
+                provider_config = dict(provider_config)
+                provider_config['model'] = (
+                    Config.OPENCODE_FLASH_MODEL
+                    if thinking_level == 'quick'
+                    else Config.OPENCODE_PRO_MODEL
+                )
+            return provider_config
+    except Exception as exc:
+        logger.debug("Could not resolve env-backed chat provider: %s", exc)
+
+    return None
+
+
 @chat_bp.route('/chat/ask', methods=['POST'])
 def ask_chat_endpoint():
     """Chat with AI about a specific stock.
@@ -52,7 +78,7 @@ def ask_chat_endpoint():
 
     try:
         # Get active AI provider
-        provider_config = get_active_ai_provider()
+        provider_config = _get_chat_provider_config(thinking_level)
         if not provider_config:
             return jsonify({'success': False, 'error': 'No AI provider configured'}), 400
 

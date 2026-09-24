@@ -7,6 +7,18 @@ export interface WizardConfig {
   openai_api_key?: string;
   google_ai_key?: string;
   xai_api_key?: string;
+  deepseek_api_key?: string;
+  deepseek_base_url?: string;
+  deepseek_model?: string;
+  opencode_api_key?: string;
+  opencode_base_url?: string;
+  opencode_model?: string;
+  opencode_flash_model?: string;
+  opencode_pro_model?: string;
+  openai_compatible_api_key?: string;
+  openai_compatible_base_url?: string;
+  openai_compatible_model?: string;
+  default_ai_provider?: string;
   // Market
   market_timezone: string;
   // Budget
@@ -35,6 +47,18 @@ export function writeEnvFile(config: WizardConfig): void {
     `OPENAI_API_KEY=${config.openai_api_key || ''}`,
     `GOOGLE_AI_KEY=${config.google_ai_key || ''}`,
     `XAI_API_KEY=${config.xai_api_key || ''}`,
+    `DEEPSEEK_API_KEY=${config.deepseek_api_key || ''}`,
+    `DEEPSEEK_BASE_URL=${config.deepseek_base_url || 'https://api.deepseek.com'}`,
+    `DEEPSEEK_MODEL=${config.deepseek_model || 'deepseek-v4-flash'}`,
+    `OPENCODE_API_KEY=${config.opencode_api_key || ''}`,
+    `OPENCODE_BASE_URL=${config.opencode_base_url || 'https://opencode.ai/zen/go/v1'}`,
+    `OPENCODE_MODEL=${config.opencode_model || 'deepseek-v4-flash'}`,
+    `OPENCODE_FLASH_MODEL=${config.opencode_flash_model || 'deepseek-v4-flash'}`,
+    `OPENCODE_PRO_MODEL=${config.opencode_pro_model || 'deepseek-v4-pro'}`,
+    `OPENAI_COMPATIBLE_API_KEY=${config.openai_compatible_api_key || ''}`,
+    `OPENAI_COMPATIBLE_BASE_URL=${config.openai_compatible_base_url || ''}`,
+    `OPENAI_COMPATIBLE_MODEL=${config.openai_compatible_model || ''}`,
+    `DEFAULT_AI_PROVIDER=${config.default_ai_provider || ''}`,
     '',
     '# Market',
     `MARKET_TIMEZONE=${config.market_timezone}`,

@@ -3,9 +3,38 @@ TickerPulse AI v3.0 - Central Configuration
 All settings are driven by environment variables with sensible defaults.
 """
 
-import os
 import sys
+import os
 from pathlib import Path
+
+
+if getattr(sys, 'frozen', False):
+    # PyInstaller bundle: resolve from executable location
+    BASE_DIR = Path(sys.executable).parent.parent
+else:
+    BASE_DIR = Path(__file__).parent.parent  # tickerpulse-ai/
+
+
+def _load_env_file(env_path: Path = BASE_DIR / '.env') -> None:
+    """Load local .env settings without overriding explicit process env."""
+    if not env_path.exists():
+        return
+
+    try:
+        from dotenv import load_dotenv
+        load_dotenv(dotenv_path=env_path, override=False)
+    except ImportError:
+        for line in env_path.read_text(encoding='utf-8').splitlines():
+            stripped = line.strip()
+            if not stripped or stripped.startswith('#') or '=' not in stripped:
+                continue
+            key, value = stripped.split('=', 1)
+            key = key.strip()
+            value = value.strip().strip('"').strip("'")
+            os.environ.setdefault(key, value)
+
+
+_load_env_file()
 
 
 class Config:
@@ -14,11 +43,7 @@ class Config:
     # -------------------------------------------------------------------------
     # Base paths
     # -------------------------------------------------------------------------
-    if getattr(sys, 'frozen', False):
-        # PyInstaller bundle: resolve from executable location
-        BASE_DIR = Path(sys.executable).parent.parent
-    else:
-        BASE_DIR = Path(__file__).parent.parent  # tickerpulse-ai/
+    BASE_DIR = BASE_DIR
     DB_PATH = os.getenv('DB_PATH', str(BASE_DIR / 'stock_news.db'))
 
     # -------------------------------------------------------------------------
@@ -54,6 +79,10 @@ class Config:
     # Monitoring / Scheduler
     # -------------------------------------------------------------------------
     CHECK_INTERVAL = int(os.getenv('CHECK_INTERVAL', 300))  # seconds (5 min)
+    IDEA_SWEEP_OUTPUT_DIR = os.getenv(
+        'IDEA_SWEEP_OUTPUT_DIR',
+        str(BASE_DIR / 'data' / 'idea_sweeps')
+    )
 
     SCHEDULER_API_ENABLED = False  # Disabled -- we use our own scheduler_routes blueprint
     SCHEDULER_API_PREFIX = '/api/scheduler'
@@ -65,6 +94,18 @@ class Config:
     OPENAI_API_KEY = os.getenv('OPENAI_API_KEY', '')
     GOOGLE_AI_KEY = os.getenv('GOOGLE_AI_KEY', '')
     XAI_API_KEY = os.getenv('XAI_API_KEY', '')
+    DEEPSEEK_API_KEY = os.getenv('DEEPSEEK_API_KEY', '')
+    DEEPSEEK_BASE_URL = os.getenv('DEEPSEEK_BASE_URL', 'https://api.deepseek.com')
+    DEEPSEEK_MODEL = os.getenv('DEEPSEEK_MODEL', 'deepseek-v4-flash')
+    OPENCODE_API_KEY = os.getenv('OPENCODE_API_KEY', '')
+    OPENCODE_BASE_URL = os.getenv('OPENCODE_BASE_URL', 'https://opencode.ai/zen/go/v1')
+    OPENCODE_MODEL = os.getenv('OPENCODE_MODEL', 'deepseek-v4-flash')
+    OPENCODE_FLASH_MODEL = os.getenv('OPENCODE_FLASH_MODEL', OPENCODE_MODEL)
+    OPENCODE_PRO_MODEL = os.getenv('OPENCODE_PRO_MODEL', 'deepseek-v4-pro')
+    OPENAI_COMPATIBLE_API_KEY = os.getenv('OPENAI_COMPATIBLE_API_KEY', '')
+    OPENAI_COMPATIBLE_BASE_URL = os.getenv('OPENAI_COMPATIBLE_BASE_URL', '')
+    OPENAI_COMPATIBLE_MODEL = os.getenv('OPENAI_COMPATIBLE_MODEL', '')
+    DEFAULT_AI_PROVIDER = os.getenv('DEFAULT_AI_PROVIDER', '').strip().lower()
 
     # Default AI model per provider (used when no model is specified in DB)
     DEFAULT_MODELS = {
@@ -72,6 +113,10 @@ class Config:
         'openai': 'gpt-4o',
         'google': 'gemini-2.0-flash',
         'xai': 'grok-3',
+        'grok': 'grok-3',
+        'deepseek': DEEPSEEK_MODEL,
+        'opencode': OPENCODE_FLASH_MODEL,
+        'openai_compatible': OPENAI_COMPATIBLE_MODEL,
     }
 
     # -------------------------------------------------------------------------

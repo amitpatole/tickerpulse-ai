@@ -12,6 +12,7 @@ from backend.jobs.daily_summary import run_daily_summary
 from backend.jobs.weekly_review import run_weekly_review
 from backend.jobs.regime_check import run_regime_check
 from backend.jobs.download_tracker import run_download_tracker
+from backend.jobs.daily_idea_sweep import run_daily_idea_sweep
 
 
 def register_all_jobs(scheduler_manager) -> None:
@@ -81,6 +82,22 @@ def register_all_jobs(scheduler_manager) -> None:
         day_of_week='mon-fri',
     )
 
+    # ---- Daily Idea Sweep: 7:00 AM in configured market timezone, weekdays ----
+    scheduler_manager.register_job(
+        job_id='daily_idea_sweep',
+        func=run_daily_idea_sweep,
+        trigger='cron',
+        name='Daily Idea Sweep',
+        description=(
+            'Lightweight idea generator that runs the market sweep, X watchlist, '
+            'technical scanner, and news fetcher, then writes latest.json for '
+            'downstream workflow tools.'
+        ),
+        hour=7,
+        minute=0,
+        day_of_week='mon-fri',
+    )
+
     # ---- Weekly Review: Sunday 8:00 PM ET ----
     scheduler_manager.register_job(
         job_id='weekly_review',
@@ -134,4 +151,5 @@ __all__ = [
     'run_weekly_review',
     'run_regime_check',
     'run_download_tracker',
+    'run_daily_idea_sweep',
 ]

@@ -1,0 +1,3001 @@
+diff --git a/backend/services/idea_feed.py b/backend/services/idea_feed.py
+new file mode 100644
+index 0000000..cc0ebf5
+--- /dev/null
++++ b/backend/services/idea_feed.py
+@@ -0,0 +1,168 @@
++"""Idea feed artifacts for downstream research workflows."""
++
++from __future__ import annotations
++
++import json
++import re
++from datetime import datetime, timezone
++from pathlib import Path
++from typing import Any
++
++
++def build_idea_feed(sweep_result: dict[str, Any]) -> dict[str, Any]:
++    generated_at = str(sweep_result.get("generated_at") or datetime.now(timezone.utc).isoformat())
++    insights = list(sweep_result.get("insights") or [])
++    insights.extend(_news_intelligence_card_insights(sweep_result.get("news_intelligence"), insights))
++    insights.extend(sweep_result.get("watchlist_events") or [])
++    ideas = []
++
++    for index, insight in enumerate(insights, 1):
++        if not isinstance(insight, dict):
++            continue
++
++        metadata = insight.get("metadata") if isinstance(insight.get("metadata"), dict) else {}
++        title = str(insight.get("title") or "Untitled idea").strip()
++        source = str(insight.get("source") or "unknown")
++        tickers = _extract_tickers(title, metadata)
++
++        ideas.append({
++            "id": f"{_timestamp_id(generated_at)}-{index:02d}",
++            "status": "needs_review",
++            "source": source,
++            "score": insight.get("score", 0),
++            "title": title,
++            "thesis": title,
++            "tickers": tickers,
++            "url": insight.get("url"),
++            "matched_keywords": metadata.get("matched_keywords", []),
++            "lane": metadata.get("lane"),
++            "next_actions": _next_actions(source, tickers),
++            "raw_metadata": metadata,
++        })
++
++    return {
++        "schema_version": 1,
++        "generated_at": generated_at,
++        "source_status": sweep_result.get("source_status", "unknown"),
++        "inputs": sweep_result.get("inputs", {}),
++        "ideas": ideas,
++    }
++
++
++def _news_intelligence_card_insights(
++    cards: Any,
++    existing_insights: list[Any],
++) -> list[dict[str, Any]]:
++    if not isinstance(cards, list):
++        return []
++
++    seen_ids: set[str] = set()
++    for insight in existing_insights:
++        if not isinstance(insight, dict):
++            continue
++        metadata = insight.get("metadata") if isinstance(insight.get("metadata"), dict) else {}
++        insight_id = metadata.get("insight_id")
++        if insight_id:
++            seen_ids.add(str(insight_id))
++
++    insights: list[dict[str, Any]] = []
++    for card in cards:
++        if not isinstance(card, dict):
++            continue
++        insight_id = card.get("insight_id")
++        if insight_id and str(insight_id) in seen_ids:
++            continue
++        insights.append(
++            {
++                "source": "news_intelligence",
++                "score": card.get("score", 0),
++                "title": str(card.get("source_claim") or "News intelligence card"),
++                "url": card.get("source_url"),
++                "metadata": {
++                    "insight_id": insight_id,
++                    "related_tickers": card.get("related_tickers", []),
++                    "themes": card.get("themes", []),
++                    "source_claim": card.get("source_claim"),
++                    "cross_reference_status": card.get("cross_reference_status"),
++                    "evidence": card.get("evidence", []),
++                    "human_review": card.get("human_review", {}),
++                },
++            }
++        )
++        if insight_id:
++            seen_ids.add(str(insight_id))
++    return insights
++
++
++def write_idea_feed(feed: dict[str, Any], output_dir: Path | str) -> dict[str, Path]:
++    target_dir = Path(output_dir)
++    target_dir.mkdir(parents=True, exist_ok=True)
++
++    stamp = _timestamp_id(str(feed.get("generated_at") or datetime.now(timezone.utc).isoformat()))
++    snapshot_path = target_dir / f"idea-feed-{stamp}.json"
++    latest_path = target_dir / "latest.json"
++    payload = json.dumps(feed, ensure_ascii=False, indent=2)
++
++    snapshot_path.write_text(payload, encoding="utf-8")
++    latest_path.write_text(payload, encoding="utf-8")
++
++    return {
++        "snapshot": snapshot_path,
++        "latest": latest_path,
++    }
++
++
++def _extract_tickers(title: str, metadata: dict[str, Any]) -> list[str]:
++    tickers: list[str] = []
++    _append_ticker_values(tickers, metadata.get("ticker"))
++    _append_ticker_values(tickers, metadata.get("tickers"))
++    _append_ticker_values(tickers, metadata.get("related_tickers"))
++
++    for match in re.findall(r"\$([A-Z][A-Z0-9]{1,5})\b", title):
++        tickers.append(match.upper())
++
++    seen: set[str] = set()
++    unique: list[str] = []
++    for ticker in tickers:
++        if ticker not in seen:
++            seen.add(ticker)
++            unique.append(ticker)
++    return unique
++
++
++def _next_actions(source: str, tickers: list[str]) -> list[str]:
++    actions = ["Review source quality and decide whether this belongs in the research queue."]
++    if tickers:
++        actions.append("Run focused news/filing check for: " + ", ".join(tickers))
++    if source == "x":
++        actions.append("Verify the claim with primary news, filings, transcript, or company data before sizing.")
++    elif source == "scanner":
++        actions.append("Check whether the technical signal aligns with a real catalyst.")
++    elif source == "news":
++        actions.append("Read the linked article and identify the investable catalyst.")
++    elif source == "reddit":
++        actions.append("Treat Reddit as discovery only; verify the claim with primary news, filings, transcripts, or company data.")
++    elif source == "ai_infra_update":
++        actions.append("Map the AI infrastructure signal to exposed watchlist names, then verify with pricing, capex, supply-chain, or customer-demand data.")
++    elif source == "watchlist_event":
++        actions.append("Put the event date on the research calendar and re-check supply, filings, and price action before acting.")
++    elif source == "news_intelligence":
++        actions.append("Review the source claim and X expert reaction before promoting this idea into technical filtering.")
++    return actions
++
++
++def _append_ticker_values(tickers: list[str], value: Any) -> None:
++    if isinstance(value, list):
++        for item in value:
++            _append_ticker_values(tickers, item)
++        return
++    if value:
++        tickers.append(str(value).upper())
++
++
++def _timestamp_id(value: str) -> str:
++    try:
++        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
++    except ValueError:
++        parsed = datetime.now(timezone.utc)
++    return parsed.strftime("%Y%m%d-%H%M%S")
+diff --git a/backend/services/market_sweep.py b/backend/services/market_sweep.py
+new file mode 100644
+index 0000000..ce15ebd
+--- /dev/null
++++ b/backend/services/market_sweep.py
+@@ -0,0 +1,531 @@
++"""Lightweight on-demand market sweep built from existing TickerPulse tools."""
++
++from __future__ import annotations
++
++import logging
++import sqlite3
++from collections.abc import Callable
++from datetime import datetime, timezone
++
++from backend.agents.base import AgentResult
++from backend.agents.scanner_agent import ScannerAgent
++from backend.agents.tools.news_fetcher import NewsFetcher
++from backend.agents.tools.reddit_scanner import RedditScanner
++from backend.config import Config
++from backend.services.ai_infra_update import build_ai_infra_update
++from backend.services.news_intelligence import build_news_intelligence_cards
++from backend.services.watchlist_notes import build_watchlist_event_insights
++from backend.services.x_watchlist import XWatchlistCollector
++
++logger = logging.getLogger(__name__)
++
++
++DEFAULT_SWEEP_TICKERS = [
++    "SPY", "QQQ", "IWM",
++    "NVDA", "AVGO", "MRVL", "AMD", "MU", "SMCI", "VRT", "PLTR",
++    "MSFT", "AAPL", "AMZN", "GOOGL", "META", "TSLA",
++    "COIN", "MSTR", "JPM", "XOM", "RBRK",
++]
++
++DEFAULT_REDDIT_SUBREDDITS = [
++    "wallstreetbets",
++    "stocks",
++    "investing",
++    "options",
++    "stockmarket",
++    "smallstreetbets",
++]
++_PRIVATE_MARKETS = {"private"}
++
++
++class MarketSweepService:
++    def __init__(
++        self,
++        scanner: ScannerAgent | None = None,
++        news_fetcher: NewsFetcher | None = None,
++        x_collector: XWatchlistCollector | None = None,
++        reddit_scanner: RedditScanner | None = None,
++        ai_infra_loader: Callable[[], dict[str, object]] | None = None,
++    ) -> None:
++        self.scanner = scanner or ScannerAgent()
++        self.news_fetcher = news_fetcher or NewsFetcher()
++        self.x_collector = x_collector or XWatchlistCollector()
++        self.reddit_scanner = reddit_scanner or RedditScanner()
++        self.ai_infra_loader = ai_infra_loader or build_ai_infra_update
++
++    def run(
++        self,
++        tickers: list[str] | None = None,
++        include_x: bool = True,
++        include_reddit: bool = False,
++        include_ai_infra: bool = True,
++        top_n: int = 10,
++        period: str = "3mo",
++        x_max_accounts: int = 12,
++        x_posts_per_account: int = 5,
++        news_max_articles: int = 3,
++        reddit_max_tickers: int = 5,
++        reddit_posts_per_ticker: int = 5,
++    ) -> dict[str, object]:
++        clean_tickers, skipped_tickers = self._clean_tickers(tickers)
++        scanner_result = self._run_scanner(clean_tickers, period, top_n)
++        top_results = self._scanner_top_results(scanner_result)
++
++        news = self._fetch_news(top_results[: min(top_n, 8)], news_max_articles)
++        x_result = (
++            self.x_collector.collect_accounts(
++                max_accounts=x_max_accounts,
++                posts_per_account=x_posts_per_account,
++            )
++            if include_x
++            else {"source_status": "skipped", "posts": [], "errors": []}
++        )
++        x_search_result = (
++            self.x_collector.collect_searches(max_queries=3, posts_per_query=10)
++            if include_x
++            else {"source_status": "skipped", "posts": [], "errors": [], "queries_checked": 0}
++        )
++        reddit = (
++            self._fetch_reddit(top_results, reddit_max_tickers, reddit_posts_per_ticker)
++            if include_reddit
++            else self._skipped_reddit()
++        )
++        ai_infra_update = (
++            self._fetch_ai_infra_update()
++            if include_ai_infra
++            else {"source_status": "skipped", "items": [], "errors": []}
++        )
++        news_intelligence = build_news_intelligence_cards(
++            news=news,
++            account_posts=x_result.get("posts", []) if isinstance(x_result, dict) else [],
++            search_posts=x_search_result.get("posts", []) if isinstance(x_search_result, dict) else [],
++            generated_at=datetime.now(timezone.utc).isoformat(),
++            max_cards=10,
++        )
++        watchlist_events = build_watchlist_event_insights()
++
++        insights = self._build_insights(
++            top_results,
++            news,
++            x_result,
++            reddit,
++            ai_infra_update,
++            news_intelligence,
++            top_n,
++        )
++        final_diligence = self._build_reddit_diligence(reddit)
++        source_status = self._source_status(
++            scanner_result,
++            news,
++            x_result,
++            x_search_result,
++            ai_infra_update,
++        )
++
++        scanner_metadata = dict(scanner_result.metadata or {})
++        scanner_metadata.setdefault("scanned", len(top_results))
++
++        return {
++            "generated_at": datetime.now(timezone.utc).isoformat(),
++            "source_status": source_status,
++            "inputs": {
++                "tickers": clean_tickers,
++                "period": period,
++                "top_n": top_n,
++                "include_x": include_x,
++                "include_reddit": include_reddit,
++                "include_ai_infra": include_ai_infra,
++                "skipped_tickers": skipped_tickers,
++            },
++            "scanner": {
++                "status": scanner_result.status,
++                "metadata": scanner_metadata,
++                "top_results": top_results,
++                "error": scanner_result.error,
++            },
++            "news": news,
++            "x": x_result,
++            "x_search": x_search_result,
++            "reddit": reddit,
++            "ai_infra_update": ai_infra_update,
++            "news_intelligence": news_intelligence,
++            "watchlist_events": watchlist_events,
++            "workflow": self._workflow_metadata(reddit),
++            "final_diligence": final_diligence,
++            "insights": insights,
++        }
++
++    def _clean_tickers(self, tickers: list[str] | None) -> tuple[list[str], list[dict[str, str]]]:
++        if tickers is not None:
++            return self._dedupe_tickers(tickers), []
++
++        quote_tickers, skipped_tickers, loaded_dashboard = self._dashboard_watchlist_tickers()
++        source = quote_tickers if loaded_dashboard else DEFAULT_SWEEP_TICKERS
++        return self._dedupe_tickers(source), skipped_tickers
++
++    @staticmethod
++    def _dedupe_tickers(tickers: list[str]) -> list[str]:
++        seen: set[str] = set()
++        cleaned: list[str] = []
++        for ticker in tickers:
++            normalized = str(ticker).strip().upper()
++            if not normalized or normalized in seen:
++                continue
++            seen.add(normalized)
++            cleaned.append(normalized)
++        return cleaned[:50]
++
++    @staticmethod
++    def _dashboard_watchlist_tickers() -> tuple[list[str], list[dict[str, str]], bool]:
++        conn: sqlite3.Connection | None = None
++        try:
++            conn = sqlite3.connect(Config.DB_PATH)
++            conn.row_factory = sqlite3.Row
++            rows = conn.execute(
++                "SELECT ticker, market FROM stocks WHERE active = 1 ORDER BY ticker"
++            ).fetchall()
++            quote_tickers: list[str] = []
++            skipped_tickers: list[dict[str, str]] = []
++            for row in rows:
++                ticker = str(row["ticker"] or "").strip().upper()
++                market = str(row["market"] or "").strip()
++                if not ticker:
++                    continue
++                if market.lower() in _PRIVATE_MARKETS:
++                    skipped_tickers.append(
++                        {
++                            "ticker": ticker,
++                            "market": market,
++                            "reason": "private_market",
++                        }
++                    )
++                    continue
++                quote_tickers.append(ticker)
++            return quote_tickers, skipped_tickers, bool(rows)
++        except sqlite3.Error as exc:
++            logger.warning("Market sweep could not load dashboard watchlist: %s", exc)
++            return [], [], False
++        finally:
++            if conn is not None:
++                conn.close()
++
++    def _run_scanner(
++        self,
++        tickers: list[str],
++        period: str,
++        top_n: int,
++    ) -> AgentResult:
++        if not tickers:
++            return AgentResult(
++                agent_name="scanner",
++                framework="native",
++                status="success",
++                output="No quoteable public tickers to scan.",
++                raw_output={"top_results": [], "all_results": []},
++                metadata={"scanned": 0, "skipped": "no_quoteable_tickers"},
++            )
++        return self.scanner.run({
++            "tickers": tickers,
++            "period": period,
++            "top_n": top_n,
++            "ai_summary": False,
++        })
++
++    @staticmethod
++    def _scanner_top_results(scanner_result: AgentResult) -> list[dict]:
++        raw_output = scanner_result.raw_output
++        if not isinstance(raw_output, dict):
++            return []
++        top_results = raw_output.get("top_results") or []
++        return [row for row in top_results if isinstance(row, dict)]
++
++    def _fetch_news(self, top_results: list[dict], max_articles: int) -> dict[str, dict]:
++        if max_articles <= 0:
++            return {}
++
++        news: dict[str, dict] = {}
++        for row in top_results:
++            ticker = str(row.get("ticker") or "").upper()
++            if not ticker:
++                continue
++            try:
++                data = self.news_fetcher.fetch_news_for_ticker(ticker, max_articles)
++                articles = data.get("articles", []) if isinstance(data, dict) else []
++                news[ticker] = {
++                    "articles": articles[:max_articles],
++                    "total_articles": len(articles),
++                }
++            except Exception as exc:
++                logger.warning("News fetch failed for %s: %s", ticker, exc)
++                news[ticker] = {"articles": [], "error": str(exc)}
++        return news
++
++    def _fetch_reddit(
++        self,
++        top_results: list[dict],
++        max_tickers: int,
++        posts_per_ticker: int,
++    ) -> dict[str, object]:
++        if max_tickers <= 0 or posts_per_ticker <= 0:
++            return self._skipped_reddit()
++
++        tickers = []
++        seen: set[str] = set()
++        for row in top_results:
++            ticker = str(row.get("ticker") or "").upper()
++            if not ticker or ticker in seen:
++                continue
++            seen.add(ticker)
++            tickers.append(ticker)
++            if len(tickers) >= max_tickers:
++                break
++
++        if not tickers:
++            return self._skipped_reddit()
++
++        try:
++            data = self.reddit_scanner.scan_multiple_tickers(
++                tickers,
++                subreddits=DEFAULT_REDDIT_SUBREDDITS,
++                limit=posts_per_ticker,
++            )
++        except Exception as exc:
++            logger.warning("Reddit sweep failed: %s", exc)
++            return {
++                "source_status": "degraded",
++                "tickers": {},
++                "errors": [{"message": str(exc)}],
++                "workflow_stage": "final_diligence",
++                "diligence_only": True,
++            }
++
++        errors: list[dict] = []
++        status = "ok"
++        if isinstance(data, dict):
++            for ticker_data in data.values():
++                if not isinstance(ticker_data, dict):
++                    continue
++                if ticker_data.get("source_status") == "degraded":
++                    status = "degraded"
++                for error in ticker_data.get("errors", []):
++                    if isinstance(error, dict):
++                        errors.append(error)
++
++        return {
++            "source_status": status,
++            "tickers": data if isinstance(data, dict) else {},
++            "errors": errors,
++            "workflow_stage": "final_diligence",
++            "diligence_only": True,
++        }
++
++    @staticmethod
++    def _skipped_reddit() -> dict[str, object]:
++        return {
++            "source_status": "skipped",
++            "tickers": {},
++            "errors": [],
++            "workflow_stage": "final_diligence",
++            "diligence_only": True,
++        }
++
++    def _fetch_ai_infra_update(self) -> dict[str, object]:
++        try:
++            return self.ai_infra_loader()
++        except Exception as exc:
++            logger.warning("AI infra update failed: %s", exc)
++            return {
++                "source_status": "degraded",
++                "items": [],
++                "errors": [{"message": str(exc)}],
++            }
++
++    def _build_insights(
++        self,
++        top_results: list[dict],
++        news: dict[str, dict],
++        x_result: dict[str, object],
++        reddit: dict[str, object],
++        ai_infra_update: dict[str, object],
++        news_intelligence: list[dict[str, object]],
++        top_n: int,
++    ) -> list[dict[str, object]]:
++        insights: list[dict[str, object]] = []
++
++        for post in x_result.get("posts", []) if isinstance(x_result, dict) else []:
++            if not isinstance(post, dict):
++                continue
++            signal_score = int(post.get("signal_score") or 0)
++            insights.append({
++                "source": "x",
++                "score": 50 + min(50, signal_score * 2),
++                "title": f"@{post.get('handle')}: {str(post.get('text') or '')[:160]}",
++                "url": post.get("url"),
++                "metadata": {
++                    "matched_keywords": post.get("matched_keywords", []),
++                    "lane": post.get("lane"),
++                },
++                })
++
++        ai_infra_items = (
++            ai_infra_update.get("items", []) if isinstance(ai_infra_update, dict) else []
++        )
++        for item in ai_infra_items:
++            if not isinstance(item, dict):
++                continue
++            insights.append({
++                "source": str(item.get("source") or "ai_infra_update"),
++                "score": item.get("score", 0),
++                "title": str(item.get("title") or "AI infra update"),
++                "url": item.get("url"),
++                "metadata": item.get("metadata") if isinstance(item.get("metadata"), dict) else {},
++            })
++
++        for row in top_results:
++            ticker = str(row.get("ticker") or "").upper()
++            score = float(row.get("opportunity_score") or 0)
++            insights.append({
++                "source": "scanner",
++                "score": score,
++                "title": (
++                    f"{ticker} technical score {score:.1f}, "
++                    f"signal {row.get('overall_signal', 'neutral')}, RSI {row.get('rsi', 'N/A')}"
++                ),
++                "url": None,
++                "metadata": row,
++            })
++
++        for ticker, data in news.items():
++            articles = data.get("articles", []) if isinstance(data, dict) else []
++            for article in articles[:1]:
++                if not isinstance(article, dict):
++                    continue
++                insights.append({
++                    "source": "news",
++                    "score": 45,
++                    "title": f"{ticker}: {article.get('title')}",
++                    "url": article.get("url"),
++                    "metadata": {
++                        "source": article.get("source"),
++                        "sentiment": article.get("sentiment_label"),
++                    },
++                })
++
++        for card in news_intelligence:
++            insights.append(
++                {
++                    "source": "news_intelligence",
++                    "score": card.get("score", 0),
++                    "title": str(card.get("source_claim") or "News intelligence card"),
++                    "url": card.get("source_url"),
++                    "metadata": {
++                        "insight_id": card.get("insight_id"),
++                        "related_tickers": card.get("related_tickers", []),
++                        "themes": card.get("themes", []),
++                        "source_claim": card.get("source_claim"),
++                        "cross_reference_status": card.get("cross_reference_status"),
++                        "evidence": card.get("evidence", []),
++                        "human_review": card.get("human_review", {}),
++                    },
++                }
++            )
++
++        insights.sort(key=lambda item: float(item.get("score") or 0), reverse=True)
++        return insights[:top_n]
++
++    def _build_reddit_diligence(self, reddit: dict[str, object]) -> list[dict[str, object]]:
++        items: list[dict[str, object]] = []
++        reddit_tickers = reddit.get("tickers", {}) if isinstance(reddit, dict) else {}
++        if not isinstance(reddit_tickers, dict):
++            return items
++
++        for ticker, data in reddit_tickers.items():
++            if not isinstance(data, dict):
++                continue
++            posts = data.get("posts", [])
++            if not isinstance(posts, list) or not posts:
++                continue
++            post = posts[0]
++            if not isinstance(post, dict):
++                continue
++            engagement = int(post.get("score") or 0) + int(post.get("num_comments") or 0)
++            items.append({
++                "source": "reddit",
++                "score": min(90, 35 + engagement / 10),
++                "title": f"r/{post.get('subreddit')}: {ticker} - {post.get('title')}",
++                "url": post.get("url"),
++                "metadata": {
++                    "ticker": str(ticker).upper(),
++                    "subreddit": post.get("subreddit"),
++                    "score": post.get("score"),
++                    "num_comments": post.get("num_comments"),
++                    "sentiment": post.get("sentiment_label"),
++                    "workflow_stage": "final_diligence",
++                    "diligence_only": True,
++                },
++            })
++
++        items.sort(key=lambda item: float(item.get("score") or 0), reverse=True)
++        return items
++
++    @staticmethod
++    def _workflow_metadata(reddit: dict[str, object]) -> dict[str, object]:
++        reddit_status = reddit.get("source_status") if isinstance(reddit, dict) else None
++        return {
++            "first_pass_sources": [
++                "scanner",
++                "news",
++                "x",
++                "ai_infra_update",
++                "watchlist_events",
++            ],
++            "final_diligence_sources": ["reddit"],
++            "reddit_stage": "final_diligence",
++            "final_diligence_status": str(reddit_status or "unknown"),
++            "reddit_policy": (
++                "Run Reddit only after first-pass filters produce a candidate; "
++                "use low-volume discovery only."
++            ),
++        }
++
++    @staticmethod
++    def _news_status(news: dict[str, dict]) -> str | None:
++        for data in news.values():
++            if isinstance(data, dict) and data.get("error"):
++                return "degraded"
++        return None
++
++    @staticmethod
++    def _source_status(
++        scanner_result: AgentResult,
++        news: dict[str, dict],
++        x_result: dict[str, object],
++        x_search_result: dict[str, object],
++        ai_infra_update: dict[str, object],
++    ) -> str:
++        statuses = [scanner_result.status]
++        news_status = MarketSweepService._news_status(news)
++        if news_status:
++            statuses.append(news_status)
++        x_status = x_result.get("source_status") if isinstance(x_result, dict) else None
++        if x_status:
++            statuses.append(str(x_status))
++        x_search_status = (
++            x_search_result.get("source_status")
++            if isinstance(x_search_result, dict)
++            else None
++        )
++        if x_search_status:
++            statuses.append(str(x_search_status))
++        ai_infra_status = (
++            ai_infra_update.get("source_status")
++            if isinstance(ai_infra_update, dict)
++            else None
++        )
++        if ai_infra_status:
++            statuses.append(str(ai_infra_status))
++        if "error" in statuses:
++            return "error"
++        if "degraded" in statuses:
++            return "degraded"
++        return "ok"
+diff --git a/backend/services/news_intelligence.py b/backend/services/news_intelligence.py
+new file mode 100644
+index 0000000..70d2294
+--- /dev/null
++++ b/backend/services/news_intelligence.py
+@@ -0,0 +1,202 @@
++from __future__ import annotations
++
++import hashlib
++import re
++from collections.abc import Mapping, Sequence
++
++
++_THEME_KEYWORDS: dict[str, tuple[str, ...]] = {
++    "hbm_supply_chain": ("HBM", "DRAM", "memory", "NAND", "wafer", "CoWoS"),
++    "ai_infrastructure": ("GPU", "B200", "H100", "datacenter", "AI infrastructure"),
++    "policy_geopolitics": ("tariff", "export control", "BIS", "China chips"),
++}
++
++_THEME_TICKERS: dict[str, tuple[str, ...]] = {
++    "hbm_supply_chain": ("AVGO", "MRVL", "MU", "NVDA"),
++    "ai_infrastructure": ("AMD", "AVGO", "NVDA", "TSM", "VRT"),
++    "policy_geopolitics": (),
++}
++
++
++def build_news_intelligence_cards(
++    *,
++    news: Mapping[str, object],
++    account_posts: Sequence[Mapping[str, object]],
++    search_posts: Sequence[Mapping[str, object]],
++    generated_at: str,
++    max_cards: int,
++) -> list[dict[str, object]]:
++    cards: list[dict[str, object]] = []
++    all_posts = [*account_posts, *search_posts]
++    for ticker, payload in news.items():
++        if not isinstance(payload, Mapping):
++            continue
++        articles = payload.get("articles")
++        if not isinstance(articles, Sequence) or isinstance(articles, str):
++            continue
++        for article in articles:
++            if not isinstance(article, Mapping):
++                continue
++            title = str(article.get("title") or "").strip()
++            if not title:
++                continue
++            source_url = str(article.get("url") or "").strip()
++            if not source_url:
++                continue
++            themes = _themes_for_text(title)
++            related_tickers = _related_tickers(str(ticker).upper(), themes)
++            evidence = _matched_evidence(title, all_posts, themes=themes)
++            status = "expert_reaction_found" if evidence else "no_expert_reaction"
++            cards.append(
++                {
++                    "insight_id": _insight_id(
++                        title=title,
++                        source_name=str(article.get("source") or "news"),
++                        source_url=source_url,
++                        seed_ticker=str(ticker).upper(),
++                    ),
++                    "source_type": "news_intelligence",
++                    "source_claim": title,
++                    "source_name": str(article.get("source") or "news"),
++                    "source_url": source_url,
++                    "source_published_at": str(article.get("published_at") or ""),
++                    "related_tickers": related_tickers,
++                    "themes": themes,
++                    "cross_reference_status": status,
++                    "evidence": evidence,
++                    "score": _score_card(themes, evidence),
++                    "human_review": {
++                        "default_decision": "needs_more_source",
++                        "prompt": "Promote, watch, reject, or request more source verification before technical filtering.",
++                    },
++                }
++            )
++    cards.sort(key=lambda item: float(item.get("score") or 0.0), reverse=True)
++    return cards[:max_cards]
++
++
++def _themes_for_text(text: str) -> list[str]:
++    matched: list[str] = []
++    lowered = text.lower()
++    for theme, keywords in _THEME_KEYWORDS.items():
++        if any(keyword.lower() in lowered for keyword in keywords):
++            matched.append(theme)
++    return matched
++
++
++def _related_tickers(seed_ticker: str, themes: Sequence[str]) -> list[str]:
++    tickers = {seed_ticker} if seed_ticker else set()
++    for theme in themes:
++        tickers.update(_THEME_TICKERS.get(theme, ()))
++    return sorted(ticker for ticker in tickers if ticker)
++
++
++def _matched_evidence(
++    title: str,
++    posts: Sequence[object],
++    *,
++    themes: Sequence[str],
++) -> list[dict[str, object]]:
++    title_terms = _terms(title)
++    domain_terms = _domain_terms(themes)
++    evidence: list[dict[str, object]] = []
++    for post in posts:
++        if not isinstance(post, Mapping):
++            continue
++        text = str(post.get("text") or "")
++        overlap = sorted(title_terms.intersection(_terms(text)))
++        if not _is_material_overlap(overlap, domain_terms, post):
++            continue
++        handle = str(post.get("handle") or post.get("source_query") or "x_search")
++        evidence.append(
++            {
++                "handle": handle,
++                "lane": str(post.get("lane") or post.get("source_query") or ""),
++                "why_source_matters": str(post.get("reason") or "Matched X reaction to the news terms."),
++                "reaction_excerpt": text[:280],
++                "url": str(post.get("url") or ""),
++                "matched_terms": overlap,
++                "signal_score": _safe_int(post.get("signal_score")),
++            }
++        )
++    evidence.sort(key=lambda item: _safe_int(item.get("signal_score")), reverse=True)
++    return evidence[:3]
++
++
++def _terms(text: str) -> set[str]:
++    raw_terms = {term.upper() for term in re.findall(r"[A-Za-z0-9$]{3,}", text)}
++    generic = {"THE", "AND", "FOR", "WITH", "FROM", "LANG"}
++    return raw_terms.difference(generic)
++
++
++_DOMAIN_TERMS_BY_THEME = {
++    "hbm_supply_chain": {"HBM", "DRAM", "NAND", "COWOS", "WAFER", "MEMORY"},
++    "ai_infrastructure": {"GPU", "B200", "H100", "DATACENTER", "ACCELERATOR"},
++    "policy_geopolitics": {"BIS", "TARIFF", "EXPORT", "CHINA"},
++}
++_TRUSTED_SEARCH_PRIORITIES = {"high", "highest"}
++_TRUSTED_SEARCH_TERMS = ("memory", "hbm", "dram")
++
++
++def _domain_terms(themes: Sequence[str]) -> set[str]:
++    terms: set[str] = set()
++    for theme in themes:
++        terms.update(_DOMAIN_TERMS_BY_THEME.get(theme, set()))
++    return terms
++
++
++def _is_material_overlap(
++    overlap: Sequence[str],
++    domain_terms: set[str],
++    post: Mapping[str, object],
++) -> bool:
++    overlap_terms = {term.upper() for term in overlap}
++    domain_overlap = overlap_terms.intersection(domain_terms)
++    if not _has_trusted_expert_signal(post):
++        return False
++    return bool(domain_overlap)
++
++
++def _has_trusted_expert_signal(post: Mapping[str, object]) -> bool:
++    lane = str(post.get("lane") or "").lower()
++    reason = str(post.get("reason") or "").lower()
++    if lane.startswith("x_search:") or str(post.get("source_trust") or "").lower() == "curated_search":
++        return _is_trusted_curated_search(post)
++    return lane.startswith("user_requested") or "memory" in lane or "memory" in reason
++
++
++def _is_trusted_curated_search(post: Mapping[str, object]) -> bool:
++    if str(post.get("source_trust") or "").lower() != "curated_search":
++        return False
++    if str(post.get("priority") or "").lower() not in _TRUSTED_SEARCH_PRIORITIES:
++        return False
++
++    source_text = " ".join(
++        str(post.get(key) or "")
++        for key in ("lane", "source_query", "query", "reason")
++    )
++    source_terms = {term.lower() for term in _terms(source_text)}
++    return any(term in source_terms for term in _TRUSTED_SEARCH_TERMS)
++
++
++def _safe_int(value: object) -> int:
++    try:
++        return int(value or 0)
++    except (TypeError, ValueError):
++        return 0
++
++
++def _score_card(themes: Sequence[str], evidence: Sequence[Mapping[str, object]]) -> float:
++    return min(100.0, 55.0 + len(themes) * 10.0 + len(evidence) * 12.5)
++
++
++def _insight_id(*, title: str, source_name: str, source_url: str, seed_ticker: str) -> str:
++    normalized_title = " ".join(title.lower().split())
++    normalized_url = source_url.strip().lower()
++    normalized_source = source_name.strip().lower()
++    normalized_ticker = seed_ticker.strip().upper()
++    source_key = normalized_url or normalized_source
++    digest = hashlib.sha256(
++        f"{source_key}|{normalized_ticker}|{normalized_title}".encode("utf-8")
++    ).hexdigest()
++    return f"news-intel-{digest[:12]}"
+diff --git a/backend/services/x_watchlist.py b/backend/services/x_watchlist.py
+new file mode 100644
+index 0000000..0b23a08
+--- /dev/null
++++ b/backend/services/x_watchlist.py
+@@ -0,0 +1,393 @@
++"""Curated X/Twitter watchlist collection via the local twscrape clone."""
++
++from __future__ import annotations
++
++import json
++import logging
++import os
++import subprocess
++from dataclasses import dataclass
++from pathlib import Path
++from typing import Protocol
++
++import yaml
++
++from backend.config import Config
++
++logger = logging.getLogger(__name__)
++
++
++PRIORITY_SCORE = {
++    "highest": 10,
++    "high": 7,
++    "medium": 4,
++    "low": 1,
++}
++
++
++def _is_required_account(account: XAccount) -> bool:
++    return account.lane.startswith("user_requested")
++
++
++def _priority_rank(account: XAccount) -> int:
++    return PRIORITY_SCORE.get(account.priority, PRIORITY_SCORE["medium"])
++
++
++@dataclass(frozen=True)
++class XAccount:
++    handle: str
++    lane: str
++    priority: str
++    reason: str
++    url: str = ""
++    user_id: str = ""
++    alert_keywords: tuple[str, ...] = ()
++
++
++@dataclass(frozen=True)
++class XSearchQuery:
++    name: str
++    query: str
++    priority: str
++
++
++@dataclass(frozen=True)
++class XWatchlistConfig:
++    accounts: tuple[XAccount, ...]
++    search_queries: tuple[XSearchQuery, ...]
++    promote_keywords: tuple[str, ...]
++    warnings: tuple[str, ...] = ()
++
++    @classmethod
++    def default_path(cls) -> Path:
++        return Config.BASE_DIR / "config" / "x_watchlists.yaml"
++
++    @classmethod
++    def load(cls, path: Path | None = None) -> "XWatchlistConfig":
++        config_path = path or cls.default_path()
++        raw = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
++
++        warnings: list[str] = []
++        quality_filters = raw.get("quality_filters") or {}
++        promote_keywords = tuple(
++            str(keyword) for keyword in quality_filters.get("promote_when_contains", [])
++        )
++
++        accounts: list[XAccount] = []
++        watchlists = raw.get("watchlists") or {}
++        for group_name, group in watchlists.items():
++            if not isinstance(group, dict):
++                warnings.append(f"watchlist {group_name} is not an object")
++                continue
++
++            priority = str(group.get("priority") or "medium")
++            for idx, account in enumerate(group.get("accounts") or []):
++                if not isinstance(account, dict):
++                    warnings.append(f"{group_name}[{idx}] is not an account object")
++                    continue
++
++                handle = str(account.get("handle") or "").strip().lstrip("@")
++                if not handle:
++                    warnings.append(f"{group_name}[{idx}] missing handle")
++                    continue
++
++                accounts.append(
++                    XAccount(
++                        handle=handle,
++                        lane=str(account.get("lane") or group_name),
++                        priority=priority,
++                        reason=str(account.get("reason") or ""),
++                        url=str(account.get("url") or f"https://x.com/{handle}"),
++                        user_id=str(account.get("user_id") or ""),
++                        alert_keywords=tuple(str(k) for k in account.get("alert_keywords") or ()),
++                    )
++                )
++
++        search_queries: list[XSearchQuery] = []
++        for idx, query in enumerate(raw.get("search_queries") or []):
++            if not isinstance(query, dict):
++                warnings.append(f"search_queries[{idx}] is not an object")
++                continue
++            name = str(query.get("name") or "").strip()
++            value = str(query.get("query") or "").strip()
++            if not name or not value:
++                warnings.append(f"search_queries[{idx}] missing name or query")
++                continue
++            search_queries.append(
++                XSearchQuery(
++                    name=name,
++                    query=value,
++                    priority=str(query.get("priority") or "medium"),
++                )
++            )
++
++        return cls(
++            accounts=tuple(accounts),
++            search_queries=tuple(search_queries),
++            promote_keywords=promote_keywords,
++            warnings=tuple(warnings),
++        )
++
++
++class TwscrapeRunnerProtocol(Protocol):
++    def user_by_login(self, handle: str) -> dict[str, object]:
++        raise NotImplementedError
++
++    def user_tweets(self, user_id: str, limit: int) -> list[dict[str, object]]:
++        raise NotImplementedError
++
++    def search(self, query: str, limit: int) -> list[dict[str, object]]:
++        raise NotImplementedError
++
++
++class TwscrapeRunner:
++    """Small subprocess wrapper around the existing local twscrape repo."""
++
++    def __init__(self, repo_path: Path | None = None, timeout_seconds: int = 60) -> None:
++        self.repo_path = repo_path or Path(os.getenv("TWSCRAPE_REPO", r"C:\Repos\twscrape"))
++        self.timeout_seconds = timeout_seconds
++
++    def user_by_login(self, handle: str) -> dict:
++        rows = self._run_json_lines(["user_by_login", handle])
++        return rows[0] if rows else {}
++
++    def user_tweets(self, user_id: str, limit: int) -> list[dict]:
++        return self._run_json_lines(["user_tweets", user_id, "--limit", str(limit)])[:limit]
++
++    def search(self, query: str, limit: int) -> list[dict[str, object]]:
++        return self._run_json_lines(["search", query, "--limit", str(limit)])[:limit]
++
++    def _run_json_lines(self, args: list[str]) -> list[dict]:
++        env = dict(os.environ)
++        env["PYTHONUTF8"] = "1"
++        env["TWS_RAISE_WHEN_NO_ACCOUNT"] = "true"
++
++        completed = subprocess.run(
++            ["uv", "run", "twscrape", *args],
++            cwd=str(self.repo_path),
++            capture_output=True,
++            text=True,
++            encoding="utf-8",
++            errors="replace",
++            timeout=self.timeout_seconds,
++            env=env,
++            check=False,
++        )
++        if completed.returncode != 0:
++            detail = (completed.stderr or completed.stdout or "").strip()
++            raise RuntimeError(detail or f"twscrape exited {completed.returncode}")
++
++        rows: list[dict] = []
++        for line in completed.stdout.splitlines():
++            if not line.strip():
++                continue
++            rows.append(json.loads(line))
++        return rows
++
++
++class XWatchlistCollector:
++    def __init__(
++        self,
++        config: XWatchlistConfig | None = None,
++        runner: TwscrapeRunnerProtocol | None = None,
++    ) -> None:
++        self.config = config or XWatchlistConfig.load()
++        self.runner = runner or TwscrapeRunner()
++
++    def _selected_accounts(self, max_accounts: int) -> tuple[XAccount, ...]:
++        if max_accounts <= 0:
++            return ()
++
++        required: list[XAccount] = []
++        seen: set[str] = set()
++        for account in self.config.accounts:
++            if not _is_required_account(account) or account.handle in seen:
++                continue
++            required.append(account)
++            seen.add(account.handle)
++
++        required_handles = {account.handle for account in required}
++        fill_limit = max(0, max_accounts - len(required))
++
++        selected: list[XAccount] = list(required)
++        ranked_optional = sorted(
++            (
++                (index, account)
++                for index, account in enumerate(self.config.accounts)
++                if account.handle not in required_handles
++            ),
++            key=lambda item: (-_priority_rank(item[1]), item[0]),
++        )
++
++        for _, account in ranked_optional:
++            if len(selected) >= len(required) + fill_limit:
++                break
++            if account.handle in seen:
++                continue
++            selected.append(account)
++            seen.add(account.handle)
++
++        return tuple(selected)
++
++    def collect_accounts(self, max_accounts: int = 12, posts_per_account: int = 5) -> dict:
++        posts: list[dict] = []
++        errors: list[dict] = []
++
++        selected_accounts = self._selected_accounts(max_accounts)
++        for account in selected_accounts:
++            try:
++                user_id = account.user_id or str(self.runner.user_by_login(account.handle).get("id_str") or "")
++                if not user_id:
++                    errors.append({"handle": account.handle, "message": "Could not resolve user id"})
++                    continue
++
++                for tweet in self.runner.user_tweets(user_id, posts_per_account)[:posts_per_account]:
++                    posts.append(self._normalize_post(account, tweet))
++            except Exception as exc:
++                logger.warning("X collection failed for @%s: %s", account.handle, exc)
++                errors.append({"handle": account.handle, "message": str(exc)})
++
++        posts.sort(
++            key=lambda post: (
++                int(post.get("signal_score", 0)),
++                int(post.get("engagement", 0)),
++            ),
++            reverse=True,
++        )
++
++        if errors and posts:
++            source_status = "degraded"
++        elif errors:
++            source_status = "error"
++        else:
++            source_status = "ok"
++
++        return {
++            "source": "x_watchlist",
++            "source_status": source_status,
++            "accounts_checked": len(selected_accounts),
++            "posts": posts,
++            "errors": errors,
++            "config_warnings": list(self.config.warnings),
++        }
++
++    def collect_searches(self, max_queries: int = 3, posts_per_query: int = 10) -> dict[str, object]:
++        posts: list[dict[str, object]] = []
++        errors: list[dict[str, str]] = []
++        successful_queries = 0
++        selected_queries = self.config.search_queries[: max(0, max_queries)]
++
++        for query in selected_queries:
++            try:
++                tweets = self.runner.search(query.query, posts_per_query)[:posts_per_query]
++                successful_queries += 1
++                for tweet in tweets:
++                    post = self._normalize_search_post(query, tweet)
++                    posts.append(post)
++            except Exception as exc:
++                logger.warning("X search failed for %s: %s", query.name, exc)
++                errors.append({"query": query.name, "message": str(exc)})
++
++        posts.sort(
++            key=lambda post: (
++                int(post.get("signal_score", 0)),
++                int(post.get("engagement", 0)),
++            ),
++            reverse=True,
++        )
++
++        if errors and successful_queries:
++            source_status = "degraded"
++        elif errors:
++            source_status = "error"
++        else:
++            source_status = "ok"
++
++        return {
++            "source": "x_search",
++            "source_status": source_status,
++            "queries_checked": len(selected_queries),
++            "posts": posts,
++            "errors": errors,
++        }
++
++    def _normalize_post(self, account: XAccount, tweet: dict) -> dict:
++        text = str(tweet.get("rawContent") or "")
++        matched_keywords = self._matched_keywords(account, text)
++        engagement = self._engagement(tweet)
++        signal_score = (
++            PRIORITY_SCORE.get(account.priority, PRIORITY_SCORE["medium"])
++            + len(matched_keywords) * 8
++            + min(5, engagement // 100)
++        )
++
++        return {
++            "id": str(tweet.get("id_str") or tweet.get("id") or ""),
++            "handle": account.handle,
++            "lane": account.lane,
++            "priority": account.priority,
++            "url": str(tweet.get("url") or ""),
++            "date": str(tweet.get("date") or ""),
++            "text": text,
++            "engagement": engagement,
++            "matched_keywords": matched_keywords,
++            "signal_score": signal_score,
++            "reason": account.reason,
++        }
++
++    def _normalize_search_post(self, query: XSearchQuery, tweet: dict[str, object]) -> dict[str, object]:
++        text = str(tweet.get("rawContent") or "")
++        matched_keywords = self._matched_keywords_for_text(text)
++        engagement = self._engagement(tweet)
++        signal_score = (
++            PRIORITY_SCORE.get(query.priority, PRIORITY_SCORE["medium"])
++            + len(matched_keywords) * 8
++            + min(5, engagement // 100)
++        )
++        return {
++            "id": str(tweet.get("id_str") or tweet.get("id") or ""),
++            "source_query": query.name,
++            "query": query.query,
++            "lane": f"x_search:{query.name}",
++            "reason": f"Configured X search query: {query.name}",
++            "source_trust": "curated_search",
++            "priority": query.priority,
++            "url": str(tweet.get("url") or ""),
++            "date": str(tweet.get("date") or ""),
++            "text": text,
++            "engagement": engagement,
++            "matched_keywords": matched_keywords,
++            "signal_score": signal_score,
++        }
++
++    def _matched_keywords(self, account: XAccount, text: str) -> list[str]:
++        keywords = list(account.alert_keywords) + list(self.config.promote_keywords)
++        return self._matched_keywords_for_text(text, keywords)
++
++    def _matched_keywords_for_text(
++        self,
++        text: str,
++        account_keywords: list[str] | None = None,
++    ) -> list[str]:
++        lowered = text.lower()
++        keywords = account_keywords or list(self.config.promote_keywords)
++        matched: list[str] = []
++        seen: set[str] = set()
++        for keyword in keywords:
++            key = keyword.strip()
++            if not key or key.lower() in seen:
++                continue
++            if key.lower() in lowered:
++                matched.append(key)
++                seen.add(key.lower())
++        return matched
++
++    @staticmethod
++    def _engagement(tweet: dict) -> int:
++        total = 0
++        for key in ("likeCount", "retweetCount", "replyCount", "quoteCount", "bookmarkedCount"):
++            try:
++                total += int(tweet.get(key) or 0)
++            except (TypeError, ValueError):
++                continue
++        return total
+diff --git a/tests/test_daily_idea_sweep.py b/tests/test_daily_idea_sweep.py
+new file mode 100644
+index 0000000..7365822
+--- /dev/null
++++ b/tests/test_daily_idea_sweep.py
+@@ -0,0 +1,268 @@
++import json
++import tempfile
++import unittest
++from contextlib import contextmanager
++from pathlib import Path
++from unittest.mock import patch
++
++
++class DailyIdeaSweepTest(unittest.TestCase):
++    def test_idea_feed_writes_latest_and_timestamped_snapshot(self) -> None:
++        from backend.services.idea_feed import build_idea_feed, write_idea_feed
++
++        sweep = {
++            "generated_at": "2026-06-05T12:00:00+00:00",
++            "source_status": "ok",
++            "inputs": {"tickers": ["NVDA", "AVGO"]},
++            "insights": [
++                {
++                    "source": "x",
++                    "score": 95,
++                    "title": "@zephyr_z9: HBM shortage matters",
++                    "url": "https://x.com/zephyr_z9/status/1",
++                    "metadata": {"matched_keywords": ["HBM", "shortage"], "lane": "ai_semis"},
++                },
++                {
++                    "source": "scanner",
++                    "score": 82,
++                    "title": "NVDA technical score 82.0",
++                    "metadata": {"ticker": "NVDA", "overall_signal": "bullish"},
++                },
++            ],
++        }
++
++        with tempfile.TemporaryDirectory() as tmpdir:
++            feed = build_idea_feed(sweep)
++            paths = write_idea_feed(feed, Path(tmpdir))
++            latest = json.loads(paths["latest"].read_text(encoding="utf-8"))
++
++        self.assertEqual(latest["generated_at"], "2026-06-05T12:00:00+00:00")
++        self.assertEqual(latest["source_status"], "ok")
++        self.assertEqual(latest["ideas"][0]["status"], "needs_review")
++        self.assertEqual(latest["ideas"][0]["source"], "x")
++        self.assertEqual(latest["ideas"][1]["tickers"], ["NVDA"])
++        self.assertTrue(paths["snapshot"].name.startswith("idea-feed-20260605-120000"))
++
++    def test_watchlist_events_are_added_to_idea_feed(self) -> None:
++        from backend.services.idea_feed import build_idea_feed
++
++        sweep = {
++            "generated_at": "2026-06-07T12:00:00+00:00",
++            "source_status": "ok",
++            "inputs": {"tickers": ["GENB"]},
++            "insights": [],
++            "watchlist_events": [
++                {
++                    "source": "watchlist_event",
++                    "score": 65,
++                    "title": "GENB: Generate Biomedicines IPO lock-up overhang",
++                    "metadata": {
++                        "ticker": "GENB",
++                        "event_date": "2026-08-26",
++                        "days_until_event": 80,
++                    },
++                }
++            ],
++        }
++
++        feed = build_idea_feed(sweep)
++
++        self.assertEqual(feed["ideas"][0]["source"], "watchlist_event")
++        self.assertEqual(feed["ideas"][0]["tickers"], ["GENB"])
++        self.assertEqual(feed["ideas"][0]["raw_metadata"]["event_date"], "2026-08-26")
++        self.assertIn("calendar", " ".join(feed["ideas"][0]["next_actions"]).lower())
++
++    def test_reddit_insights_get_reddit_specific_next_actions(self) -> None:
++        from backend.services.idea_feed import build_idea_feed
++
++        sweep = {
++            "generated_at": "2026-06-07T12:00:00+00:00",
++            "source_status": "ok",
++            "inputs": {"tickers": ["NVDA"]},
++            "insights": [
++                {
++                    "source": "reddit",
++                    "score": 67,
++                    "title": "r/stocks: NVDA - HBM shortage DD",
++                    "url": "https://www.reddit.com/r/stocks/comments/1/nvda",
++                    "metadata": {
++                        "ticker": "NVDA",
++                        "subreddit": "stocks",
++                        "score": 240,
++                        "num_comments": 80,
++                    },
++                }
++            ],
++        }
++
++        feed = build_idea_feed(sweep)
++
++        self.assertEqual(feed["ideas"][0]["source"], "reddit")
++        self.assertEqual(feed["ideas"][0]["tickers"], ["NVDA"])
++        self.assertIn("reddit", " ".join(feed["ideas"][0]["next_actions"]).lower())
++
++    def test_ai_infra_update_insights_keep_related_tickers_and_next_actions(self) -> None:
++        from backend.services.idea_feed import build_idea_feed
++
++        sweep = {
++            "generated_at": "2026-06-07T12:00:00+00:00",
++            "source_status": "ok",
++            "inputs": {"tickers": ["NVDA"]},
++            "insights": [
++                {
++                    "source": "ai_infra_update",
++                    "score": 91.9,
++                    "title": "AI infra update: H100 SXM rental median $2.40, 7D -41.9%",
++                    "url": None,
++                    "metadata": {
++                        "gpu": "H100 SXM",
++                        "related_tickers": ["NVDA", "AMD"],
++                    },
++                }
++            ],
++        }
++
++        feed = build_idea_feed(sweep)
++
++        self.assertEqual(feed["ideas"][0]["source"], "ai_infra_update")
++        self.assertEqual(feed["ideas"][0]["tickers"], ["NVDA", "AMD"])
++        self.assertIn("ai infrastructure", " ".join(feed["ideas"][0]["next_actions"]).lower())
++
++    def test_idea_feed_preserves_news_intelligence_metadata(self) -> None:
++        from backend.services.idea_feed import build_idea_feed
++
++        feed = build_idea_feed(
++            {
++                "generated_at": "2026-06-08T02:00:00+00:00",
++                "source_status": "ok",
++                "insights": [
++                    {
++                        "source": "news_intelligence",
++                        "score": 85,
++                        "title": "Memory chip supply tightens as HBM demand rises",
++                        "url": "https://example.com/memory-hbm",
++                        "metadata": {
++                            "insight_id": "news-intel-abc",
++                            "related_tickers": ["MU", "NVDA"],
++                            "themes": ["hbm_supply_chain"],
++                            "source_claim": "Memory chip supply tightens as HBM demand rises",
++                        },
++                    }
++                ],
++            }
++        )
++
++        idea = feed["ideas"][0]
++        assert idea["source"] == "news_intelligence"
++        assert idea["tickers"] == ["MU", "NVDA"]
++        assert idea["raw_metadata"]["insight_id"] == "news-intel-abc"
++        assert "x expert reaction" in " ".join(idea["next_actions"]).lower()
++
++    def test_idea_feed_includes_news_intelligence_cards_even_when_insights_are_capped(self) -> None:
++        from backend.services.idea_feed import build_idea_feed
++
++        feed = build_idea_feed(
++            {
++                "generated_at": "2026-06-08T02:00:00+00:00",
++                "source_status": "ok",
++                "insights": [
++                    {
++                        "source": "scanner",
++                        "score": 99,
++                        "title": "NVDA technical score 99.0, signal bullish, RSI 42",
++                        "url": None,
++                        "metadata": {"ticker": "NVDA", "overall_signal": "bullish"},
++                    }
++                ],
++                "news_intelligence": [
++                    {
++                        "insight_id": "news-intel-capped",
++                        "source_type": "news_intelligence",
++                        "source_claim": "Memory chip supply tightens as HBM demand rises",
++                        "source_name": "Example Wire",
++                        "source_url": "https://example.com/memory-hbm",
++                        "source_published_at": "2026-06-08T00:30:00+00:00",
++                        "related_tickers": ["MU", "NVDA"],
++                        "themes": ["hbm_supply_chain"],
++                        "cross_reference_status": "expert_reaction_found",
++                        "evidence": [{"handle": "mindmoon_108"}],
++                        "score": 85,
++                        "human_review": {"default_decision": "needs_more_source"},
++                    }
++                ],
++            }
++        )
++
++        news_ideas = [idea for idea in feed["ideas"] if idea["source"] == "news_intelligence"]
++        assert any(idea["source"] == "scanner" for idea in feed["ideas"])
++        assert news_ideas[0]["tickers"] == ["MU", "NVDA"]
++        assert news_ideas[0]["raw_metadata"]["insight_id"] == "news-intel-capped"
++
++    def test_daily_idea_sweep_job_is_registered(self) -> None:
++        from backend.jobs import register_all_jobs
++        from backend.scheduler import SchedulerManager
++
++        manager = SchedulerManager()
++        register_all_jobs(manager)
++
++        job = manager.get_job("daily_idea_sweep")
++        self.assertIsNotNone(job)
++        self.assertEqual(job["name"], "Daily Idea Sweep")
++        self.assertIn("idea", job["description"].lower())
++
++    def test_daily_idea_sweep_job_writes_feed_and_records_summary(self) -> None:
++        from backend.jobs.daily_idea_sweep import run_daily_idea_sweep
++
++        sweep = {
++            "generated_at": "2026-06-05T12:00:00+00:00",
++            "source_status": "ok",
++            "inputs": {"tickers": ["NVDA"]},
++            "insights": [
++                {
++                    "source": "x",
++                    "score": 90,
++                    "title": "HBM shortage",
++                    "url": "https://x.com/example/status/1",
++                    "metadata": {"matched_keywords": ["HBM"]},
++                }
++            ],
++        }
++
++        with tempfile.TemporaryDirectory() as tmpdir:
++            job_contexts = []
++            with (
++                patch("backend.jobs.daily_idea_sweep.MarketSweepService") as service_class,
++                patch("backend.jobs.daily_idea_sweep.Config.IDEA_SWEEP_OUTPUT_DIR", tmpdir),
++                patch("backend.jobs.daily_idea_sweep.job_timer", new=_fake_job_timer(job_contexts)),
++            ):
++                service_class.return_value.run.return_value = sweep
++                run_daily_idea_sweep()
++
++            latest = Path(tmpdir) / "latest.json"
++            saved = json.loads(latest.read_text(encoding="utf-8"))
++
++        self.assertEqual(saved["ideas"][0]["title"], "HBM shortage")
++        self.assertEqual(job_contexts[0]["job_id"], "daily_idea_sweep")
++        self.assertIn("1 ideas", job_contexts[0]["ctx"]["result_summary"])
++        service_class.return_value.run.assert_called_once_with(
++            include_x=True,
++            include_reddit=False,
++            top_n=10,
++            x_max_accounts=16,
++            x_posts_per_account=3,
++            news_max_articles=3,
++        )
++
++
++def _fake_job_timer(contexts: list[dict]):
++    @contextmanager
++    def _timer(job_id: str, job_name: str):
++        ctx = {"result_summary": "", "agent_name": None, "cost": 0.0, "status": "success"}
++        contexts.append({"job_id": job_id, "job_name": job_name, "ctx": ctx})
++        yield ctx
++
++    return _timer
++
++
++if __name__ == "__main__":
++    unittest.main()
+diff --git a/tests/test_market_sweep_service.py b/tests/test_market_sweep_service.py
+new file mode 100644
+index 0000000..7914319
+--- /dev/null
++++ b/tests/test_market_sweep_service.py
+@@ -0,0 +1,508 @@
++import unittest
++import sqlite3
++import tempfile
++from datetime import datetime, timezone
++from pathlib import Path
++from unittest.mock import patch
++
++from backend.agents.base import AgentResult
++
++
++class _FakeScanner:
++    def __init__(self) -> None:
++        self.inputs: dict | None = None
++
++    def run(self, inputs: dict) -> AgentResult:
++        self.inputs = inputs
++        return AgentResult(
++            agent_name="scanner",
++            framework="native",
++            status="success",
++            output="scan ok",
++            raw_output={
++                "top_results": [
++                    {
++                        "ticker": "NVDA",
++                        "opportunity_score": 82.0,
++                        "current_price": 100.0,
++                        "rsi": 45.0,
++                        "overall_signal": "bullish",
++                    }
++                ]
++            },
++        )
++
++
++class _FakeNewsFetcher:
++    def fetch_news_for_ticker(self, ticker: str, max_articles: int = 3) -> dict:
++        return {
++            "ticker": ticker,
++            "articles": [
++                {
++                    "title": "NVDA supplier flags HBM shortage",
++                    "source": "Google News",
++                    "url": "https://example.test/news",
++                    "sentiment_label": "positive",
++                }
++            ],
++        }
++
++
++class _FakeXCollector:
++    def collect_accounts(self, max_accounts: int = 12, posts_per_account: int = 5) -> dict:
++        return {
++            "source_status": "ok",
++            "posts": [
++                {
++                    "handle": "zephyr_z9",
++                    "text": "HBM shortage matters for AI servers",
++                    "url": "https://x.com/zephyr_z9/status/1",
++                    "signal_score": 18,
++                    "matched_keywords": ["HBM", "shortage"],
++                }
++            ],
++            "errors": [],
++        }
++
++    def collect_searches(self, max_queries: int = 3, posts_per_query: int = 10) -> dict:
++        return {"source_status": "ok", "posts": [], "errors": [], "queries_checked": 0}
++
++
++class _FakeRedditScanner:
++    def scan_multiple_tickers(
++        self,
++        tickers: list[str],
++        subreddits: list[str] | None = None,
++        limit: int = 10,
++    ) -> dict:
++        return {
++            "NVDA": {
++                "ticker": "NVDA",
++                "source_status": "ok",
++                "total_mentions": 1,
++                "total_score": 240,
++                "total_comments": 80,
++                "avg_sentiment": 0.4,
++                "posts": [
++                    {
++                        "title": "NVDA HBM shortage DD",
++                        "url": "https://www.reddit.com/r/stocks/comments/1/nvda",
++                        "subreddit": "stocks",
++                        "score": 240,
++                        "num_comments": 80,
++                        "sentiment_label": "positive",
++                    }
++                ],
++                "errors": [],
++            }
++        }
++
++
++class _FailingRedditScanner:
++    def scan_multiple_tickers(
++        self,
++        tickers: list[str],
++        subreddits: list[str] | None = None,
++        limit: int = 10,
++    ) -> dict:
++        raise RuntimeError("reddit unavailable")
++
++
++def _fake_ai_infra_update() -> dict:
++    return {
++        "source_status": "ok",
++        "items": [
++            {
++                "source": "ai_infra_update",
++                "score": 91.9,
++                "title": "AI infra update: H100 SXM rental median $2.40, 7D -41.9%, 30D +4.7%, offers 16",
++                "url": None,
++                "metadata": {
++                    "gpu": "H100 SXM",
++                    "ticker": "NVDA",
++                    "related_tickers": ["NVDA", "AMD"],
++                },
++            }
++        ],
++        "errors": [],
++    }
++
++
++class MarketSweepServiceTest(unittest.TestCase):
++    def test_market_sweep_reuses_scanner_news_and_x_without_ai_summary(self) -> None:
++        from backend.services.market_sweep import MarketSweepService
++
++        scanner = _FakeScanner()
++        service = MarketSweepService(
++            scanner=scanner,
++            news_fetcher=_FakeNewsFetcher(),
++            x_collector=_FakeXCollector(),
++            reddit_scanner=_FakeRedditScanner(),
++            ai_infra_loader=_fake_ai_infra_update,
++        )
++
++        result = service.run(tickers=["NVDA"], include_x=True, include_reddit=False, top_n=5)
++
++        self.assertEqual(scanner.inputs["tickers"], ["NVDA"])
++        self.assertFalse(scanner.inputs["ai_summary"])
++        self.assertEqual(result["source_status"], "ok")
++        self.assertEqual(result["scanner"]["metadata"]["scanned"], 1)
++        self.assertEqual(result["news"]["NVDA"]["articles"][0]["title"], "NVDA supplier flags HBM shortage")
++        self.assertEqual(result["x"]["posts"][0]["handle"], "zephyr_z9")
++        self.assertEqual(result["ai_infra_update"]["source_status"], "ok")
++        self.assertTrue(any(item["source"] == "ai_infra_update" for item in result["insights"]))
++
++    def test_market_sweep_emits_news_intelligence_cards(self) -> None:
++        from backend.services.market_sweep import MarketSweepService
++
++        class FakeScanner:
++            def run(self, inputs: dict) -> AgentResult:
++                return AgentResult(
++                    agent_name="scanner",
++                    framework="native",
++                    status="success",
++                    output="scan ok",
++                    raw_output={
++                        "top_results": [
++                            {
++                                "ticker": "MU",
++                                "opportunity_score": 50,
++                                "overall_signal": "neutral",
++                                "rsi": 55,
++                            }
++                        ]
++                    },
++                    metadata={"scanned": 1},
++                    error=None,
++                )
++
++        class FakeNewsFetcher:
++            def fetch_news_for_ticker(self, ticker: str, max_articles: int) -> dict[str, object]:
++                return {
++                    "articles": [
++                        {
++                            "title": "Memory chip supply tightens as HBM demand rises",
++                            "url": "https://example.com/memory-hbm",
++                            "source": "Example Wire",
++                            "published_at": "2026-06-08T00:30:00+00:00",
++                        }
++                    ]
++                }
++
++        class FakeXCollector:
++            def collect_accounts(self, max_accounts: int, posts_per_account: int) -> dict[str, object]:
++                return {
++                    "source_status": "ok",
++                    "posts": [
++                        {
++                            "handle": "mindmoon_108",
++                            "lane": "user_requested_memory",
++                            "reason": "Korean memory-chip engineer with supply/demand context",
++                            "text": "HBM demand is still stronger than supply and DRAM allocation is tight.",
++                            "url": "https://x.com/mindmoon_108/status/2",
++                            "matched_keywords": ["HBM", "DRAM"],
++                            "signal_score": 30,
++                        }
++                    ],
++                    "errors": [],
++                }
++
++            def collect_searches(self, max_queries: int, posts_per_query: int) -> dict[str, object]:
++                return {"source_status": "ok", "posts": [], "errors": [], "queries_checked": 0}
++
++        service = MarketSweepService(
++            scanner=FakeScanner(),
++            news_fetcher=FakeNewsFetcher(),
++            x_collector=FakeXCollector(),
++            ai_infra_loader=lambda: {"source_status": "skipped", "items": [], "errors": []},
++        )
++
++        result = service.run(tickers=["MU"], include_x=True, include_ai_infra=False, top_n=5)
++
++        cards = result["news_intelligence"]
++        assert cards[0]["source_type"] == "news_intelligence"
++        assert cards[0]["cross_reference_status"] == "expert_reaction_found"
++        assert any(item["source"] == "news_intelligence" for item in result["insights"])
++
++    def test_market_sweep_errors_when_x_search_fails(self) -> None:
++        from backend.services.market_sweep import MarketSweepService
++
++        class SearchFailingXCollector(_FakeXCollector):
++            def collect_searches(self, max_queries: int, posts_per_query: int) -> dict:
++                return {
++                    "source_status": "error",
++                    "posts": [],
++                    "errors": [{"message": "x search unavailable"}],
++                    "queries_checked": 1,
++                }
++
++        service = MarketSweepService(
++            scanner=_FakeScanner(),
++            news_fetcher=_FakeNewsFetcher(),
++            x_collector=SearchFailingXCollector(),
++            reddit_scanner=_FakeRedditScanner(),
++            ai_infra_loader=_fake_ai_infra_update,
++        )
++
++        result = service.run(tickers=["NVDA"], include_x=True, include_ai_infra=False, top_n=5)
++
++        self.assertEqual(result["x"]["source_status"], "ok")
++        self.assertEqual(result["x_search"]["source_status"], "error")
++        self.assertEqual(result["source_status"], "error")
++
++    def test_market_sweep_degrades_when_news_fetch_fails(self) -> None:
++        from backend.services.market_sweep import MarketSweepService
++
++        class FailingNewsFetcher:
++            def fetch_news_for_ticker(self, ticker: str, max_articles: int = 3) -> dict:
++                raise RuntimeError("news unavailable")
++
++        service = MarketSweepService(
++            scanner=_FakeScanner(),
++            news_fetcher=FailingNewsFetcher(),
++            x_collector=_FakeXCollector(),
++            reddit_scanner=_FakeRedditScanner(),
++            ai_infra_loader=_fake_ai_infra_update,
++        )
++
++        result = service.run(tickers=["NVDA"], include_x=False, include_ai_infra=False, top_n=5)
++
++        self.assertIn("error", result["news"]["NVDA"])
++        self.assertEqual(result["source_status"], "degraded")
++
++    def test_market_sweep_uses_active_dashboard_watchlist_by_default(self) -> None:
++        from backend.services.market_sweep import MarketSweepService
++
++        with tempfile.TemporaryDirectory() as tmpdir:
++            db_path = str(Path(tmpdir) / "stocks.db")
++            conn = sqlite3.connect(db_path)
++            conn.execute(
++                """
++                CREATE TABLE stocks (
++                    ticker TEXT PRIMARY KEY,
++                    name TEXT,
++                    market TEXT,
++                    active INTEGER
++                )
++                """
++            )
++            conn.executemany(
++                "INSERT INTO stocks (ticker, name, market, active) VALUES (?, ?, ?, ?)",
++                [
++                    ("NVDA", "NVIDIA Corporation", "US", 1),
++                    ("AAPL", "Apple Inc.", "US", 1),
++                    ("TSLA", "Tesla Inc.", "US", 0),
++                ],
++            )
++            conn.commit()
++            conn.close()
++
++            scanner = _FakeScanner()
++            service = MarketSweepService(
++                scanner=scanner,
++                news_fetcher=_FakeNewsFetcher(),
++                x_collector=_FakeXCollector(),
++                reddit_scanner=_FakeRedditScanner(),
++                ai_infra_loader=_fake_ai_infra_update,
++            )
++
++            with patch("backend.config.Config.DB_PATH", db_path):
++                result = service.run(tickers=None, include_x=False, include_reddit=False)
++
++        self.assertEqual(scanner.inputs["tickers"], ["AAPL", "NVDA"])
++        self.assertEqual(result["inputs"]["tickers"], ["AAPL", "NVDA"])
++
++    def test_market_sweep_skips_private_dashboard_symbols_in_quote_scan(self) -> None:
++        from backend.services.market_sweep import MarketSweepService
++
++        with tempfile.TemporaryDirectory() as tmpdir:
++            db_path = str(Path(tmpdir) / "stocks.db")
++            conn = sqlite3.connect(db_path)
++            conn.execute(
++                """
++                CREATE TABLE stocks (
++                    ticker TEXT PRIMARY KEY,
++                    name TEXT,
++                    market TEXT,
++                    active INTEGER
++                )
++                """
++            )
++            conn.executemany(
++                "INSERT INTO stocks (ticker, name, market, active) VALUES (?, ?, ?, ?)",
++                [
++                    ("NVDA", "NVIDIA Corporation", "US", 1),
++                    ("SPACEX", "SpaceX", "Private", 1),
++                ],
++            )
++            conn.commit()
++            conn.close()
++
++            scanner = _FakeScanner()
++            service = MarketSweepService(
++                scanner=scanner,
++                news_fetcher=_FakeNewsFetcher(),
++                x_collector=_FakeXCollector(),
++                reddit_scanner=_FakeRedditScanner(),
++                ai_infra_loader=_fake_ai_infra_update,
++            )
++
++            with patch("backend.config.Config.DB_PATH", db_path):
++                result = service.run(tickers=None, include_x=False, include_reddit=False)
++
++        self.assertEqual(scanner.inputs["tickers"], ["NVDA"])
++        self.assertEqual(result["inputs"]["tickers"], ["NVDA"])
++        self.assertEqual(
++            result["inputs"]["skipped_tickers"],
++            [{"ticker": "SPACEX", "market": "Private", "reason": "private_market"}],
++        )
++
++    def test_market_sweep_includes_watchlist_events(self) -> None:
++        from backend.services.market_sweep import MarketSweepService
++
++        event = {
++            "source": "watchlist_event",
++            "score": 65,
++            "title": "GENB: Generate Biomedicines IPO lock-up overhang",
++            "metadata": {"ticker": "GENB", "event_date": "2026-08-26"},
++        }
++        service = MarketSweepService(
++            scanner=_FakeScanner(),
++            news_fetcher=_FakeNewsFetcher(),
++            x_collector=_FakeXCollector(),
++            reddit_scanner=_FakeRedditScanner(),
++            ai_infra_loader=_fake_ai_infra_update,
++        )
++
++        with patch("backend.services.market_sweep.build_watchlist_event_insights", return_value=[event]):
++            result = service.run(tickers=["NVDA"], include_x=False, include_reddit=False)
++
++        self.assertEqual(result["watchlist_events"], [event])
++
++    def test_market_sweep_includes_reddit_intake_when_enabled(self) -> None:
++        from backend.services.market_sweep import MarketSweepService
++
++        service = MarketSweepService(
++            scanner=_FakeScanner(),
++            news_fetcher=_FakeNewsFetcher(),
++            x_collector=_FakeXCollector(),
++            reddit_scanner=_FakeRedditScanner(),
++            ai_infra_loader=_fake_ai_infra_update,
++        )
++
++        result = service.run(tickers=["NVDA"], include_x=False, include_reddit=True, top_n=5)
++
++        self.assertEqual(result["reddit"]["source_status"], "ok")
++        self.assertEqual(result["reddit"]["tickers"]["NVDA"]["total_mentions"], 1)
++        self.assertFalse(any(item["source"] == "reddit" for item in result["insights"]))
++        self.assertEqual(result["workflow"]["reddit_stage"], "final_diligence")
++        self.assertEqual(result["workflow"]["final_diligence_status"], "ok")
++        self.assertEqual(result["final_diligence"][0]["source"], "reddit")
++        self.assertTrue(result["final_diligence"][0]["metadata"]["diligence_only"])
++        self.assertEqual(
++            result["final_diligence"][0]["metadata"]["workflow_stage"],
++            "final_diligence",
++        )
++
++    def test_market_sweep_skips_reddit_by_default_for_second_stage_diligence(self) -> None:
++        from backend.services.market_sweep import MarketSweepService
++
++        service = MarketSweepService(
++            scanner=_FakeScanner(),
++            news_fetcher=_FakeNewsFetcher(),
++            x_collector=_FakeXCollector(),
++            reddit_scanner=_FailingRedditScanner(),
++            ai_infra_loader=_fake_ai_infra_update,
++        )
++
++        result = service.run(tickers=["NVDA"], include_x=False)
++
++        self.assertEqual(result["source_status"], "ok")
++        self.assertEqual(result["reddit"]["source_status"], "skipped")
++        self.assertFalse(any(item["source"] == "reddit" for item in result["insights"]))
++
++    def test_reddit_failure_degrades_market_sweep_without_blocking_other_sources(self) -> None:
++        from backend.services.market_sweep import MarketSweepService
++
++        service = MarketSweepService(
++            scanner=_FakeScanner(),
++            news_fetcher=_FakeNewsFetcher(),
++            x_collector=_FakeXCollector(),
++            reddit_scanner=_FailingRedditScanner(),
++            ai_infra_loader=_fake_ai_infra_update,
++        )
++
++        result = service.run(tickers=["NVDA"], include_x=False, include_reddit=True)
++
++        self.assertEqual(result["source_status"], "ok")
++        self.assertEqual(result["reddit"]["source_status"], "degraded")
++        self.assertEqual(result["workflow"]["final_diligence_status"], "degraded")
++        self.assertEqual(result["scanner"]["status"], "success")
++
++    def test_watchlist_notes_loader_builds_due_event_insights(self) -> None:
++        from backend.services.watchlist_notes import build_watchlist_event_insights
++
++        with tempfile.TemporaryDirectory() as tmpdir:
++            path = Path(tmpdir) / "watchlist_notes.yaml"
++            path.write_text(
++                """
++events:
++  - ticker: GENB
++    title: Generate Biomedicines IPO lock-up overhang
++    event_date: "2026-08-26"
++    user_note_basis: Watch restricted share overhang.
++    process:
++      - Watch volume after unlock.
++    sources:
++      - https://example.test/genb
++""",
++                encoding="utf-8",
++            )
++
++            events = build_watchlist_event_insights(
++                now=datetime(2026, 6, 7, tzinfo=timezone.utc),
++                lookahead_days=90,
++                path=path,
++            )
++
++        self.assertEqual(events[0]["source"], "watchlist_event")
++        self.assertEqual(events[0]["metadata"]["ticker"], "GENB")
++        self.assertEqual(events[0]["metadata"]["event_date"], "2026-08-26")
++        self.assertEqual(events[0]["metadata"]["days_until_event"], 80)
++
++    def test_market_sweep_api_returns_service_result(self) -> None:
++        from flask import Flask
++        from backend.api.market_sweep import market_sweep_bp
++
++        app = Flask(__name__)
++        app.register_blueprint(market_sweep_bp)
++
++        with patch("backend.api.market_sweep.MarketSweepService") as service_class:
++            service_class.return_value.run.return_value = {
++                "source_status": "ok",
++                "insights": [],
++            }
++            response = app.test_client().post(
++                "/api/market-sweep",
++                json={"tickers": ["NVDA"], "include_x": False, "top_n": 3},
++            )
++
++        self.assertEqual(response.status_code, 200)
++        self.assertEqual(response.get_json()["source_status"], "ok")
++        service_class.return_value.run.assert_called_once_with(
++            tickers=["NVDA"],
++            include_x=False,
++            include_reddit=False,
++            include_ai_infra=True,
++            top_n=3,
++            period="3mo",
++            x_max_accounts=12,
++            x_posts_per_account=5,
++            news_max_articles=3,
++            reddit_max_tickers=5,
++            reddit_posts_per_ticker=5,
++        )
++
++
++if __name__ == "__main__":
++    unittest.main()
+diff --git a/tests/test_monitoring_hardening.py b/tests/test_monitoring_hardening.py
+new file mode 100644
+index 0000000..2943d94
+--- /dev/null
++++ b/tests/test_monitoring_hardening.py
+@@ -0,0 +1,391 @@
++import json
++import sys
++import tempfile
++import unittest
++from pathlib import Path
++from unittest.mock import patch
++
++REPO_ROOT = Path(__file__).resolve().parents[1]
++if str(REPO_ROOT) not in sys.path:
++    sys.path.insert(0, str(REPO_ROOT))
++
++
++class _FakeAnalytics:
++    def get_stock_price_data(self, ticker: str, period: str) -> dict:
++        return {
++            "open": [100.0, 101.0, 102.0, 103.0, 104.0, 105.0, 106.0, 107.0,
++                     108.0, 109.0, 110.0, 111.0, 112.0, 113.0, None],
++            "high": [101.0, 102.0, 103.0, 104.0, 105.0, 106.0, 107.0, 108.0,
++                     109.0, 110.0, 111.0, 112.0, 113.0, 114.0, None],
++            "low": [99.0, 100.0, 101.0, 102.0, 103.0, 104.0, 105.0, 106.0,
++                    107.0, 108.0, 109.0, 110.0, 111.0, 112.0, None],
++            "close": [100.0, 101.0, 102.0, 103.0, 104.0, 105.0, 106.0, 107.0,
++                      108.0, 109.0, 110.0, 111.0, 112.0, 113.0, None],
++            "volume": [1000] * 14 + [None],
++        }
++
++    def calculate_rsi(self, prices: list[float], period: int = 14) -> float:
++        return 55.0
++
++    def calculate_macd(self, prices: list[float]) -> tuple[float, float, str]:
++        return 1.0, 0.5, "bullish"
++
++    def calculate_moving_averages(self, prices: list[float]) -> dict:
++        return {"ma_20": {"value": 105.0, "signal": "bullish"}}
++
++    def calculate_ema(self, prices: list[float], period: int) -> float:
++        return 106.0
++
++
++class _FakeRedditResponse:
++    status_code = 403
++    headers = {}
++
++    def json(self) -> dict:
++        return {}
++
++
++class _FakeRedditSession:
++    headers: dict = {}
++
++    def get(self, *args, **kwargs) -> _FakeRedditResponse:
++        return _FakeRedditResponse()
++
++
++class MonitoringHardeningTest(unittest.TestCase):
++    def test_technical_analyzer_sanitizes_trailing_null_ohlcv_bars(self) -> None:
++        from backend.agents.tools.technical import TechnicalAnalyzer
++
++        with patch("backend.agents.tools.technical._get_analytics", return_value=_FakeAnalytics()):
++            result = TechnicalAnalyzer().analyze_ticker(
++                "NVDA",
++                "3mo",
++                "rsi,macd,ma,bollinger,atr,vwap,obv,stochastic",
++            )
++
++        self.assertNotIn("error", result)
++        self.assertEqual(result["current_price"], 113.0)
++        self.assertEqual(result["data_points"], 14)
++        self.assertIn("stochastic", result["indicators"])
++        self.assertIn("atr", result["indicators"])
++
++    def test_reddit_scanner_reports_degraded_source_errors(self) -> None:
++        from backend.agents.tools.reddit_scanner import RedditScanner
++
++        with patch("backend.agents.tools.reddit_scanner.requests.Session", return_value=_FakeRedditSession()):
++            result = RedditScanner().scan_ticker("NVDA", ["wallstreetbets"], limit=1)
++
++        self.assertEqual(result["source_status"], "degraded")
++        self.assertEqual(result["total_mentions"], 0)
++        self.assertEqual(result["errors"][0]["subreddit"], "wallstreetbets")
++        self.assertEqual(result["errors"][0]["status_code"], 403)
++
++    def test_x_watchlist_collector_scores_keyword_matches_from_config(self) -> None:
++        from backend.services.x_watchlist import XWatchlistCollector, XWatchlistConfig
++
++        with tempfile.TemporaryDirectory() as tmpdir:
++            config_path = Path(tmpdir) / "x_watchlists.yaml"
++            config_path.write_text(
++                """
++version: 1
++quality_filters:
++  promote_when_contains:
++    - "HBM"
++watchlists:
++  user_seed_core:
++    priority: highest
++    accounts:
++      - handle: "seed"
++        lane: "ai_semis_supply_chain"
++        reason: "seed account"
++search_queries: []
++""",
++                encoding="utf-8",
++            )
++
++            config = XWatchlistConfig.load(config_path)
++            collector = XWatchlistCollector(config=config, runner=_FakeTwscrapeRunner())
++            result = collector.collect_accounts(max_accounts=1, posts_per_account=1)
++
++        self.assertEqual(result["source_status"], "ok")
++        self.assertEqual(result["accounts_checked"], 1)
++        self.assertEqual(len(result["posts"]), 1)
++        self.assertEqual(result["posts"][0]["handle"], "seed")
++        self.assertGreaterEqual(result["posts"][0]["signal_score"], 10)
++        self.assertIn("HBM", result["posts"][0]["matched_keywords"])
++
++
++class _FakeTwscrapeRunner:
++    def user_by_login(self, handle: str) -> dict:
++        return {"id_str": "123", "username": handle}
++
++    def user_tweets(self, user_id: str, limit: int) -> list[dict]:
++        return [
++            {
++                "id_str": "tweet-1",
++                "url": "https://x.com/seed/status/tweet-1",
++                "date": "2026-06-05 12:00:00+00:00",
++                "rawContent": "HBM supply shortage is getting worse for AI servers",
++                "likeCount": 10,
++                "retweetCount": 2,
++                "replyCount": 1,
++            },
++            {
++                "id_str": "tweet-2",
++                "url": "https://x.com/seed/status/tweet-2",
++                "date": "2026-06-05 12:01:00+00:00",
++                "rawContent": "second row should be capped by collector",
++                "likeCount": 0,
++                "retweetCount": 0,
++                "replyCount": 0,
++            }
++        ]
++
++
++class _RecordingXRunner:
++    def __init__(self) -> None:
++        self.requested_handles: list[str] = []
++
++    def user_by_login(self, handle: str) -> dict[str, object]:
++        self.requested_handles.append(handle)
++        return {"id_str": f"user-{handle}"}
++
++    def user_tweets(self, user_id: str, limit: int) -> list[dict[str, object]]:
++        handle = user_id.removeprefix("user-")
++        return [
++            {
++                "id_str": f"tweet-{handle}",
++                "rawContent": f"{handle} HBM DRAM demand check",
++                "url": f"https://x.com/{handle}/status/1",
++                "date": "2026-06-08T00:00:00+00:00",
++                "likeCount": 1,
++                "retweetCount": 0,
++                "replyCount": 0,
++                "quoteCount": 0,
++                "bookmarkedCount": 0,
++            }
++        ]
++
++    def search(self, query: str, limit: int) -> list[dict[str, object]]:
++        return []
++
++
++def test_x_collector_includes_late_user_requested_accounts() -> None:
++    from backend.services.x_watchlist import (
++        XAccount,
++        XSearchQuery,
++        XWatchlistCollector,
++        XWatchlistConfig,
++    )
++
++    class RecordingRunner:
++        def __init__(self) -> None:
++            self.requested_handles: list[str] = []
++
++        def user_by_login(self, handle: str) -> dict[str, object]:
++            self.requested_handles.append(handle)
++            return {"id_str": f"user-{handle}"}
++
++        def user_tweets(self, user_id: str, limit: int) -> list[dict[str, object]]:
++            handle = user_id.removeprefix("user-")
++            return [
++                {
++                    "id_str": f"tweet-{handle}",
++                    "rawContent": f"{handle} HBM DRAM demand check",
++                    "url": f"https://x.com/{handle}/status/1",
++                    "date": "2026-06-08T00:00:00+00:00",
++                    "likeCount": 1,
++                    "retweetCount": 0,
++                    "replyCount": 0,
++                    "quoteCount": 0,
++                    "bookmarkedCount": 0,
++                }
++            ]
++
++        def search(self, query: str, limit: int) -> list[dict[str, object]]:
++            return []
++
++    config = XWatchlistConfig(
++        accounts=(
++            XAccount(handle="early_low", lane="macro", priority="low", reason="Low-priority early source"),
++            XAccount(handle="late_highest", lane="semis", priority="highest", reason="High-authority later source"),
++            XAccount(
++                handle="mindmoon_108",
++                lane="user_requested_memory",
++                priority="low",
++                reason="User-requested memory-chip engineer",
++            ),
++        ),
++        search_queries=(
++            XSearchQuery(
++                name="memory",
++                query="(HBM OR DRAM OR memory) lang:en",
++                priority="high",
++            ),
++        ),
++        promote_keywords=("HBM", "DRAM"),
++    )
++    runner = RecordingRunner()
++    collector = XWatchlistCollector(config=config, runner=runner)
++
++    result = collector.collect_accounts(max_accounts=2, posts_per_account=1)
++
++    assert result["accounts_checked"] == 2
++    assert "mindmoon_108" in runner.requested_handles
++    assert "late_highest" in runner.requested_handles
++    assert "early_low" not in runner.requested_handles
++    assert len(runner.requested_handles) == len(set(runner.requested_handles))
++
++
++def test_x_collector_skips_optional_when_required_accounts_fill_limit() -> None:
++    from backend.services.x_watchlist import XAccount, XWatchlistCollector, XWatchlistConfig
++
++    config = XWatchlistConfig(
++        accounts=(
++            XAccount(
++                handle="optional_highest",
++                lane="semis",
++                priority="highest",
++                reason="Optional high-authority source",
++            ),
++            XAccount(
++                handle="mindmoon_108",
++                lane="user_requested_memory",
++                priority="low",
++                reason="User-requested memory-chip engineer",
++            ),
++        ),
++        search_queries=(),
++        promote_keywords=("HBM", "DRAM"),
++    )
++    runner = _RecordingXRunner()
++    collector = XWatchlistCollector(config=config, runner=runner)
++
++    result = collector.collect_accounts(max_accounts=1, posts_per_account=1)
++
++    assert result["accounts_checked"] == 1
++    assert runner.requested_handles == ["mindmoon_108"]
++
++
++def test_x_collector_dedupes_required_accounts_before_optional_capacity() -> None:
++    from backend.services.x_watchlist import XAccount, XWatchlistCollector, XWatchlistConfig
++
++    config = XWatchlistConfig(
++        accounts=(
++            XAccount(
++                handle="mindmoon_108",
++                lane="user_requested_memory",
++                priority="low",
++                reason="User-requested memory-chip engineer",
++            ),
++            XAccount(
++                handle="mindmoon_108",
++                lane="user_requested_memory",
++                priority="low",
++                reason="Duplicate user-requested memory-chip engineer",
++            ),
++            XAccount(
++                handle="optional_highest",
++                lane="semis",
++                priority="highest",
++                reason="Optional high-authority source",
++            ),
++        ),
++        search_queries=(),
++        promote_keywords=("HBM", "DRAM"),
++    )
++    runner = _RecordingXRunner()
++    collector = XWatchlistCollector(config=config, runner=runner)
++
++    result = collector.collect_accounts(max_accounts=2, posts_per_account=1)
++
++    assert result["accounts_checked"] == 2
++    assert runner.requested_handles == ["mindmoon_108", "optional_highest"]
++    assert len(runner.requested_handles) == len(set(runner.requested_handles))
++
++
++def test_x_collector_collects_search_reactions() -> None:
++    from backend.services.x_watchlist import (
++        XAccount,
++        XSearchQuery,
++        XWatchlistCollector,
++        XWatchlistConfig,
++    )
++
++    class SearchRunner:
++        def user_by_login(self, handle: str) -> dict[str, object]:
++            return {"id_str": f"user-{handle}"}
++
++        def user_tweets(self, user_id: str, limit: int) -> list[dict[str, object]]:
++            return []
++
++        def search(self, query: str, limit: int) -> list[dict[str, object]]:
++            assert query == "(HBM OR DRAM) lang:en"
++            assert limit == 2
++            return [
++                {
++                    "id_str": "search-1",
++                    "rawContent": "HBM supply remains tight into the second half.",
++                    "url": "https://x.com/mindmoon_108/status/2",
++                    "date": "2026-06-08T01:00:00+00:00",
++                    "likeCount": 20,
++                    "retweetCount": 3,
++                    "replyCount": 1,
++                    "quoteCount": 0,
++                    "bookmarkedCount": 4,
++                }
++            ]
++
++    config = XWatchlistConfig(
++        accounts=(XAccount(handle="mindmoon_108", lane="user_requested_memory", priority="low", reason="Memory source"),),
++        search_queries=(XSearchQuery(name="memory", query="(HBM OR DRAM) lang:en", priority="high"),),
++        promote_keywords=("HBM", "DRAM"),
++    )
++    collector = XWatchlistCollector(config=config, runner=SearchRunner())
++
++    result = collector.collect_searches(max_queries=1, posts_per_query=2)
++
++    assert result["source_status"] == "ok"
++    assert result["queries_checked"] == 1
++    assert result["posts"][0]["source_query"] == "memory"
++    assert result["posts"][0]["lane"] == "x_search:memory"
++    assert result["posts"][0]["reason"] == "Configured X search query: memory"
++    assert result["posts"][0]["source_trust"] == "curated_search"
++    assert result["posts"][0]["priority"] == "high"
++    assert result["posts"][0]["matched_keywords"] == ["HBM"]
++
++
++def test_x_collector_marks_empty_success_and_search_error_degraded() -> None:
++    from backend.services.x_watchlist import XSearchQuery, XWatchlistCollector, XWatchlistConfig
++
++    class PartialSearchRunner:
++        def user_by_login(self, handle: str) -> dict[str, object]:
++            return {"id_str": f"user-{handle}"}
++
++        def user_tweets(self, user_id: str, limit: int) -> list[dict[str, object]]:
++            return []
++
++        def search(self, query: str, limit: int) -> list[dict[str, object]]:
++            if query == "first lang:en":
++                return []
++            raise RuntimeError("search backend unavailable")
++
++    config = XWatchlistConfig(
++        accounts=(),
++        search_queries=(
++            XSearchQuery(name="first", query="first lang:en", priority="medium"),
++            XSearchQuery(name="second", query="second lang:en", priority="medium"),
++        ),
++        promote_keywords=(),
++    )
++    collector = XWatchlistCollector(config=config, runner=PartialSearchRunner())
++
++    result = collector.collect_searches(max_queries=2, posts_per_query=2)
++
++    assert result["queries_checked"] == 2
++    assert len(result["errors"]) == 1
++    assert result["source_status"] == "degraded"
++
++
++if __name__ == "__main__":
++    unittest.main()
+diff --git a/tests/test_news_intelligence.py b/tests/test_news_intelligence.py
+new file mode 100644
+index 0000000..1269fbb
+--- /dev/null
++++ b/tests/test_news_intelligence.py
+@@ -0,0 +1,492 @@
++import sys
++from pathlib import Path
++
++REPO_ROOT = Path(__file__).resolve().parents[1]
++if str(REPO_ROOT) not in sys.path:
++    sys.path.insert(0, str(REPO_ROOT))
++
++from backend.services.news_intelligence import build_news_intelligence_cards
++
++
++def test_builds_memory_news_card_with_expert_reaction() -> None:
++    news = {
++        "MU": {
++            "articles": [
++                {
++                    "title": "Memory chip supply tightens as HBM demand rises",
++                    "url": "https://example.com/memory-hbm",
++                    "source": "Example Wire",
++                    "published_at": "2026-06-08T00:30:00+00:00",
++                    "sentiment_label": "positive",
++                }
++            ]
++        }
++    }
++    x_posts = [
++        {
++            "handle": "mindmoon_108",
++            "lane": "user_requested_memory",
++            "reason": "Korean memory-chip engineer with supply/demand context",
++            "url": "https://x.com/mindmoon_108/status/2",
++            "date": "2026-06-08T01:00:00+00:00",
++            "text": "HBM demand is still stronger than supply and DRAM allocation is tight.",
++            "matched_keywords": ["HBM", "DRAM"],
++            "signal_score": 30,
++            "engagement": 10,
++        }
++    ]
++
++    cards = build_news_intelligence_cards(
++        news=news,
++        account_posts=x_posts,
++        search_posts=[],
++        generated_at="2026-06-08T02:00:00+00:00",
++        max_cards=5,
++    )
++    cards_later = build_news_intelligence_cards(
++        news=news,
++        account_posts=x_posts,
++        search_posts=[],
++        generated_at="2026-06-08T03:00:00+00:00",
++        max_cards=5,
++    )
++
++    assert len(cards) == 1
++    card = cards[0]
++    assert cards_later[0]["insight_id"] == card["insight_id"]
++    assert card["source_type"] == "news_intelligence"
++    assert card["source_claim"] == "Memory chip supply tightens as HBM demand rises"
++    assert card["related_tickers"] == ["AVGO", "MRVL", "MU", "NVDA"]
++    assert card["themes"] == ["hbm_supply_chain"]
++    assert card["cross_reference_status"] == "expert_reaction_found"
++    assert card["evidence"][0]["handle"] == "mindmoon_108"
++    assert "Korean memory-chip engineer" in card["evidence"][0]["why_source_matters"]
++    assert card["human_review"]["default_decision"] == "needs_more_source"
++
++
++def test_skips_news_card_without_source_url() -> None:
++    news = {
++        "MU": {
++            "articles": [
++                {
++                    "title": "Memory chip supply tightens as HBM demand rises",
++                    "url": " ",
++                    "source": "Example Wire",
++                    "published_at": "2026-06-08T00:30:00+00:00",
++                }
++            ]
++        }
++    }
++
++    cards = build_news_intelligence_cards(
++        news=news,
++        account_posts=[],
++        search_posts=[],
++        generated_at="2026-06-08T02:00:00+00:00",
++        max_cards=5,
++    )
++
++    assert cards == []
++
++
++def test_generalist_two_domain_terms_do_not_count_as_expert_reaction() -> None:
++    news = {
++        "MU": {
++            "articles": [
++                {
++                    "title": "HBM DRAM supply tightens",
++                    "url": "https://example.com/hbm-dram-supply",
++                    "source": "Example Wire",
++                    "published_at": "2026-06-08T00:30:00+00:00",
++                }
++            ]
++        }
++    }
++    x_posts = [
++        {
++            "handle": "generalist",
++            "lane": "tech_general",
++            "reason": "General tech commentator",
++            "url": "https://x.com/generalist/status/6",
++            "date": "2026-06-08T01:00:00+00:00",
++            "text": "HBM and DRAM are trending.",
++            "matched_keywords": ["HBM", "DRAM"],
++            "signal_score": 30,
++            "engagement": 10,
++        }
++    ]
++
++    cards = build_news_intelligence_cards(
++        news=news,
++        account_posts=x_posts,
++        search_posts=[],
++        generated_at="2026-06-08T02:00:00+00:00",
++        max_cards=5,
++    )
++
++    assert cards[0]["cross_reference_status"] == "no_expert_reaction"
++    assert cards[0]["evidence"] == []
++
++
++def test_curated_search_reaction_counts_as_expert_evidence() -> None:
++    news = {
++        "MU": {
++            "articles": [
++                {
++                    "title": "Memory chip supply tightens as HBM demand rises",
++                    "url": "https://example.com/memory-hbm",
++                    "source": "Example Wire",
++                    "published_at": "2026-06-08T00:30:00+00:00",
++                }
++            ]
++        }
++    }
++    search_posts = [
++        {
++            "source_query": "memory",
++            "query": "(HBM OR DRAM) lang:en",
++            "priority": "high",
++            "source_trust": "curated_search",
++            "url": "https://x.com/search/status/7",
++            "date": "2026-06-08T01:00:00+00:00",
++            "text": "HBM demand remains tight and DRAM allocation is constrained.",
++            "matched_keywords": ["HBM", "DRAM"],
++            "signal_score": 30,
++            "engagement": 10,
++        }
++    ]
++
++    cards = build_news_intelligence_cards(
++        news=news,
++        account_posts=[],
++        search_posts=search_posts,
++        generated_at="2026-06-08T02:00:00+00:00",
++        max_cards=5,
++    )
++
++    assert cards[0]["cross_reference_status"] == "expert_reaction_found"
++    assert cards[0]["evidence"][0]["handle"] == "memory"
++    assert cards[0]["evidence"][0]["lane"] == "memory"
++
++
++def test_low_priority_generic_search_does_not_count_as_expert_evidence() -> None:
++    news = {
++        "MU": {
++            "articles": [
++                {
++                    "title": "Memory chip supply tightens as HBM demand rises",
++                    "url": "https://example.com/memory-hbm",
++                    "source": "Example Wire",
++                    "published_at": "2026-06-08T00:30:00+00:00",
++                }
++            ]
++        }
++    }
++    search_posts = [
++        {
++            "source_query": "generic",
++            "query": "stocks lang:en",
++            "priority": "low",
++            "source_trust": "curated_search",
++            "url": "https://x.com/search/status/8",
++            "date": "2026-06-08T01:00:00+00:00",
++            "text": "HBM demand and DRAM allocation are being discussed.",
++            "matched_keywords": ["HBM", "DRAM"],
++            "signal_score": 30,
++            "engagement": 10,
++        }
++    ]
++
++    cards = build_news_intelligence_cards(
++        news=news,
++        account_posts=[],
++        search_posts=search_posts,
++        generated_at="2026-06-08T02:00:00+00:00",
++        max_cards=5,
++    )
++
++    assert cards[0]["cross_reference_status"] == "no_expert_reaction"
++    assert cards[0]["evidence"] == []
++
++
++def test_curated_search_trust_requires_exact_domain_token() -> None:
++    news = {
++        "MU": {
++            "articles": [
++                {
++                    "title": "Memory chip supply tightens as HBM demand rises",
++                    "url": "https://example.com/memory-hbm",
++                    "source": "Example Wire",
++                    "published_at": "2026-06-08T00:30:00+00:00",
++                }
++            ]
++        }
++    }
++    search_posts = [
++        {
++            "source_query": "notmemory",
++            "query": "stocks lang:en",
++            "lane": "x_search:notmemory",
++            "reason": "Configured X search query: notmemory",
++            "priority": "high",
++            "source_trust": "curated_search",
++            "url": "https://x.com/search/status/9",
++            "date": "2026-06-08T01:00:00+00:00",
++            "text": "HBM demand remains tight and DRAM allocation is constrained.",
++            "matched_keywords": ["HBM", "DRAM"],
++            "signal_score": 30,
++            "engagement": 10,
++        }
++    ]
++
++    cards = build_news_intelligence_cards(
++        news=news,
++        account_posts=[],
++        search_posts=search_posts,
++        generated_at="2026-06-08T02:00:00+00:00",
++        max_cards=5,
++    )
++
++    assert cards[0]["cross_reference_status"] == "no_expert_reaction"
++    assert cards[0]["evidence"] == []
++
++
++def test_generic_overlap_does_not_count_as_expert_reaction() -> None:
++    news = {
++        "MSFT": {
++            "articles": [
++                {
++                    "title": "AI demand lifts market",
++                    "url": "https://example.com/generic-ai-demand",
++                    "source": "Example Wire",
++                    "published_at": "2026-06-08T00:30:00+00:00",
++                }
++            ]
++        }
++    }
++    x_posts = [
++        {
++            "handle": "generalist",
++            "lane": "tech_general",
++            "reason": "General tech commentator",
++            "url": "https://x.com/generalist/status/1",
++            "date": "2026-06-08T01:00:00+00:00",
++            "text": "Demand remains strong for software.",
++            "matched_keywords": [],
++            "signal_score": 30,
++            "engagement": 10,
++        }
++    ]
++
++    cards = build_news_intelligence_cards(
++        news=news,
++        account_posts=x_posts,
++        search_posts=[],
++        generated_at="2026-06-08T02:00:00+00:00",
++        max_cards=5,
++    )
++
++    assert cards[0]["cross_reference_status"] == "no_expert_reaction"
++    assert cards[0]["evidence"] == []
++
++
++def test_ticker_only_overlap_does_not_count_as_expert_reaction() -> None:
++    news = {
++        "NVDA": {
++            "articles": [
++                {
++                    "title": "NVDA HBM supply concerns rise",
++                    "url": "https://example.com/nvda-hbm-supply",
++                    "source": "Example Wire",
++                    "published_at": "2026-06-08T00:30:00+00:00",
++                }
++            ]
++        }
++    }
++    x_posts = [
++        {
++            "handle": "generalist",
++            "lane": "tech_general",
++            "reason": "General tech commentator",
++            "url": "https://x.com/generalist/status/2",
++            "date": "2026-06-08T01:00:00+00:00",
++            "text": "NVDA chart looks extended here.",
++            "matched_keywords": [],
++            "signal_score": 30,
++            "engagement": 10,
++        }
++    ]
++
++    cards = build_news_intelligence_cards(
++        news=news,
++        account_posts=x_posts,
++        search_posts=[],
++        generated_at="2026-06-08T02:00:00+00:00",
++        max_cards=5,
++    )
++
++    assert cards[0]["cross_reference_status"] == "no_expert_reaction"
++    assert cards[0]["evidence"] == []
++
++
++def test_generic_two_word_overlap_does_not_count_as_expert_reaction() -> None:
++    news = {
++        "MSFT": {
++            "articles": [
++                {
++                    "title": "Market demand concerns rise",
++                    "url": "https://example.com/market-demand",
++                    "source": "Example Wire",
++                    "published_at": "2026-06-08T00:30:00+00:00",
++                }
++            ]
++        }
++    }
++    x_posts = [
++        {
++            "handle": "generalist",
++            "lane": "tech_general",
++            "reason": "General tech commentator",
++            "url": "https://x.com/generalist/status/3",
++            "date": "2026-06-08T01:00:00+00:00",
++            "text": "Market demand concerns rise across software.",
++            "matched_keywords": [],
++            "signal_score": 30,
++            "engagement": 10,
++        }
++    ]
++
++    cards = build_news_intelligence_cards(
++        news=news,
++        account_posts=x_posts,
++        search_posts=[],
++        generated_at="2026-06-08T02:00:00+00:00",
++        max_cards=5,
++    )
++
++    assert cards[0]["cross_reference_status"] == "no_expert_reaction"
++    assert cards[0]["evidence"] == []
++
++
++def test_insight_id_ignores_source_name_when_url_is_present() -> None:
++    news_wire = {
++        "MU": {
++            "articles": [
++                {
++                    "title": "Memory chip supply tightens as HBM demand rises",
++                    "url": "https://example.com/memory-hbm",
++                    "source": "Wire",
++                    "published_at": "2026-06-08T00:30:00+00:00",
++                }
++            ]
++        }
++    }
++    news_wire_service = {
++        "MU": {
++            "articles": [
++                {
++                    "title": "Memory chip supply tightens as HBM demand rises",
++                    "url": "https://example.com/memory-hbm",
++                    "source": "Wire Service",
++                    "published_at": "2026-06-08T00:30:00+00:00",
++                }
++            ]
++        }
++    }
++
++    wire_cards = build_news_intelligence_cards(
++        news=news_wire,
++        account_posts=[],
++        search_posts=[],
++        generated_at="2026-06-08T02:00:00+00:00",
++        max_cards=5,
++    )
++    wire_service_cards = build_news_intelligence_cards(
++        news=news_wire_service,
++        account_posts=[],
++        search_posts=[],
++        generated_at="2026-06-08T02:00:00+00:00",
++        max_cards=5,
++    )
++
++    assert wire_service_cards[0]["insight_id"] == wire_cards[0]["insight_id"]
++
++
++def test_builder_skips_malformed_posts_and_bad_scores() -> None:
++    news = {
++        "MU": {
++            "articles": [
++                {
++                    "title": "Memory chip supply tightens as HBM demand rises",
++                    "url": "https://example.com/memory-hbm",
++                    "source": "Example Wire",
++                    "published_at": "2026-06-08T00:30:00+00:00",
++                }
++            ]
++        }
++    }
++    x_posts = [
++        object(),
++        {
++            "handle": "mindmoon_108",
++            "lane": "user_requested_memory",
++            "reason": "Korean memory-chip engineer with supply/demand context",
++            "url": "https://x.com/mindmoon_108/status/4",
++            "date": "2026-06-08T01:00:00+00:00",
++            "text": "HBM demand is still stronger than supply and DRAM allocation is tight.",
++            "matched_keywords": ["HBM", "DRAM"],
++            "signal_score": "high",
++            "engagement": 10,
++        },
++    ]
++
++    cards = build_news_intelligence_cards(
++        news=news,
++        account_posts=x_posts,
++        search_posts=[],
++        generated_at="2026-06-08T02:00:00+00:00",
++        max_cards=5,
++    )
++
++    assert cards[0]["cross_reference_status"] == "expert_reaction_found"
++    assert cards[0]["evidence"][0]["handle"] == "mindmoon_108"
++    assert cards[0]["evidence"][0]["signal_score"] == 0
++
++
++def test_single_domain_token_generalist_post_does_not_count_as_expert_reaction() -> None:
++    news = {
++        "MU": {
++            "articles": [
++                {
++                    "title": "Memory chip supply tightens as HBM demand rises",
++                    "url": "https://example.com/memory-hbm",
++                    "source": "Example Wire",
++                    "published_at": "2026-06-08T00:30:00+00:00",
++                }
++            ]
++        }
++    }
++    x_posts = [
++        {
++            "handle": "generalist",
++            "lane": "tech_general",
++            "reason": "General tech commentator",
++            "url": "https://x.com/generalist/status/5",
++            "date": "2026-06-08T01:00:00+00:00",
++            "text": "HBM is trending again.",
++            "matched_keywords": [],
++            "signal_score": 30,
++            "engagement": 10,
++        }
++    ]
++
++    cards = build_news_intelligence_cards(
++        news=news,
++        account_posts=x_posts,
++        search_posts=[],
++        generated_at="2026-06-08T02:00:00+00:00",
++        max_cards=5,
++    )
++
++    assert cards[0]["cross_reference_status"] == "no_expert_reaction"
++    assert cards[0]["evidence"] == []

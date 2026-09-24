@@ -286,6 +286,63 @@ def calculate_stochastic(closes: List[float], highs: List[float], lows: List[flo
     }
 
 
+def _as_finite_float(value: Any) -> Optional[float]:
+    """Return a finite float for numeric provider values, otherwise None."""
+    try:
+        if value is None:
+            return None
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if math.isfinite(parsed) else None
+
+
+def _list_get(values: List[Any], index: int) -> Any:
+    return values[index] if index < len(values) else None
+
+
+def _sanitize_ohlcv(price_data: Dict[str, Any]) -> Dict[str, List[Any]]:
+    """Align provider OHLCV arrays and drop bars without a valid close."""
+    closes_raw = price_data.get('close', []) or []
+    highs_raw = price_data.get('high', []) or []
+    lows_raw = price_data.get('low', []) or []
+    opens_raw = price_data.get('open', []) or []
+    volumes_raw = price_data.get('volume', []) or []
+
+    opens: List[float] = []
+    highs: List[float] = []
+    lows: List[float] = []
+    closes: List[float] = []
+    volumes: List[int] = []
+
+    for idx, close_raw in enumerate(closes_raw):
+        close = _as_finite_float(close_raw)
+        if close is None:
+            continue
+
+        open_val = _as_finite_float(_list_get(opens_raw, idx)) or close
+        high = _as_finite_float(_list_get(highs_raw, idx)) or close
+        low = _as_finite_float(_list_get(lows_raw, idx)) or close
+        volume = _as_finite_float(_list_get(volumes_raw, idx)) or 0.0
+
+        if low > high:
+            low, high = high, low
+
+        opens.append(open_val)
+        highs.append(high)
+        lows.append(low)
+        closes.append(close)
+        volumes.append(max(0, int(volume)))
+
+    return {
+        "open": opens,
+        "high": highs,
+        "low": lows,
+        "close": closes,
+        "volume": volumes,
+    }
+
+
 # ------------------------------------------------------------------
 # The Tool
 # ------------------------------------------------------------------
@@ -329,13 +386,11 @@ class TechnicalAnalyzer(_CrewAIBaseTool):
         if not price_data or not price_data.get('close'):
             return json.dumps({"error": f"No price data available for {ticker} ({period})"})
 
-        closes_raw = price_data.get('close', [])
-        highs_raw = price_data.get('high', [])
-        lows_raw = price_data.get('low', [])
-        volumes_raw = price_data.get('volume', [])
-
-        # Filter None values for closes (used by existing analytics)
-        closes = [p for p in closes_raw if p is not None]
+        sanitized = _sanitize_ohlcv(price_data)
+        closes = sanitized["close"]
+        highs = sanitized["high"]
+        lows = sanitized["low"]
+        volumes = sanitized["volume"]
 
         if len(closes) < 5:
             return json.dumps({"error": f"Insufficient price data for {ticker}: only {len(closes)} bars"})
@@ -404,22 +459,22 @@ class TechnicalAnalyzer(_CrewAIBaseTool):
 
         # ATR (NEW)
         if "atr" in requested:
-            result["indicators"]["atr"] = calculate_atr(highs_raw, lows_raw, closes_raw)
+            result["indicators"]["atr"] = calculate_atr(highs, lows, closes)
 
         # VWAP (NEW)
         if "vwap" in requested:
             result["indicators"]["vwap"] = calculate_vwap(
-                closes_raw, highs_raw, lows_raw, volumes_raw
+                closes, highs, lows, volumes
             )
 
         # OBV (NEW)
         if "obv" in requested:
-            result["indicators"]["obv"] = calculate_obv(closes_raw, volumes_raw)
+            result["indicators"]["obv"] = calculate_obv(closes, volumes)
 
         # Stochastic Oscillator (NEW)
         if "stochastic" in requested:
             result["indicators"]["stochastic"] = calculate_stochastic(
-                closes_raw, highs_raw, lows_raw
+                closes, highs, lows
             )
 
         # Overall summary signal

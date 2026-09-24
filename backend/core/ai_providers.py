@@ -7,6 +7,7 @@ Supports multiple AI providers: OpenAI (ChatGPT), Anthropic (Claude), Google (Ge
 import requests
 import json
 import logging
+import os
 from typing import Dict, Optional, List
 from abc import ABC, abstractmethod
 
@@ -67,6 +68,111 @@ class OpenAIProvider(AIProvider):
 
     def get_provider_name(self) -> str:
         return f"OpenAI ({self.model})"
+
+
+def _chat_completions_url(base_url: str) -> str:
+    """Return a chat-completions endpoint for an OpenAI-compatible base URL."""
+    normalized = base_url.rstrip("/")
+    if normalized.endswith("/chat/completions"):
+        return normalized
+    return f"{normalized}/chat/completions"
+
+
+class OpenAICompatibleProvider(AIProvider):
+    """Provider for OpenAI-compatible chat-completions APIs."""
+
+    provider_label = "OpenAI Compatible"
+
+    def __init__(self, api_key: str, model: str, base_url: str):
+        super().__init__(api_key)
+        if not base_url:
+            raise ValueError("OpenAI-compatible base URL is required")
+        self.model = model
+        self.base_url = _chat_completions_url(base_url)
+
+    def generate_analysis(self, prompt: str, max_tokens: int = 500) -> str:
+        try:
+            headers = {
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json",
+            }
+
+            data = {
+                "model": self.model,
+                "messages": [
+                    {"role": "system", "content": "You are a financial analyst expert providing stock market analysis."},
+                    {"role": "user", "content": prompt},
+                ],
+                "max_tokens": max_tokens,
+                "temperature": 0.7,
+            }
+
+            response = requests.post(self.base_url, headers=headers, json=data, timeout=30)
+
+            if response.status_code != 200:
+                error_msg = f"HTTP {response.status_code}: {response.text}"
+                logger.error("%s API error: %s", self.provider_label, error_msg)
+                return f"Error: {error_msg}"
+
+            response.raise_for_status()
+
+            result = response.json()
+            message = result['choices'][0]['message']
+            content = (message.get('content') or '').strip()
+            if content:
+                return content
+            if message.get('reasoning_content'):
+                return "Error: Model returned reasoning only; increase max_tokens."
+            return "Error: Model returned an empty response."
+
+        except Exception as e:
+            logger.error("%s API error: %s", self.provider_label, e)
+            return f"Error: {str(e)}"
+
+    def get_provider_name(self) -> str:
+        return f"{self.provider_label} ({self.model})"
+
+
+class DeepSeekProvider(OpenAICompatibleProvider):
+    """DeepSeek provider using its OpenAI-compatible API."""
+
+    provider_label = "DeepSeek"
+
+    def __init__(self, api_key: str, model: str = "deepseek-v4-flash"):
+        try:
+            from backend.config import Config
+            base_url = Config.DEEPSEEK_BASE_URL
+        except ImportError:
+            base_url = "https://api.deepseek.com"
+        super().__init__(api_key, model, base_url)
+
+
+class OpenCodeProvider(OpenAICompatibleProvider):
+    """OpenCode Go provider using its OpenAI-compatible chat API."""
+
+    provider_label = "OpenCode"
+
+    def __init__(self, api_key: str, model: str = "deepseek-v4-flash"):
+        try:
+            from backend.config import Config
+            base_url = Config.OPENCODE_BASE_URL
+        except ImportError:
+            base_url = "https://opencode.ai/zen/go/v1"
+        super().__init__(api_key, model, base_url)
+
+
+class GenericOpenAICompatibleProvider(OpenAICompatibleProvider):
+    """Generic OpenAI-compatible provider for OpenCode/OpenRouter-style APIs."""
+
+    def __init__(self, api_key: str, model: str = ""):
+        try:
+            from backend.config import Config
+            base_url = os.getenv("OPENAI_COMPATIBLE_BASE_URL", Config.OPENAI_COMPATIBLE_BASE_URL)
+            selected_model = model or os.getenv("OPENAI_COMPATIBLE_MODEL", Config.OPENAI_COMPATIBLE_MODEL)
+        except ImportError:
+            base_url = os.getenv("OPENAI_COMPATIBLE_BASE_URL", "")
+            selected_model = model
+        super().__init__(api_key, selected_model, base_url)
 
 
 class AnthropicProvider(AIProvider):
@@ -223,9 +329,13 @@ class AIProviderFactory:
 
     PROVIDERS = {
         'openai': OpenAIProvider,
+        'openai_compatible': GenericOpenAICompatibleProvider,
+        'deepseek': DeepSeekProvider,
+        'opencode': OpenCodeProvider,
         'anthropic': AnthropicProvider,
         'google': GoogleProvider,
-        'grok': GrokProvider
+        'grok': GrokProvider,
+        'xai': GrokProvider,
     }
 
     @classmethod
@@ -257,6 +367,24 @@ class AIProviderFactory:
                 'default_model': 'gpt-4o'
             },
             {
+                'id': 'deepseek',
+                'name': 'DeepSeek',
+                'models': ['deepseek-v4-flash', 'deepseek-v4-pro'],
+                'default_model': 'deepseek-v4-flash'
+            },
+            {
+                'id': 'opencode',
+                'name': 'OpenCode',
+                'models': ['deepseek-v4-flash', 'deepseek-v4-pro', 'kimi-k2.6', 'kimi-k2.5', 'glm-5.1', 'glm-5'],
+                'default_model': 'deepseek-v4-flash'
+            },
+            {
+                'id': 'openai_compatible',
+                'name': 'OpenAI-Compatible',
+                'models': ['provider/free-model'],
+                'default_model': 'provider/free-model'
+            },
+            {
                 'id': 'anthropic',
                 'name': 'Anthropic (Claude)',
                 'models': ['claude-3-5-sonnet-20241022', 'claude-3-5-haiku-20241022', 'claude-3-opus-20240229', 'claude-3-sonnet-20240229', 'claude-3-haiku-20240307'],
@@ -285,7 +413,7 @@ def test_provider_connection(provider_name: str, api_key: str, model: Optional[s
             return {'success': False, 'error': 'Invalid provider'}
 
         # Simple test prompt
-        response = provider.generate_analysis("Say 'OK' if you can read this.", max_tokens=10)
+        response = provider.generate_analysis("Say 'OK' if you can read this.", max_tokens=160)
 
         if response and not response.startswith('Error:'):
             return {'success': True, 'provider': provider.get_provider_name()}

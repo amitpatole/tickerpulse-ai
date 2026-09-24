@@ -22,14 +22,20 @@ import type { AIProvider, HealthCheck } from '@/lib/types';
 const PROVIDER_COLORS: Record<string, string> = {
   openai: 'border-green-500/30 bg-green-500/5',
   anthropic: 'border-orange-500/30 bg-orange-500/5',
+  deepseek: 'border-cyan-500/30 bg-cyan-500/5',
   google: 'border-blue-500/30 bg-blue-500/5',
+  opencode: 'border-fuchsia-500/30 bg-fuchsia-500/5',
+  openai_compatible: 'border-teal-500/30 bg-teal-500/5',
   xai: 'border-purple-500/30 bg-purple-500/5',
 };
 
 const PROVIDER_ICONS: Record<string, string> = {
   openai: 'OpenAI',
   anthropic: 'Anthropic',
+  deepseek: 'DeepSeek',
   google: 'Google AI',
+  opencode: 'OpenCode',
+  openai_compatible: 'OpenAI-Compatible',
   xai: 'xAI',
 };
 

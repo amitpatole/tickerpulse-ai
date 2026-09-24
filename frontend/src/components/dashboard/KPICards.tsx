@@ -43,6 +43,7 @@ export default function KPICards() {
   const { data: agents, loading: agentsLoading } = useApi<Agent[]>(getAgents, [], { refreshInterval: 10000 });
 
   const totalStocks = stocks?.filter(s => s.active)?.length ?? 0;
+  const inactiveStocks = stocks?.filter(s => !s.active)?.length ?? 0;
   const activeAlerts = alerts?.length ?? 0;
 
   const agentCounts = agents?.reduce(
@@ -62,7 +63,7 @@ export default function KPICards() {
       <KPICard
         title="Stocks Monitored"
         value={totalStocks}
-        subtitle={`${stocks?.length ?? 0} total tracked`}
+        subtitle={inactiveStocks > 0 ? `${inactiveStocks} inactive archived` : 'Dashboard watchlist'}
         icon={<BarChart3 className="h-5 w-5 text-blue-400" />}
         color="bg-blue-500/10"
         loading={stocksLoading}

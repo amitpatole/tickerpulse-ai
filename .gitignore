@@ -2,6 +2,8 @@
 check_*.py
 list_*.py
 test_*.py
+!tests/
+!tests/test_*.py
 *_test.py
 *_dev.py
 fetch_*.py
@@ -55,6 +57,9 @@ frontend/out/
 
 # Logs directory
 logs/
+
+# Runtime data artifacts
+data/
 
 # Dev utilities
 seed_data.py
